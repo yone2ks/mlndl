@@ -1,0 +1,239 @@
+ndl_version: "1.0"
+
+meta:
+  name: spine-leaf-mlag-evpn
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - id: spine1
+      name: Spine-1
+      implementation: vm
+      role: spine
+      device_type: cumulus_linux
+
+    - id: leaf1
+      name: Leaf-1
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+
+    - id: leaf2
+      name: Leaf-2
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+
+    - id: server1
+      name: Server-1
+      implementation: physical
+      role: server
+
+  interfaces:
+    - id: spine1-swp1
+      node: spine1
+      name: swp1
+    - id: spine1-swp2
+      node: spine1
+      name: swp2
+    - id: leaf1-swp51
+      node: leaf1
+      name: swp51
+    - id: leaf2-swp51
+      node: leaf2
+      name: swp51
+    - id: leaf1-swp49
+      node: leaf1
+      name: swp49
+    - id: leaf1-swp50
+      node: leaf1
+      name: swp50
+    - id: leaf2-swp49
+      node: leaf2
+      name: swp49
+    - id: leaf2-swp50
+      node: leaf2
+      name: swp50
+    - id: leaf1-swp1
+      node: leaf1
+      name: swp1
+    - id: leaf2-swp1
+      node: leaf2
+      name: swp1
+
+  links:
+    - id: link-spine1-leaf1
+      from: spine1-swp1
+      to: leaf1-swp51
+      link_speed: 10G
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-spine1-leaf2
+      from: spine1-swp2
+      to: leaf2-swp51
+      link_speed: 10G
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-mlag-peerlink-1
+      from: leaf1-swp49
+      to: leaf2-swp49
+      link_speed: 10G
+      mtu: 9216
+      link_role: peer-link
+
+    - id: link-mlag-peerlink-2
+      from: leaf1-swp50
+      to: leaf2-swp50
+      link_speed: 10G
+      mtu: 9216
+      link_role: peer-link
+
+  lag:
+    - id: lag-peer-link
+      type: lacp
+      node: leaf1
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-mlag-server1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-peer-link
+      peer_link_interface: peerlink.4094
+      domain_id: 10
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a
+      trunk_ports:
+        - {node: leaf1, interface: leaf1-swp1}
+        - {node: leaf2, interface: leaf2-swp1}
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vtep_source: leaf1-lo
+      members: [leaf1, leaf2]
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets:
+        import: ["65001:100"]
+        export: ["65001:100"]
+
+  interfaces:
+    - id: spine1-lo
+      node: spine1
+      interface: lo
+      ip: 10.0.0.1/32
+
+    - id: leaf1-lo
+      node: leaf1
+      interface: lo
+      ip: 10.0.0.11/32
+
+    - id: leaf2-lo
+      node: leaf2
+      interface: lo
+      ip: 10.0.0.12/32
+
+    - id: leaf1-swp51-l3
+      node: leaf1
+      interface: swp51
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+      attaches_to:
+        interface: leaf1-swp51
+
+    - id: leaf2-swp51-l3
+      node: leaf2
+      interface: swp51
+      ip: 10.1.0.3/31
+      vrf: vrf-default
+      attaches_to:
+        interface: leaf2-swp51
+
+    - id: leaf1-vlan100
+      node: leaf1
+      interface: vlan-100
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        protocol: anycast_gateway
+        vip: 192.168.100.254
+
+  routing_adjacencies:
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      from: {node: spine1, update_source: spine1-lo}
+      to: {node: leaf1, update_source: leaf1-lo}
+      attaches_to:
+        link: link-spine1-leaf1
+
+    - id: bgp-peer-spine1-leaf2
+      type: bgp
+      from: {node: spine1, update_source: spine1-lo}
+      to: {node: leaf2, update_source: leaf2-lo}
+      attaches_to:
+        link: link-spine1-leaf2
+
+protocols:
+  bfd:
+    - id: bfd-global
+      min_tx: 300
+      min_rx: 300
+      multiplier: 3
+      nodes: [spine1, leaf1, leaf2]
+
+  bgp:
+    - id: bgp-underlay
+      role: underlay
+      nodes:
+        - node: spine1
+          local_as: 65000
+          neighbors:
+            - node: leaf1
+              remote_as: 65001
+              type: ebgp
+              bfd: true
+            - node: leaf2
+              remote_as: 65002
+              type: ebgp
+              bfd: true
+
+    - id: bgp-evpn
+      role: overlay
+      nodes:
+        - node: spine1
+          local_as: 65000
+          role: route_reflector
+          neighbors:
+            - node: leaf1
+              remote_as: 65000
+              type: ibgp
+              role: route_reflector_client
+              address_families: [l2vpn_evpn]
+            - node: leaf2
+              remote_as: 65000
+              type: ibgp
+              role: route_reflector_client
+              address_families: [l2vpn_evpn]

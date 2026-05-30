@@ -1,0 +1,43 @@
+ndl_version: "1.0"
+
+meta:
+  name: simple-spine-leaf
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - id: spine1
+      name: Spine-1
+      implementation: vm
+      role: spine
+      device_type: cumulus_linux
+      attaches_to: eve-server
+
+    - id: leaf1
+      name: Leaf-1
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+      attaches_to: eve-server
+
+    - id: eve-server
+      name: EVE-NG Server
+      implementation: physical
+      role: hypervisor
+
+  interfaces:
+    - id: spine1-swp1
+      node: spine1
+      name: swp1
+
+    - id: leaf1-swp51
+      node: leaf1
+      name: swp51
+
+  links:
+    - id: link-spine1-leaf1
+      from: spine1-swp1
+      to: leaf1-swp51
+      link_speed: 10G
+      mtu: 9216
+      link_role: underlay

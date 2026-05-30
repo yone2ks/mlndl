@@ -1,0 +1,32 @@
+ndl_version: "1.0"
+meta:
+  name: invalid-vni-duplicate
+
+layer3:
+  vrfs:
+    - id: vrf-a
+    - id: vrf-b
+  interfaces:
+    - id: lo1
+      node: leaf1
+      interface: lo
+
+layer1:
+  nodes:
+    - id: leaf1
+
+layer2:
+  vxlan:
+    - id: vni-100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100        # 未定義 VLAN も別エラー
+      vtep_source: lo1
+      members: [leaf1]
+
+    - id: vni-100-dup
+      type: l2vni
+      vni: 10100            # ← 重複 VNI
+      vlan: vlan-200
+      vtep_source: lo1
+      members: [leaf1]

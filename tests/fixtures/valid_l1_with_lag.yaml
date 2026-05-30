@@ -1,0 +1,67 @@
+ndl_version: "1.0"
+
+meta:
+  name: mlag-spine-leaf-lab
+
+layer1:
+  nodes:
+    - id: leaf1
+      name: Leaf-1
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+
+    - id: leaf2
+      name: Leaf-2
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+
+    - id: server1
+      name: Server-1
+      implementation: physical
+      role: server
+
+  interfaces:
+    - id: leaf1-swp1
+      node: leaf1
+      name: swp1
+    - id: leaf1-swp2
+      node: leaf1
+      name: swp2
+    - id: leaf1-swp49
+      node: leaf1
+      name: swp49
+    - id: leaf1-swp50
+      node: leaf1
+      name: swp50
+    - id: leaf2-swp1
+      node: leaf2
+      name: swp1
+    - id: leaf2-swp2
+      node: leaf2
+      name: swp2
+    - id: server1-eth0
+      node: server1
+      name: eth0
+    - id: server1-eth1
+      node: server1
+      name: eth1
+
+  links: []
+
+  lag:
+    - id: lag-peer-link
+      type: lacp
+      node: leaf1
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-mlag-server1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-peer-link
+      peer_link_interface: peerlink.4094
+      domain_id: 10

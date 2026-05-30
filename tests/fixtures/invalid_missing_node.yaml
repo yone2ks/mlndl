@@ -1,0 +1,23 @@
+ndl_version: "1.0"
+
+meta:
+  name: invalid-missing-node
+
+layer1:
+  nodes:
+    - id: spine1
+      role: spine
+
+  interfaces:
+    - id: spine1-swp1
+      node: spine1
+      name: swp1
+
+    - id: ghost-swp1
+      node: ghost-node        # 未定義ノードへの参照
+      name: swp1
+
+  links:
+    - id: link-test
+      from: spine1-swp1
+      to: undefined-interface  # 未定義インターフェースへの参照

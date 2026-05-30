@@ -1,0 +1,41 @@
+ndl_version: "1.0"
+meta:
+  name: invalid-mtu-vxlan
+
+layer1:
+  nodes:
+    - id: leaf1
+    - id: leaf2
+  interfaces:
+    - id: leaf1-swp1
+      node: leaf1
+      name: swp1
+    - id: leaf2-swp1
+      node: leaf2
+      name: swp1
+  links:
+    - id: link-underlay
+      from: leaf1-swp1
+      to: leaf2-swp1
+      mtu: 1500             # ← VxLAN 使用時は 1550 以上必須
+      link_role: underlay
+
+layer3:
+  vrfs:
+    - id: vrf-a
+  interfaces:
+    - id: leaf1-lo
+      node: leaf1
+      interface: lo
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+  vxlan:
+    - id: vni-100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vtep_source: leaf1-lo
+      members: [leaf1, leaf2]

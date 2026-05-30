@@ -1,0 +1,311 @@
+"""Phase 1 ユニットテスト"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+import mlndl
+from mlndl import parse, parse_file, validate
+from mlndl.exporter import cytoscape, yaml as yaml_exporter
+from mlndl.schema.layer1 import LacpLag, MlagLag
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# パーサー
+# ---------------------------------------------------------------------------
+
+class TestParser:
+    def test_parse_valid_simple(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        assert t.ndl_version == "1.0"
+        assert t.meta is not None
+        assert t.meta.name == "simple-spine-leaf"
+        assert t.layer1 is not None
+
+    def test_parse_valid_simple_nodes(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        l1 = t.layer1
+        assert len(l1.nodes) == 3
+        node_ids = {n.id for n in l1.nodes}
+        assert "spine1" in node_ids
+        assert "leaf1" in node_ids
+        assert "eve-server" in node_ids
+
+    def test_parse_valid_simple_links(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        l1 = t.layer1
+        assert len(l1.links) == 1
+        link = l1.links[0]
+        assert link.from_ == "spine1-swp1"
+        assert link.to == "leaf1-swp51"
+        assert link.link_speed == "10G"
+        assert link.mtu == 9216
+
+    def test_parse_valid_with_lag(self):
+        t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")
+        l1 = t.layer1
+        assert len(l1.lag) == 2
+
+    def test_parse_lag_types(self):
+        t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")
+        lags = {lag.id: lag for lag in t.layer1.lag}
+
+        peer_link = lags["lag-peer-link"]
+        assert isinstance(peer_link, LacpLag)
+        assert peer_link.type == "lacp"
+        assert peer_link.node == "leaf1"
+        assert peer_link.members == ["leaf1-swp49", "leaf1-swp50"]
+
+        mlag = lags["lag-mlag-server1"]
+        assert isinstance(mlag, MlagLag)
+        assert mlag.type == "mlag"
+        assert mlag.nodes == ["leaf1", "leaf2"]
+        assert mlag.peer_link == "lag-peer-link"
+        assert mlag.domain_id == 10
+
+    def test_parse_empty_yaml(self):
+        t = parse(b"")
+        assert t.ndl_version == "1.0"
+        assert t.layer1 is None
+
+    def test_parse_from_string(self):
+        t = parse('ndl_version: "1.0"\n')
+        assert t.ndl_version == "1.0"
+
+
+# ---------------------------------------------------------------------------
+# バージョンチェック
+# ---------------------------------------------------------------------------
+
+class TestVersionCheck:
+    def test_version_2_raises(self):
+        with pytest.raises(Exception, match="バージョン"):
+            parse(b'ndl_version: "2.0"\n')
+
+    def test_version_1_1_ok(self):
+        t = parse(b'ndl_version: "1.1"\n')
+        assert t.ndl_version == "1.1"
+
+    def test_invalid_version_format_raises(self):
+        with pytest.raises(Exception):
+            parse(b'ndl_version: "abc"\n')
+
+
+# ---------------------------------------------------------------------------
+# セキュリティ
+# ---------------------------------------------------------------------------
+
+class TestSecurity:
+    def test_size_limit(self):
+        from mlndl.constants import MAX_TOPOLOGY_BYTES
+        big = b"x" * (MAX_TOPOLOGY_BYTES + 1)
+        with pytest.raises(ValueError, match="上限"):
+            parse(big)
+
+    def test_size_at_limit_ok(self):
+        from mlndl.constants import MAX_TOPOLOGY_BYTES
+        # ちょうど上限サイズの有効な YAML（ほぼすべてスペース）
+        content = b'ndl_version: "1.0"\n'
+        padding = b"# " + b"x" * (MAX_TOPOLOGY_BYTES - len(content) - 3) + b"\n"
+        parse(content + padding)  # 例外が出なければ OK
+
+
+# ---------------------------------------------------------------------------
+# スキーマバリデーション（pydantic）
+# ---------------------------------------------------------------------------
+
+class TestSchemaValidation:
+    def test_container_hypervisor_error(self):
+        yaml_str = b"""
+ndl_version: "1.0"
+layer1:
+  nodes:
+    - id: node1
+      implementation: container
+      role: hypervisor
+"""
+        with pytest.raises(Exception, match="ADR-0004"):
+            parse(yaml_str)
+
+    def test_mlag_single_node_error(self):
+        yaml_str = b"""
+ndl_version: "1.0"
+layer1:
+  nodes:
+    - id: leaf1
+  interfaces: []
+  lag:
+    - id: lag1
+      type: mlag
+      nodes: [leaf1]
+      members: []
+      peer_link: lag-pl
+      peer_link_interface: peerlink.4094
+"""
+        with pytest.raises(Exception, match="2 ノード"):
+            parse(yaml_str)
+
+    def test_attaches_to_two_keys_error(self):
+        yaml_str = b"""
+ndl_version: "1.0"
+layer1:
+  nodes:
+    - id: node1
+      attaches_to:
+        node: host1
+        interface: eth0
+"""
+        with pytest.raises(Exception):
+            parse(yaml_str)
+
+    def test_unknown_field_error(self):
+        yaml_str = b"""
+ndl_version: "1.0"
+layer1:
+  nodes:
+    - id: node1
+      unknown_field: value
+"""
+        with pytest.raises(Exception):
+            parse(yaml_str)
+
+    def test_invalid_implementation_error(self):
+        yaml_str = b"""
+ndl_version: "1.0"
+layer1:
+  nodes:
+    - id: node1
+      implementation: virtual
+"""
+        with pytest.raises(Exception):
+            parse(yaml_str)
+
+
+# ---------------------------------------------------------------------------
+# バリデーター（参照整合性）
+# ---------------------------------------------------------------------------
+
+class TestValidator:
+    def test_valid_simple_no_errors(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        errors = validate(t)
+        assert errors == []
+
+    def test_valid_with_lag_no_errors(self):
+        t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")
+        errors = validate(t)
+        assert errors == []
+
+    def test_invalid_missing_node(self):
+        t = parse_file(FIXTURES / "invalid_missing_node.yaml")
+        errors = validate(t)
+        assert len(errors) >= 2
+        paths = [e.path for e in errors]
+        # ghost-node 参照エラー
+        assert any("node" in p for p in paths)
+        # undefined-interface 参照エラー
+        assert any("to" in p for p in paths)
+
+    def test_validate_returns_validation_error_objects(self):
+        t = parse_file(FIXTURES / "invalid_missing_node.yaml")
+        errors = validate(t)
+        for e in errors:
+            assert isinstance(e, mlndl.ValidationError)
+            assert e.path
+            assert e.message
+
+    def test_empty_topology_no_errors(self):
+        t = parse(b'ndl_version: "1.0"\n')
+        errors = validate(t)
+        assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# エクスポーター: YAML
+# ---------------------------------------------------------------------------
+
+class TestYamlExporter:
+    def test_export_contains_version(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = yaml_exporter.export(t)
+        assert "ndl_version" in result
+
+    def test_export_contains_node_ids(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = yaml_exporter.export(t)
+        assert "spine1" in result
+        assert "leaf1" in result
+
+    def test_export_from_alias(self):
+        """from_ フィールドが from としてシリアライズされること"""
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = yaml_exporter.export(t)
+        assert "from:" in result
+        assert "from_:" not in result
+
+    def test_roundtrip(self):
+        """parse → export → parse でデータが保持されること"""
+        original = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        exported = yaml_exporter.export(original)
+        restored = parse(exported.encode())
+        assert restored.layer1 is not None
+        assert len(restored.layer1.nodes) == len(original.layer1.nodes)
+        assert len(restored.layer1.links) == len(original.layer1.links)
+
+
+# ---------------------------------------------------------------------------
+# エクスポーター: Cytoscape.js
+# ---------------------------------------------------------------------------
+
+class TestCytoscapeExporter:
+    def test_export_has_nodes_and_edges(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = cytoscape.export(t)
+        assert "nodes" in result
+        assert "edges" in result
+
+    def test_export_node_ids(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = cytoscape.export(t)
+        node_ids = {n["data"]["id"] for n in result["nodes"]}
+        assert "spine1" in node_ids
+        assert "leaf1" in node_ids
+
+    def test_export_interface_parent(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = cytoscape.export(t)
+        iface_nodes = [n for n in result["nodes"] if n["data"].get("type") == "interface"]
+        for iface in iface_nodes:
+            assert "parent" in iface["data"]
+
+    def test_export_link_edge(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = cytoscape.export(t)
+        link_edges = [e for e in result["edges"] if e["data"].get("type") == "link"]
+        assert len(link_edges) == 1
+        edge = link_edges[0]
+        assert edge["data"]["source"] == "spine1-swp1"
+        assert edge["data"]["target"] == "leaf1-swp51"
+
+    def test_export_attaches_to_edge(self):
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = cytoscape.export(t)
+        attaches_edges = [e for e in result["edges"] if e["data"].get("type") == "attaches_to"]
+        # spine1 と leaf1 が eve-server に attaches_to
+        assert len(attaches_edges) == 2
+
+    def test_export_json_is_valid_string(self):
+        import json
+        t = parse_file(FIXTURES / "valid_l1_simple.yaml")
+        result = cytoscape.export_json(t)
+        parsed = json.loads(result)
+        assert "nodes" in parsed
+
+    def test_export_empty_topology(self):
+        t = parse(b'ndl_version: "1.0"\n')
+        result = cytoscape.export(t)
+        assert result == {"nodes": [], "edges": []}
