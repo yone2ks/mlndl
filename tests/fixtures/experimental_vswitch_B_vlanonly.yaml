@@ -1,0 +1,45 @@
+ndl_version: "1.0"
+
+meta:
+  name: vswitch-approach-B-vlanonly
+  network_types: [l1-physical, l2-network]
+  # アプローチB: vSwitch 概念ゼロ。L2 VLAN の access_ports/trunk_ports だけで全表現。
+  # VM vNIC と ToR trunk が同じ VLAN にぶら下がっていれば
+  # "同一ブロードキャストドメイン" は推論可能、とみなす。
+
+layer1:
+  nodes:
+    - {id: esxi-01,  role: hypervisor, implementation: physical, device_type: vmware_esxi}
+    - {id: tor-sw1,  role: leaf,       implementation: physical, device_type: arista_eos}
+    - {id: web-vm1,  role: server,     implementation: vm, attaches_to: esxi-01}
+    - {id: web-vm2,  role: server,     implementation: vm, attaches_to: esxi-01}
+
+  interfaces:
+    - {id: esxi-01-vmnic0, node: esxi-01, name: vmnic0}
+    - {id: tor-sw1-Eth1,   node: tor-sw1, name: Ethernet1}
+    - {id: web-vm1-eth0,   node: web-vm1, name: eth0}
+    - {id: web-vm2-eth0,   node: web-vm2, name: eth0}
+
+  links:
+    - id: link-esxi01-tor1
+      endpoints: [esxi-01-vmnic0, tor-sw1-Eth1]
+      link_speed: 10G
+      link_role: uplink
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {node: tor-sw1, interface: Ethernet1}
+        # esxi-01 vmnic0 も実体は trunk port。書ける:
+        - {node: esxi-01, interface: vmnic0}
+      access_ports:
+        # VM vNIC を access として登録。VST 相当 (タグはどこかで剥がれている) と暗黙合意。
+        - {node: web-vm1, interface: eth0}
+        - {node: web-vm2, interface: eth0}
+      # MISSING: vmnic0 と VM vNIC が「同じ dvSwitch を介して接続されている」事実は書けない。
+      #          → 同じ VLAN に居る、という事実のみで等価とみなす運用。
+      # MISSING: タグ付与主体 (VST=dvSwitch / VGT=Guest / EST=ESXi) の区別ができない。
+      # MISSING: 同一 ESXi 上で VLAN100 と VLAN200 の両方を持つ場合、
+      #          vmnic0 が両 VLAN の trunk_ports に重複登場 (冗長だが書ける)。

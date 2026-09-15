@@ -1,0 +1,88 @@
+ndl_version: "1.0"
+
+meta:
+  name: vsphere-dvswitch-lab
+  network_types: [l1-physical, l2-network]
+  # シナリオ: ESXi 1台 + 2 VM + dvSwitch(dvs-01) + ToR(tor-sw1)
+  # 現行 MLNDL は L1 + L2 (VLAN) のみ正式サポート。
+  # dvSwitch / PortGroup は表現できないため、近似として下記を行う:
+  #   - ESXi を hypervisor として L1 ノードに置く
+  #   - VM は attaches_to: esxi-01 で物理ホストに紐付ける
+  #   - VM の vNIC ↔ ESXi vmnic 間は L1 link で「擬似的に」表現
+  #   - これは実体としては不正確 (dvSwitch を介する) だが、現行スキーマでは仕方ない
+
+layer1:
+  nodes:
+    - id: esxi-01
+      name: ESXi-01
+      role: hypervisor
+      implementation: physical
+      device_type: vmware_esxi
+
+    - id: tor-sw1
+      name: ToR-SW-1
+      role: leaf
+      implementation: physical
+      device_type: arista_eos
+
+    - id: web-vm1
+      name: web-vm1
+      role: server
+      implementation: vm
+      attaches_to: esxi-01           # 文字列糖衣構文 = supporting-node
+
+    - id: web-vm2
+      name: web-vm2
+      role: server
+      implementation: vm
+      attaches_to: esxi-01
+
+  interfaces:
+    # ESXi 物理 NIC
+    - {id: esxi-01-vmnic0, node: esxi-01, name: vmnic0}
+    - {id: esxi-01-vmnic1, node: esxi-01, name: vmnic1}
+
+    # ToR 物理ポート
+    - {id: tor-sw1-Eth1, node: tor-sw1, name: Ethernet1}
+    - {id: tor-sw1-Eth2, node: tor-sw1, name: Ethernet2}
+
+    # VM vNIC (実際は dvSwitch port group "pg-web" に接続するが、現行は物理 IF として表現)
+    - {id: web-vm1-eth0, node: web-vm1, name: eth0}
+    - {id: web-vm2-eth0, node: web-vm2, name: eth0}
+
+  links:
+    # 物理ケーブル: ESXi vmnic ↔ ToR (trunk)
+    - id: link-esxi01-vmnic0-tor1-eth1
+      endpoints: [esxi-01-vmnic0, tor-sw1-Eth1]
+      link_speed: 10G
+      link_role: uplink
+    - id: link-esxi01-vmnic1-tor1-eth2
+      endpoints: [esxi-01-vmnic1, tor-sw1-Eth2]
+      link_speed: 10G
+      link_role: uplink
+
+    # --- ここから先は「現行スキーマでは表現できないものを link で擬似的に書く」例 ---
+    # VM の vNIC が dvSwitch port-group "pg-web" に接続している事実を、
+    # 苦し紛れに vmnic0 への "link" として書く。これは正しくない。
+    # (dvSwitch は L2 ブリッジであり、点対点リンクではない)
+    # 本来は layer2.bridges のような構成子が必要。コメントアウトして残す:
+    #
+    # - id: link-webvm1-pgweb
+    #   endpoints: [web-vm1-eth0, esxi-01-vmnic0]   # 嘘
+    # - id: link-webvm2-pgweb
+    #   endpoints: [web-vm2-eth0, esxi-01-vmnic0]   # 嘘 (1 IF が複数 link 端点になる)
+
+layer2:
+  vlans:
+    # VLAN 100 = pg-web 相当。ToR 側 trunk は書けるが、
+    # dvSwitch 側の port-group → VLAN マッピングは書けない。
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {node: tor-sw1, interface: Ethernet1}
+        - {node: tor-sw1, interface: Ethernet2}
+      access_ports:
+        # 苦し紛れ: VM vNIC を access port として登録。
+        # 本来は「pg-web に接続 → pg-web が VLAN100 にタグ」という 2 段構造。
+        - {node: web-vm1, interface: eth0}
+        - {node: web-vm2, interface: eth0}

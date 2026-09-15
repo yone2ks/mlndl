@@ -1,0 +1,72 @@
+ndl_version: "1.0"
+
+meta:
+  name: vswitch-approach-A-chain
+  network_types: [l1-physical, l2-network]
+  # アプローチA: vSwitch 概念を持たず、attaches_to 連鎖で表現する。
+  # VM vNIC は ESXi の vmnic (物理 NIC) に attaches_to で紐付ける。
+  # → "VM vNIC は最終的にこの物理ポートから外へ出る" を表現。
+
+layer1:
+  nodes:
+    - id: esxi-01
+      role: hypervisor
+      implementation: physical
+      device_type: vmware_esxi
+
+    - id: tor-sw1
+      role: leaf
+      implementation: physical
+      device_type: arista_eos
+
+    - id: web-vm1
+      role: server
+      implementation: vm
+      attaches_to: esxi-01
+
+    - id: web-vm2
+      role: server
+      implementation: vm
+      attaches_to: esxi-01
+
+  interfaces:
+    - {id: esxi-01-vmnic0, node: esxi-01, name: vmnic0}
+    - {id: tor-sw1-Eth1,   node: tor-sw1, name: Ethernet1}
+
+    # VM vNIC は vmnic0 に attaches_to (supporting-termination-point)
+    - id: web-vm1-eth0
+      node: web-vm1
+      name: eth0
+      attaches_to: {interface: esxi-01-vmnic0}
+      # MISSING: dvSwitch / port-group の存在が消える。
+      # MISSING: 複数 vNIC が同じ vmnic を "supports" して良いか仕様未定義
+      #          (ADR-0001 では 1:1 とも N:1 とも書かれていない)。
+      # MISSING: dvSwitch がアップリンクチーミングで vmnic0/vmnic1 を束ねる場合、
+      #          どちらの vmnic に attaches_to すべきか決定不能。
+
+    - id: web-vm2-eth0
+      node: web-vm2
+      name: eth0
+      attaches_to: {interface: esxi-01-vmnic0}
+
+  links:
+    # 物理ケーブルのみ
+    - id: link-esxi01-tor1
+      endpoints: [esxi-01-vmnic0, tor-sw1-Eth1]
+      link_speed: 10G
+      link_role: uplink
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {node: tor-sw1, interface: Ethernet1}
+      access_ports:
+        # ERROR(意味的): VM vNIC を access_port にすると
+        # "VM が直接 untagged で VLAN100 を持つ" ことになり、
+        # 実体 (dvSwitch が VST でタグ付け) と一致しない。
+        # しかし vNIC を表に出さないと VLAN との関係が失われる。
+        - {node: web-vm1, interface: eth0}
+        - {node: web-vm2, interface: eth0}
+      # MISSING: "dvSwitch が VST でタグ付与" という事実を書く場所がない。

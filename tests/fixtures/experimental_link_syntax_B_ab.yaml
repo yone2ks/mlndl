@@ -1,0 +1,25 @@
+# 実験用: 案B — a / b の 2 フィールド形式
+# 中立性 (方向を持たない) を保ちつつ、フィールド数を 2 に固定。
+# 利点: pydantic で a: str, b: str と素直に書ける。IDE 補完が効く。
+# 欠点: a/b は意味のないラベルで「どちらが先か」の慣習が生じやすい。
+#       人間の可読性は from/to に劣る。
+ndl_version: "1.0"
+
+meta:
+  name: experimental-link-syntax-b
+  network_types: [l1-physical]
+
+layer1:
+  links:
+    - id: link-spine1-leaf1
+      a: spine1-swp1
+      b: leaf1-swp51
+      link_speed: 10G
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-mlag-peerlink-1
+      a: leaf1-swp49
+      b: leaf2-swp49
+      link_speed: 10G
+      link_role: peer-link

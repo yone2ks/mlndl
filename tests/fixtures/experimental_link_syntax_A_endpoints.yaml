@@ -1,0 +1,23 @@
+# 実験用: 案A — endpoints 配列形式
+# Layer1 link を中立な双方向表現で記述する案。
+# 利点: 物理ケーブルは方向を持たないため、配列表現は意味論的に正しい。
+# 欠点: IDE 補完で「2要素固定」を型で示しにくい。順序に依存しないが
+#       テスト比較やソートで非決定性が生じうる。
+ndl_version: "1.0"
+
+meta:
+  name: experimental-link-syntax-a
+  network_types: [l1-physical]
+
+layer1:
+  links:
+    - id: link-spine1-leaf1
+      endpoints: [spine1-swp1, leaf1-swp51]
+      link_speed: 10G
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-mlag-peerlink-1
+      endpoints: [leaf1-swp49, leaf2-swp49]
+      link_speed: 10G
+      link_role: peer-link

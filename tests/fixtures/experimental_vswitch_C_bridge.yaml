@@ -1,0 +1,53 @@
+ndl_version: "1.0"
+
+meta:
+  name: vswitch-approach-C-bridge
+  network_types: [l1-physical, l2-network]
+  # アプローチC: layer2.bridges を最小エンティティとして導入 (現行スキーマには未実装)。
+  # bridge は「同一 L2 セグメントを共有するポートの集合」を表す抽象。
+  # port_group や vSwitch ベンダー固有の階層は持たない。
+  # bridge は L2 上で uplink (物理 NIC) と member (VM vNIC) を直接束ね、
+  # tag_vlan で VST 相当のタグ付与を表現する。
+
+layer1:
+  nodes:
+    - {id: esxi-01,  role: hypervisor, implementation: physical, device_type: vmware_esxi}
+    - {id: tor-sw1,  role: leaf,       implementation: physical, device_type: arista_eos}
+    - {id: web-vm1,  role: server,     implementation: vm, attaches_to: esxi-01}
+    - {id: web-vm2,  role: server,     implementation: vm, attaches_to: esxi-01}
+
+  interfaces:
+    - {id: esxi-01-vmnic0, node: esxi-01, name: vmnic0}
+    - {id: tor-sw1-Eth1,   node: tor-sw1, name: Ethernet1}
+    - {id: web-vm1-eth0,   node: web-vm1, name: eth0}
+    - {id: web-vm2-eth0,   node: web-vm2, name: eth0}
+
+  links:
+    - id: link-esxi01-tor1
+      endpoints: [esxi-01-vmnic0, tor-sw1-Eth1]
+      link_speed: 10G
+      link_role: uplink
+
+layer2:
+  # NOTE: bridges は仕様提案 (現行 schema/layer2.py には未実装)。
+  bridges:
+    - id: br-pg-web
+      host: esxi-01                  # この bridge が動くノード (ホスト)
+      tag_vlan: 100                  # VST: この bridge を通る frame に VLAN100 タグを付与
+      uplinks:                       # 物理側 (タグ付き trunk へ向かう)
+        - {node: esxi-01, interface: vmnic0}
+      members:                       # 仮想側 (untagged で接続される vNIC)
+        - {node: web-vm1, interface: eth0}
+        - {node: web-vm2, interface: eth0}
+      # 利点:
+      # - "誰がタグ付けするか" が tag_vlan で明示される
+      # - 複数 vNIC が同じ bridge にぶら下がる関係が自然に書ける
+      # - 物理 NIC (uplink) と VM (member) の役割が分離
+
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {node: tor-sw1, interface: Ethernet1}
+      # access_ports は不要 (VM vNIC は bridge 配下、ToR trunk のみ書く)
+      # bridge.tag_vlan = 100 が vlan-100 と暗黙にバインド (validator で参照解決)

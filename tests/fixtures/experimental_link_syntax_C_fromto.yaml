@@ -1,0 +1,23 @@
+# 実験用: 案C — from / to (現行) 形式 (参考比較)
+# 利点: 人間が読んだとき直感的。グラフライブラリの慣習 (edge.from/to) と一致。
+#       既存の eve-lab-builder / ndl-viz が前提にしている。
+# 欠点: 物理ケーブルは方向を持たないので意味論的にミスリード。
+#       「from は接続元の意味があるのか?」という質問が定期的に発生する。
+ndl_version: "1.0"
+
+meta:
+  name: experimental-link-syntax-c
+  network_types: [l1-physical]
+
+layer1:
+  links:
+    - id: link-spine1-leaf1
+      endpoints: [spine1-swp1, leaf1-swp51]
+      link_speed: 10G
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-mlag-peerlink-1
+      endpoints: [leaf1-swp49, leaf2-swp49]
+      link_speed: 10G
+      link_role: peer-link
