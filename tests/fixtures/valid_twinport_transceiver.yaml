@@ -1,0 +1,97 @@
+ndl_version: "1.0"
+
+meta:
+  name: twinport-transceiver-lab
+  description: |
+    QSFP-DD ツインポートトランシーバ (1 物理スロット = 2 論理ポート / breakout 的)
+    を含むトポロジー。spine1 のスロット 1 は leaf1/leaf2 へ分岐、スロット 2 は
+    leaf3 への LAG として束ねる。
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - id: spine1
+      role: spine
+      implementation: physical
+      device_type: arista_7060x   # QSFP-DD 搭載想定
+
+    - id: leaf1
+      role: leaf
+      implementation: physical
+      device_type: cumulus_linux
+
+    - id: leaf2
+      role: leaf
+      implementation: physical
+      device_type: cumulus_linux
+
+    - id: leaf3
+      role: leaf
+      implementation: physical
+      device_type: cumulus_linux
+
+  interfaces:
+    # ── spine1: スロット 1 (ツインポート) ─────────────────────────────
+    # 物理スロット名 Ethernet1/1 を「親」として表現したいが、現行スキーマには
+    # 親子関係のフィールドが無いため、命名規約 (-A / -B サフィックス) で示す。
+    # 落ちる情報: 「この 2 IF は同一 QSFP-DD スロットに刺さった 1 個のモジュール」
+    - id: spine1-eth1-1-a
+      node: spine1
+      name: Ethernet1/1/A         # ベンダ表記イメージ (breakout の慣例)
+    - id: spine1-eth1-1-b
+      node: spine1
+      name: Ethernet1/1/B
+
+    # ── spine1: スロット 2 (ツインポート / LAG 束ね) ─────────────────
+    - id: spine1-eth1-2-a
+      node: spine1
+      name: Ethernet1/2/A
+    - id: spine1-eth1-2-b
+      node: spine1
+      name: Ethernet1/2/B
+
+    # ── leaf 側 ────────────────────────────────────────────────────
+    - id: leaf1-eth1
+      node: leaf1
+      name: eth1
+    - id: leaf2-eth1
+      node: leaf2
+      name: eth1
+    - id: leaf3-eth1
+      node: leaf3
+      name: eth1
+    - id: leaf3-eth2
+      node: leaf3
+      name: eth2
+
+  links:
+    # スロット 1: 物理的には 1 本のツインポートケーブル、論理的には独立 2 リンク
+    - id: link-spine1-leaf1
+      endpoints: [spine1-eth1-1-a, leaf1-eth1]
+      link_speed: 100G
+      link_role: underlay
+      # NOTE: spine1-eth1-1-* は同一トランシーバ。共通障害域だが現行スキーマでは表現不可。
+
+    - id: link-spine1-leaf2
+      endpoints: [spine1-eth1-1-b, leaf2-eth1]
+      link_speed: 100G
+      link_role: underlay
+
+    # スロット 2: 両ポートとも leaf3 へ。spine1 側で LAG。
+    - id: link-spine1-leaf3-a
+      endpoints: [spine1-eth1-2-a, leaf3-eth1]
+      link_speed: 100G
+      link_role: underlay
+    - id: link-spine1-leaf3-b
+      endpoints: [spine1-eth1-2-b, leaf3-eth2]
+      link_speed: 100G
+      link_role: underlay
+
+  lag:
+    - id: lag-spine1-to-leaf3
+      type: lacp
+      node: spine1
+      members: [spine1-eth1-2-a, spine1-eth1-2-b]
+      lacp: {mode: active, min_links: 1}
+      # NOTE: leaf3 側にも対向 LAG が必要なはずだが、ここでは spine1 側のみ記述。
+      # 現行スキーマでは「対向 LAG への参照」フィールドが無い。

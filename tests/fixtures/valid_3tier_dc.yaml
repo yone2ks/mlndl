@@ -1,0 +1,240 @@
+ndl_version: "1.0"
+
+meta:
+  name: 3tier-dc
+  description: Core-Aggregation-Distribution 3層構成 DC（Core↔Agg は 2-member LACP LAG）
+
+layer1:
+  nodes:
+    # ── Core 層 ─────────────────────────────────────────────────────────
+    - id: core1
+      name: Core-1
+      role: core
+      implementation: physical
+      device_type: cisco_nexus_9508
+
+    - id: core2
+      name: Core-2
+      role: core
+      implementation: physical
+      device_type: cisco_nexus_9508
+
+    # ── Aggregation 層 ──────────────────────────────────────────────────
+    - id: agg1
+      name: Agg-1
+      role: aggregation
+      implementation: physical
+      device_type: cisco_nexus_7706
+
+    - id: agg2
+      name: Agg-2
+      role: aggregation
+      implementation: physical
+      device_type: cisco_nexus_7706
+
+    # ── Distribution 層 ─────────────────────────────────────────────────
+    - id: dist1
+      name: Dist-1
+      role: distribution
+      implementation: physical
+      device_type: cisco_catalyst_9300
+
+    - id: dist2
+      name: Dist-2
+      role: distribution
+      implementation: physical
+      device_type: cisco_catalyst_9300
+
+    - id: dist3
+      name: Dist-3
+      role: distribution
+      implementation: physical
+      device_type: cisco_catalyst_9300
+
+    - id: dist4
+      name: Dist-4
+      role: distribution
+      implementation: physical
+      device_type: cisco_catalyst_9300
+
+    # ── Server 層 ───────────────────────────────────────────────────────
+    - id: server1
+      name: Server-1
+      role: server
+      implementation: physical
+
+    - id: server2
+      name: Server-2
+      role: server
+      implementation: physical
+
+    - id: server3
+      name: Server-3
+      role: server
+      implementation: physical
+
+    - id: server4
+      name: Server-4
+      role: server
+      implementation: physical
+
+  interfaces:
+    # ── Core1 ─────────────────────────────────────────────────────────
+    # Te1/1, Te1/2 → Agg1 (LAG member)
+    - { id: core1-te1-1, node: core1, name: Te1/1 }
+    - { id: core1-te1-2, node: core1, name: Te1/2 }
+    # Te1/3, Te1/4 → Agg2 (LAG member)
+    - { id: core1-te1-3, node: core1, name: Te1/3 }
+    - { id: core1-te1-4, node: core1, name: Te1/4 }
+    # Te2/1 → Core2 (インターコネクト)
+    - { id: core1-te2-1, node: core1, name: Te2/1 }
+
+    # ── Core2 ─────────────────────────────────────────────────────────
+    # Te1/1, Te1/2 → Agg1 (LAG member)
+    - { id: core2-te1-1, node: core2, name: Te1/1 }
+    - { id: core2-te1-2, node: core2, name: Te1/2 }
+    # Te1/3, Te1/4 → Agg2 (LAG member)
+    - { id: core2-te1-3, node: core2, name: Te1/3 }
+    - { id: core2-te1-4, node: core2, name: Te1/4 }
+    # Te2/1 → Core1 (インターコネクト)
+    - { id: core2-te2-1, node: core2, name: Te2/1 }
+
+    # ── Agg1 ──────────────────────────────────────────────────────────
+    # Te1/1, Te1/2 ← Core1 (LAG)
+    - { id: agg1-te1-1, node: agg1, name: Te1/1 }
+    - { id: agg1-te1-2, node: agg1, name: Te1/2 }
+    # Te1/3, Te1/4 ← Core2 (LAG)
+    - { id: agg1-te1-3, node: agg1, name: Te1/3 }
+    - { id: agg1-te1-4, node: agg1, name: Te1/4 }
+    # Ge1/1〜Ge1/4 → Dist1〜Dist4 (各1本)
+    - { id: agg1-ge1-1, node: agg1, name: Ge1/1 }
+    - { id: agg1-ge1-2, node: agg1, name: Ge1/2 }
+    - { id: agg1-ge1-3, node: agg1, name: Ge1/3 }
+    - { id: agg1-ge1-4, node: agg1, name: Ge1/4 }
+
+    # ── Agg2 ──────────────────────────────────────────────────────────
+    - { id: agg2-te1-1, node: agg2, name: Te1/1 }
+    - { id: agg2-te1-2, node: agg2, name: Te1/2 }
+    - { id: agg2-te1-3, node: agg2, name: Te1/3 }
+    - { id: agg2-te1-4, node: agg2, name: Te1/4 }
+    - { id: agg2-ge1-1, node: agg2, name: Ge1/1 }
+    - { id: agg2-ge1-2, node: agg2, name: Ge1/2 }
+    - { id: agg2-ge1-3, node: agg2, name: Ge1/3 }
+    - { id: agg2-ge1-4, node: agg2, name: Ge1/4 }
+
+    # ── Dist1 ─────────────────────────────────────────────────────────
+    - { id: dist1-ge0-1, node: dist1, name: Ge0/1 }
+    - { id: dist1-ge0-2, node: dist1, name: Ge0/2 }
+    - { id: dist1-fa0-1, node: dist1, name: Fa0/1 }
+    # ── Dist2 ─────────────────────────────────────────────────────────
+    - { id: dist2-ge0-1, node: dist2, name: Ge0/1 }
+    - { id: dist2-ge0-2, node: dist2, name: Ge0/2 }
+    - { id: dist2-fa0-1, node: dist2, name: Fa0/1 }
+    # ── Dist3 ─────────────────────────────────────────────────────────
+    - { id: dist3-ge0-1, node: dist3, name: Ge0/1 }
+    - { id: dist3-ge0-2, node: dist3, name: Ge0/2 }
+    - { id: dist3-fa0-1, node: dist3, name: Fa0/1 }
+    # ── Dist4 ─────────────────────────────────────────────────────────
+    - { id: dist4-ge0-1, node: dist4, name: Ge0/1 }
+    - { id: dist4-ge0-2, node: dist4, name: Ge0/2 }
+    - { id: dist4-fa0-1, node: dist4, name: Fa0/1 }
+
+    # ── Servers ───────────────────────────────────────────────────────
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server2-eth0, node: server2, name: eth0 }
+    - { id: server3-eth0, node: server3, name: eth0 }
+    - { id: server4-eth0, node: server4, name: eth0 }
+
+  links:
+    # ── Core インターコネクト ───────────────────────────────────────────
+    - id: link-core1-core2
+      endpoints: [core1-te2-1, core2-te2-1]
+      link_speed: 40G
+      link_role: underlay
+
+    # ── Core1 ↔ Agg1 (LACP LAG: 2 member)  ───────────────────────────
+    - id: link-core1-agg1-a
+      endpoints: [core1-te1-1, agg1-te1-1]
+      link_speed: 10G
+      link_role: underlay
+
+    - id: link-core1-agg1-b
+      endpoints: [core1-te1-2, agg1-te1-2]
+      link_speed: 10G
+      link_role: underlay
+
+    # ── Core1 ↔ Agg2 (LACP LAG: 2 member)  ───────────────────────────
+    - id: link-core1-agg2-a
+      endpoints: [core1-te1-3, agg2-te1-1]
+      link_speed: 10G
+      link_role: underlay
+
+    - id: link-core1-agg2-b
+      endpoints: [core1-te1-4, agg2-te1-2]
+      link_speed: 10G
+      link_role: underlay
+
+    # ── Core2 ↔ Agg1 (LACP LAG: 2 member)  ───────────────────────────
+    - id: link-core2-agg1-a
+      endpoints: [core2-te1-1, agg1-te1-3]
+      link_speed: 10G
+      link_role: underlay
+
+    - id: link-core2-agg1-b
+      endpoints: [core2-te1-2, agg1-te1-4]
+      link_speed: 10G
+      link_role: underlay
+
+    # ── Core2 ↔ Agg2 (LACP LAG: 2 member)  ───────────────────────────
+    - id: link-core2-agg2-a
+      endpoints: [core2-te1-3, agg2-te1-3]
+      link_speed: 10G
+      link_role: underlay
+
+    - id: link-core2-agg2-b
+      endpoints: [core2-te1-4, agg2-te1-4]
+      link_speed: 10G
+      link_role: underlay
+
+    # ── Aggregation ↔ Distribution（各 Dist が Agg1/Agg2 に冗長接続）──
+    - { id: link-agg1-dist1, endpoints: [agg1-ge1-1, dist1-ge0-1], link_speed: 1G }
+    - { id: link-agg2-dist1, endpoints: [agg2-ge1-1, dist1-ge0-2], link_speed: 1G }
+    - { id: link-agg1-dist2, endpoints: [agg1-ge1-2, dist2-ge0-1], link_speed: 1G }
+    - { id: link-agg2-dist2, endpoints: [agg2-ge1-2, dist2-ge0-2], link_speed: 1G }
+    - { id: link-agg1-dist3, endpoints: [agg1-ge1-3, dist3-ge0-1], link_speed: 1G }
+    - { id: link-agg2-dist3, endpoints: [agg2-ge1-3, dist3-ge0-2], link_speed: 1G }
+    - { id: link-agg1-dist4, endpoints: [agg1-ge1-4, dist4-ge0-1], link_speed: 1G }
+    - { id: link-agg2-dist4, endpoints: [agg2-ge1-4, dist4-ge0-2], link_speed: 1G }
+
+    # ── Distribution → Server（アクセス）──────────────────────────────
+    - { id: link-dist1-server1, endpoints: [dist1-fa0-1, server1-eth0], link_speed: 1G, link_role: access }
+    - { id: link-dist2-server2, endpoints: [dist2-fa0-1, server2-eth0], link_speed: 1G, link_role: access }
+    - { id: link-dist3-server3, endpoints: [dist3-fa0-1, server3-eth0], link_speed: 1G, link_role: access }
+    - { id: link-dist4-server4, endpoints: [dist4-fa0-1, server4-eth0], link_speed: 1G, link_role: access }
+
+  lag:
+    # ── Core1 の LACP LAG ──────────────────────────────────────────────
+    - id: lag-core1-agg1
+      type: lacp
+      node: core1
+      members: [core1-te1-1, core1-te1-2]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-core1-agg2
+      type: lacp
+      node: core1
+      members: [core1-te1-3, core1-te1-4]
+      lacp: {mode: active, min_links: 1}
+
+    # ── Core2 の LACP LAG ──────────────────────────────────────────────
+    - id: lag-core2-agg1
+      type: lacp
+      node: core2
+      members: [core2-te1-1, core2-te1-2]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-core2-agg2
+      type: lacp
+      node: core2
+      members: [core2-te1-3, core2-te1-4]
+      lacp: {mode: active, min_links: 1}

@@ -1,0 +1,482 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# マルチサイト (DC + キャンパス) を WAN で結ぶ構成
+#   - DC: Spine x2 / Leaf x2 (MLAG) / Border x2 / Server x2
+#         EVPN/VXLAN, L2VNI/L3VNI, anycast GW
+#   - Campus: Core x2 (inter-core LACP, SVI 終端) / Agg x2 / Dist x2 / Host x2
+#             tag VLAN x3 トランク全通し, Dist-Host access
+#   - WAN: DC-Border <-> Campus-Core を eBGP
+#
+# 注: 現行 mlndl にサイト概念は無いため、サイトの区別は role / id prefix /
+#     meta.description で表現するに留まる。下記 feedback 参照。
+# ============================================================================
+
+meta:
+  name: multisite-wan
+  description: DC (EVPN/VXLAN/MLAG) + Campus (3-tier, SVI on Core) joined by WAN eBGP
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    # ── DC site ─────────────────────────────────────────────────────────
+    - { id: dc-spine1,  name: DC-Spine-1,  role: spine,  implementation: vm, device_type: cumulus_linux }
+    - { id: dc-spine2,  name: DC-Spine-2,  role: spine,  implementation: vm, device_type: cumulus_linux }
+    - { id: dc-leaf1,   name: DC-Leaf-1,   role: leaf,   implementation: vm, device_type: cumulus_linux }
+    - { id: dc-leaf2,   name: DC-Leaf-2,   role: leaf,   implementation: vm, device_type: cumulus_linux }
+    - { id: dc-border1, name: DC-Border-1, role: border, implementation: vm, device_type: cumulus_linux }
+    - { id: dc-border2, name: DC-Border-2, role: border, implementation: vm, device_type: cumulus_linux }
+    - { id: dc-server1, name: DC-Server-1, role: server, implementation: physical }
+    - { id: dc-server2, name: DC-Server-2, role: server, implementation: physical }
+
+    # ── Campus site ─────────────────────────────────────────────────────
+    # NOTE: 3-tier キャンパスでは Core/Aggregation/Distribution が混在するが
+    #       推奨 9 語彙 (ADR-0003) に 'aggregation' / 'distribution' は無い。
+    #       自由文字列なので valid だが、可視化スタイル既定が無い点に注意。
+    - { id: cm-core1,   name: CM-Core-1,   role: core,         implementation: physical, device_type: cisco_nexus_9508 }
+    - { id: cm-core2,   name: CM-Core-2,   role: core,         implementation: physical, device_type: cisco_nexus_9508 }
+    - { id: cm-agg1,    name: CM-Dist-1,   role: distribution, implementation: physical, device_type: cisco_nexus_7706 }
+    - { id: cm-agg2,    name: CM-Dist-2,   role: distribution, implementation: physical, device_type: cisco_nexus_7706 }
+    - { id: cm-dist1,   name: CM-Access-1, role: access,       implementation: physical, device_type: cisco_catalyst_9300 }
+    - { id: cm-dist2,   name: CM-Access-2, role: access,       implementation: physical, device_type: cisco_catalyst_9300 }
+    - { id: cm-host1,   name: CM-Host-1,   role: server,       implementation: physical }
+    - { id: cm-host2,   name: CM-Host-2,   role: server,       implementation: physical }
+
+  interfaces:
+    # ── DC Spine ────────────────────────────────────────────────────────
+    - { id: dc-spine1-swp1, node: dc-spine1, name: swp1 }   # -> dc-leaf1
+    - { id: dc-spine1-swp2, node: dc-spine1, name: swp2 }   # -> dc-leaf2
+    - { id: dc-spine1-swp3, node: dc-spine1, name: swp3 }   # -> dc-border1
+    - { id: dc-spine1-swp4, node: dc-spine1, name: swp4 }   # -> dc-border2
+    - { id: dc-spine2-swp1, node: dc-spine2, name: swp1 }
+    - { id: dc-spine2-swp2, node: dc-spine2, name: swp2 }
+    - { id: dc-spine2-swp3, node: dc-spine2, name: swp3 }
+    - { id: dc-spine2-swp4, node: dc-spine2, name: swp4 }
+
+    # ── DC Leaf (MLAG pair) ─────────────────────────────────────────────
+    - { id: dc-leaf1-swp51, node: dc-leaf1, name: swp51 }   # -> spine1
+    - { id: dc-leaf1-swp52, node: dc-leaf1, name: swp52 }   # -> spine2
+    - { id: dc-leaf1-swp49, node: dc-leaf1, name: swp49 }   # peer-link
+    - { id: dc-leaf1-swp50, node: dc-leaf1, name: swp50 }   # peer-link
+    - { id: dc-leaf1-swp1,  node: dc-leaf1, name: swp1 }    # MLAG -> server1
+    - { id: dc-leaf1-swp2,  node: dc-leaf1, name: swp2 }    # MLAG -> server2
+    - { id: dc-leaf2-swp51, node: dc-leaf2, name: swp51 }
+    - { id: dc-leaf2-swp52, node: dc-leaf2, name: swp52 }
+    - { id: dc-leaf2-swp49, node: dc-leaf2, name: swp49 }
+    - { id: dc-leaf2-swp50, node: dc-leaf2, name: swp50 }
+    - { id: dc-leaf2-swp1,  node: dc-leaf2, name: swp1 }
+    - { id: dc-leaf2-swp2,  node: dc-leaf2, name: swp2 }
+
+    # ── DC Border ───────────────────────────────────────────────────────
+    - { id: dc-border1-swp51, node: dc-border1, name: swp51 }   # -> spine1
+    - { id: dc-border1-swp52, node: dc-border1, name: swp52 }   # -> spine2
+    - { id: dc-border1-swp1,  node: dc-border1, name: swp1 }    # WAN -> cm-core1
+    - { id: dc-border2-swp51, node: dc-border2, name: swp51 }
+    - { id: dc-border2-swp52, node: dc-border2, name: swp52 }
+    - { id: dc-border2-swp1,  node: dc-border2, name: swp1 }    # WAN -> cm-core2
+
+    # ── DC Server ──────────────────────────────────────────────────────
+    - { id: dc-server1-eth0, node: dc-server1, name: eth0 }
+    - { id: dc-server1-eth1, node: dc-server1, name: eth1 }
+    - { id: dc-server2-eth0, node: dc-server2, name: eth0 }
+    - { id: dc-server2-eth1, node: dc-server2, name: eth1 }
+
+    # ── Campus Core ────────────────────────────────────────────────────
+    - { id: cm-core1-te1-1, node: cm-core1, name: Te1/1 }   # WAN -> dc-border1
+    - { id: cm-core1-te2-1, node: cm-core1, name: Te2/1 }   # inter-core LACP
+    - { id: cm-core1-te2-2, node: cm-core1, name: Te2/2 }   # inter-core LACP
+    - { id: cm-core1-ge1-1, node: cm-core1, name: Ge1/1 }   # -> cm-agg1
+    - { id: cm-core1-ge1-2, node: cm-core1, name: Ge1/2 }   # -> cm-agg2
+    - { id: cm-core2-te1-1, node: cm-core2, name: Te1/1 }   # WAN -> dc-border2
+    - { id: cm-core2-te2-1, node: cm-core2, name: Te2/1 }
+    - { id: cm-core2-te2-2, node: cm-core2, name: Te2/2 }
+    - { id: cm-core2-ge1-1, node: cm-core2, name: Ge1/1 }   # -> cm-agg1
+    - { id: cm-core2-ge1-2, node: cm-core2, name: Ge1/2 }   # -> cm-agg2
+
+    # ── Campus Agg ─────────────────────────────────────────────────────
+    - { id: cm-agg1-ge1-1, node: cm-agg1, name: Ge1/1 }   # <- core1
+    - { id: cm-agg1-ge1-2, node: cm-agg1, name: Ge1/2 }   # <- core2
+    - { id: cm-agg1-ge2-1, node: cm-agg1, name: Ge2/1 }   # -> dist1
+    - { id: cm-agg2-ge1-1, node: cm-agg2, name: Ge1/1 }
+    - { id: cm-agg2-ge1-2, node: cm-agg2, name: Ge1/2 }
+    - { id: cm-agg2-ge2-1, node: cm-agg2, name: Ge2/1 }   # -> dist2
+
+    # ── Campus Dist ────────────────────────────────────────────────────
+    - { id: cm-dist1-ge0-1, node: cm-dist1, name: Ge0/1 } # <- agg1
+    - { id: cm-dist1-fa0-1, node: cm-dist1, name: Fa0/1 } # -> host1
+    - { id: cm-dist2-ge0-1, node: cm-dist2, name: Ge0/1 } # <- agg2
+    - { id: cm-dist2-fa0-1, node: cm-dist2, name: Fa0/1 } # -> host2
+
+    # ── Campus Host ────────────────────────────────────────────────────
+    - { id: cm-host1-eth0, node: cm-host1, name: eth0 }
+    - { id: cm-host2-eth0, node: cm-host2, name: eth0 }
+
+  links:
+    # ── DC underlay (Spine <-> Leaf/Border) ─────────────────────────────
+    - { id: link-dc-spine1-leaf1,   endpoints: [dc-spine1-swp1, dc-leaf1-swp51],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine1-leaf2,   endpoints: [dc-spine1-swp2, dc-leaf2-swp51],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine1-border1, endpoints: [dc-spine1-swp3, dc-border1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine1-border2, endpoints: [dc-spine1-swp4, dc-border2-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-leaf1,   endpoints: [dc-spine2-swp1, dc-leaf1-swp52],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-leaf2,   endpoints: [dc-spine2-swp2, dc-leaf2-swp52],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-border1, endpoints: [dc-spine2-swp3, dc-border1-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-border2, endpoints: [dc-spine2-swp4, dc-border2-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+
+    # ── DC MLAG peer-link ──────────────────────────────────────────────
+    - { id: link-dc-leaf-peer1, endpoints: [dc-leaf1-swp49, dc-leaf2-swp49], link_speed: 10G, mtu: 9216, link_role: peer-link }
+    - { id: link-dc-leaf-peer2, endpoints: [dc-leaf1-swp50, dc-leaf2-swp50], link_speed: 10G, mtu: 9216, link_role: peer-link }
+
+    # ── DC MLAG -> Servers ─────────────────────────────────────────────
+    - { id: link-dc-leaf1-server1, endpoints: [dc-leaf1-swp1, dc-server1-eth0], link_speed: 10G, link_role: access }
+    - { id: link-dc-leaf2-server1, endpoints: [dc-leaf2-swp1, dc-server1-eth1], link_speed: 10G, link_role: access }
+    - { id: link-dc-leaf1-server2, endpoints: [dc-leaf1-swp2, dc-server2-eth0], link_speed: 10G, link_role: access }
+    - { id: link-dc-leaf2-server2, endpoints: [dc-leaf2-swp2, dc-server2-eth1], link_speed: 10G, link_role: access }
+
+    # ── WAN (DC Border <-> Campus Core) ────────────────────────────────
+    # NOTE: link_role に 'wan' は語彙化されていない。CLAUDE.md には
+    #       underlay/access/peer-link/management/uplink しか例が無く、
+    #       WAN リンクをどれにマップすべきか不明。'uplink' を採用したが、
+    #       片側 (DC) では downlink でもある。feedback 参照。
+    - { id: link-wan-border1-core1, endpoints: [dc-border1-swp1, cm-core1-te1-1], link_speed: 10G, mtu: 9216, link_role: uplink }
+    - { id: link-wan-border2-core2, endpoints: [dc-border2-swp1, cm-core2-te1-1], link_speed: 10G, mtu: 9216, link_role: uplink }
+
+    # ── Campus inter-core LACP (2-member) ──────────────────────────────
+    - { id: link-cm-core-interconnect-a, endpoints: [cm-core1-te2-1, cm-core2-te2-1], link_speed: 40G, link_role: peer-link }
+    - { id: link-cm-core-interconnect-b, endpoints: [cm-core1-te2-2, cm-core2-te2-2], link_speed: 40G, link_role: peer-link }
+
+    # ── Campus Core <-> Agg ────────────────────────────────────────────
+    - { id: link-cm-core1-agg1, endpoints: [cm-core1-ge1-1, cm-agg1-ge1-1], link_speed: 1G, link_role: underlay }
+    - { id: link-cm-core1-agg2, endpoints: [cm-core1-ge1-2, cm-agg2-ge1-1], link_speed: 1G, link_role: underlay }
+    - { id: link-cm-core2-agg1, endpoints: [cm-core2-ge1-1, cm-agg1-ge1-2], link_speed: 1G, link_role: underlay }
+    - { id: link-cm-core2-agg2, endpoints: [cm-core2-ge1-2, cm-agg2-ge1-2], link_speed: 1G, link_role: underlay }
+
+    # ── Campus Agg <-> Dist ────────────────────────────────────────────
+    - { id: link-cm-agg1-dist1, endpoints: [cm-agg1-ge2-1, cm-dist1-ge0-1], link_speed: 1G, link_role: underlay }
+    - { id: link-cm-agg2-dist2, endpoints: [cm-agg2-ge2-1, cm-dist2-ge0-1], link_speed: 1G, link_role: underlay }
+
+    # ── Campus Dist -> Host (access) ───────────────────────────────────
+    - { id: link-cm-dist1-host1, endpoints: [cm-dist1-fa0-1, cm-host1-eth0], link_speed: 1G, link_role: access }
+    - { id: link-cm-dist2-host2, endpoints: [cm-dist2-fa0-1, cm-host2-eth0], link_speed: 1G, link_role: access }
+
+  lag:
+    # ── DC MLAG (Leaf1 + Leaf2) ────────────────────────────────────────
+    - id: lag-dc-leaf-peerlink
+      type: lacp
+      node: dc-leaf1
+      members: [dc-leaf1-swp49, dc-leaf1-swp50]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-dc-mlag-server1
+      type: mlag
+      nodes: [dc-leaf1, dc-leaf2]
+      members: [dc-leaf1-swp1, dc-leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-dc-leaf-peerlink
+      peer_link_interface: peerlink.4094
+      domain_id: 10
+      system_mac: "44:38:39:ff:00:0a"
+      client_lag: lag-dc-server1-bond0
+
+    - id: lag-dc-server1-bond0
+      type: lacp
+      node: dc-server1
+      members: [dc-server1-eth0, dc-server1-eth1]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-dc-mlag-server2
+      type: mlag
+      nodes: [dc-leaf1, dc-leaf2]
+      members: [dc-leaf1-swp2, dc-leaf2-swp2]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-dc-leaf-peerlink
+      peer_link_interface: peerlink.4094
+      domain_id: 10
+      system_mac: "44:38:39:ff:00:0a"
+      client_lag: lag-dc-server2-bond0
+
+    - id: lag-dc-server2-bond0
+      type: lacp
+      node: dc-server2
+      members: [dc-server2-eth0, dc-server2-eth1]
+      lacp: {mode: active, min_links: 1}
+
+    # ── Campus inter-core LACP (Core1 single-node bond) ────────────────
+    # NOTE: 物理的にはマルチシャーシ間ケーブルだが MLAG ではなく単に LACP
+    #       bundle として core1 から見た bond。対向 core2 にも同様の bond
+    #       が必要 (1 つの LAG オブジェクトで両端を書けない -> feedback).
+    - id: lag-cm-core1-interconnect
+      type: lacp
+      node: cm-core1
+      members: [cm-core1-te2-1, cm-core1-te2-2]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-cm-core2-interconnect
+      type: lacp
+      node: cm-core2
+      members: [cm-core2-te2-1, cm-core2-te2-2]
+      lacp: {mode: active, min_links: 1}
+
+layer2:
+  vlans:
+    # ── DC tenant VLAN ─────────────────────────────────────────────────
+    - id: vlan-100
+      vlan_id: 100
+      name: dc-tenant-a
+      trunk_ports:
+        - {node: dc-leaf1, interface: dc-leaf1-swp1}
+        - {node: dc-leaf2, interface: dc-leaf2-swp1}
+        - {node: dc-leaf1, interface: dc-leaf1-swp2}
+        - {node: dc-leaf2, interface: dc-leaf2-swp2}
+
+    # ── Campus VLAN (tag x3, Core-Agg トランク全通し, Dist-Host access) ─
+    # NOTE: トランクポートは Core/Agg 間/Agg-Dist 間で全通し。
+    #       各 VLAN ごとに trunk_ports を全リンクのポート分書き並べる必要
+    #       がある (= 3 VLAN x 多数ポート の繰り返し)。冗長で書きにくい。
+    - id: vlan-10
+      vlan_id: 10
+      name: cm-users
+      trunk_ports:
+        - {node: cm-core1, interface: cm-core1-ge1-1}
+        - {node: cm-core1, interface: cm-core1-ge1-2}
+        - {node: cm-core2, interface: cm-core2-ge1-1}
+        - {node: cm-core2, interface: cm-core2-ge1-2}
+        - {node: cm-agg1,  interface: cm-agg1-ge1-1}
+        - {node: cm-agg1,  interface: cm-agg1-ge1-2}
+        - {node: cm-agg1,  interface: cm-agg1-ge2-1}
+        - {node: cm-agg2,  interface: cm-agg2-ge1-1}
+        - {node: cm-agg2,  interface: cm-agg2-ge1-2}
+        - {node: cm-agg2,  interface: cm-agg2-ge2-1}
+        - {node: cm-dist1, interface: cm-dist1-ge0-1}
+        - {node: cm-dist2, interface: cm-dist2-ge0-1}
+      access_ports:
+        - {node: cm-host1, interface: cm-host1-eth0}
+
+    - id: vlan-20
+      vlan_id: 20
+      name: cm-voip
+      trunk_ports:
+        - {node: cm-core1, interface: cm-core1-ge1-1}
+        - {node: cm-core1, interface: cm-core1-ge1-2}
+        - {node: cm-core2, interface: cm-core2-ge1-1}
+        - {node: cm-core2, interface: cm-core2-ge1-2}
+        - {node: cm-agg1,  interface: cm-agg1-ge1-1}
+        - {node: cm-agg1,  interface: cm-agg1-ge1-2}
+        - {node: cm-agg1,  interface: cm-agg1-ge2-1}
+        - {node: cm-agg2,  interface: cm-agg2-ge1-1}
+        - {node: cm-agg2,  interface: cm-agg2-ge1-2}
+        - {node: cm-agg2,  interface: cm-agg2-ge2-1}
+        - {node: cm-dist1, interface: cm-dist1-ge0-1}
+        - {node: cm-dist2, interface: cm-dist2-ge0-1}
+      access_ports:
+        - {node: cm-host2, interface: cm-host2-eth0}
+
+    - id: vlan-30
+      vlan_id: 30
+      name: cm-mgmt
+      trunk_ports:
+        - {node: cm-core1, interface: cm-core1-ge1-1}
+        - {node: cm-core1, interface: cm-core1-ge1-2}
+        - {node: cm-core2, interface: cm-core2-ge1-1}
+        - {node: cm-core2, interface: cm-core2-ge1-2}
+        - {node: cm-agg1,  interface: cm-agg1-ge1-1}
+        - {node: cm-agg1,  interface: cm-agg1-ge1-2}
+        - {node: cm-agg1,  interface: cm-agg1-ge2-1}
+        - {node: cm-agg2,  interface: cm-agg2-ge1-1}
+        - {node: cm-agg2,  interface: cm-agg2-ge1-2}
+        - {node: cm-agg2,  interface: cm-agg2-ge2-1}
+        - {node: cm-dist1, interface: cm-dist1-ge0-1}
+        - {node: cm-dist2, interface: cm-dist2-ge0-1}
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vtep_source: dc-leaf1-lo
+      members: [dc-leaf1, dc-leaf2]
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets:
+        import: ["65001:100"]
+        export: ["65001:100"]
+
+  interfaces:
+    # ── DC Loopbacks ───────────────────────────────────────────────────
+    - { id: dc-spine1-lo,  node: dc-spine1,  interface: lo, ip: 10.0.0.1/32 }
+    - { id: dc-spine2-lo,  node: dc-spine2,  interface: lo, ip: 10.0.0.2/32 }
+    - { id: dc-leaf1-lo,   node: dc-leaf1,   interface: lo, ip: 10.0.0.11/32 }
+    - { id: dc-leaf2-lo,   node: dc-leaf2,   interface: lo, ip: 10.0.0.12/32 }
+    - { id: dc-border1-lo, node: dc-border1, interface: lo, ip: 10.0.0.21/32 }
+    - { id: dc-border2-lo, node: dc-border2, interface: lo, ip: 10.0.0.22/32 }
+
+    # ── Campus Loopbacks ──────────────────────────────────────────────
+    - { id: cm-core1-lo, node: cm-core1, interface: lo, ip: 10.0.1.1/32 }
+    - { id: cm-core2-lo, node: cm-core2, interface: lo, ip: 10.0.1.2/32 }
+
+    # ── DC SVI (anycast GW for VLAN100) ────────────────────────────────
+    - id: dc-leaf1-vlan100
+      node: dc-leaf1
+      interface: vlan-100
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+    - id: dc-leaf2-vlan100
+      node: dc-leaf2
+      interface: vlan-100
+      ip: 192.168.100.2/24
+      vrf: vrf-tenant-a
+
+    # ── Campus SVI on Core (VLAN10/20/30 を Core で終端、VRRP) ─────────
+    - id: cm-core1-vlan10
+      node: cm-core1
+      interface: vlan-10
+      ip: 172.16.10.2/24
+      vrf: vrf-default
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
+    - id: cm-core2-vlan10
+      node: cm-core2
+      interface: vlan-10
+      ip: 172.16.10.3/24
+      vrf: vrf-default
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 172.16.10.1, priority: 90}
+    - id: cm-core1-vlan20
+      node: cm-core1
+      interface: vlan-20
+      ip: 172.16.20.2/24
+      vrf: vrf-default
+      fhrp:
+        - {protocol: vrrp, group_id: 20, vip: 172.16.20.1, priority: 110}
+    - id: cm-core2-vlan20
+      node: cm-core2
+      interface: vlan-20
+      ip: 172.16.20.3/24
+      vrf: vrf-default
+      fhrp:
+        - {protocol: vrrp, group_id: 20, vip: 172.16.20.1, priority: 90}
+    - id: cm-core1-vlan30
+      node: cm-core1
+      interface: vlan-30
+      ip: 172.16.30.2/24
+      vrf: vrf-default
+      fhrp:
+        - {protocol: vrrp, group_id: 30, vip: 172.16.30.1, priority: 110}
+    - id: cm-core2-vlan30
+      node: cm-core2
+      interface: vlan-30
+      ip: 172.16.30.3/24
+      vrf: vrf-default
+      fhrp:
+        - {protocol: vrrp, group_id: 30, vip: 172.16.30.1, priority: 90}
+
+    # ── WAN P2P L3 (DC Border <-> Campus Core) ─────────────────────────
+    - id: dc-border1-swp1-l3
+      node: dc-border1
+      interface: swp1
+      ip: 10.255.0.1/31
+      vrf: vrf-default
+      attaches_to: {interface: dc-border1-swp1}
+    - id: cm-core1-te1-1-l3
+      node: cm-core1
+      interface: Te1/1
+      ip: 10.255.0.0/31
+      vrf: vrf-default
+      attaches_to: {interface: cm-core1-te1-1}
+    - id: dc-border2-swp1-l3
+      node: dc-border2
+      interface: swp1
+      ip: 10.255.0.3/31
+      vrf: vrf-default
+      attaches_to: {interface: dc-border2-swp1}
+    - id: cm-core2-te1-1-l3
+      node: cm-core2
+      interface: Te1/1
+      ip: 10.255.0.2/31
+      vrf: vrf-default
+      attaches_to: {interface: cm-core2-te1-1}
+
+  routing_adjacencies:
+    # ── DC underlay BGP (Spine <-> Leaf/Border) ─────────────────────────
+    - { id: bgp-peer-dc-spine1-leaf1,   type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf1,   update_source: dc-leaf1-lo},   attaches_to: {link: link-dc-spine1-leaf1} }
+    - { id: bgp-peer-dc-spine1-leaf2,   type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf2,   update_source: dc-leaf2-lo},   attaches_to: {link: link-dc-spine1-leaf2} }
+    - { id: bgp-peer-dc-spine1-border1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border1, update_source: dc-border1-lo}, attaches_to: {link: link-dc-spine1-border1} }
+    - { id: bgp-peer-dc-spine1-border2, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border2, update_source: dc-border2-lo}, attaches_to: {link: link-dc-spine1-border2} }
+    - { id: bgp-peer-dc-spine2-leaf1,   type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf1,   update_source: dc-leaf1-lo},   attaches_to: {link: link-dc-spine2-leaf1} }
+    - { id: bgp-peer-dc-spine2-leaf2,   type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf2,   update_source: dc-leaf2-lo},   attaches_to: {link: link-dc-spine2-leaf2} }
+    - { id: bgp-peer-dc-spine2-border1, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border1, update_source: dc-border1-lo}, attaches_to: {link: link-dc-spine2-border1} }
+    - { id: bgp-peer-dc-spine2-border2, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border2, update_source: dc-border2-lo}, attaches_to: {link: link-dc-spine2-border2} }
+
+    # ── WAN eBGP (DC Border <-> Campus Core) ────────────────────────────
+    - { id: bgp-peer-wan-border1-core1, type: bgp, from: {node: dc-border1, update_source: dc-border1-lo}, to: {node: cm-core1, update_source: cm-core1-lo}, attaches_to: {link: link-wan-border1-core1} }
+    - { id: bgp-peer-wan-border2-core2, type: bgp, from: {node: dc-border2, update_source: dc-border2-lo}, to: {node: cm-core2, update_source: cm-core2-lo}, attaches_to: {link: link-wan-border2-core2} }
+
+protocols:
+  bfd:
+    - id: bfd-global
+      min_tx: 300
+      min_rx: 300
+      multiplier: 3
+      nodes: [dc-spine1, dc-spine2, dc-leaf1, dc-leaf2, dc-border1, dc-border2, cm-core1, cm-core2]
+
+  bgp:
+    - id: bgp-dc-underlay
+      role: underlay
+      nodes:
+        - node: dc-spine1
+          local_as: 65000
+          neighbors:
+            - {node: dc-leaf1,   remote_as: 65001, type: ebgp, bfd: true}
+            - {node: dc-leaf2,   remote_as: 65002, type: ebgp, bfd: true}
+            - {node: dc-border1, remote_as: 65011, type: ebgp, bfd: true}
+            - {node: dc-border2, remote_as: 65012, type: ebgp, bfd: true}
+        - node: dc-spine2
+          local_as: 65000
+          neighbors:
+            - {node: dc-leaf1,   remote_as: 65001, type: ebgp, bfd: true}
+            - {node: dc-leaf2,   remote_as: 65002, type: ebgp, bfd: true}
+            - {node: dc-border1, remote_as: 65011, type: ebgp, bfd: true}
+            - {node: dc-border2, remote_as: 65012, type: ebgp, bfd: true}
+
+    - id: bgp-dc-evpn
+      role: overlay
+      nodes:
+        - node: dc-spine1
+          local_as: 65000
+          role: route_reflector
+          neighbors:
+            - {node: dc-leaf1,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+            - {node: dc-leaf2,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+            - {node: dc-border1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+            - {node: dc-border2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+        - node: dc-spine2
+          local_as: 65000
+          role: route_reflector
+          neighbors:
+            - {node: dc-leaf1,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+            - {node: dc-leaf2,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+            - {node: dc-border1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+            - {node: dc-border2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+
+    # ── WAN eBGP between sites ──────────────────────────────────────────
+    - id: bgp-wan
+      role: underlay
+      nodes:
+        - node: dc-border1
+          local_as: 65011
+          neighbors:
+            - {node: cm-core1, remote_as: 65100, type: ebgp, bfd: true, address_families: [ipv4_unicast]}
+        - node: dc-border2
+          local_as: 65012
+          neighbors:
+            - {node: cm-core2, remote_as: 65100, type: ebgp, bfd: true, address_families: [ipv4_unicast]}
