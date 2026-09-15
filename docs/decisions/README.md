@@ -65,7 +65,7 @@ Pass A のドラフトは Pass C 完了後も削除しない（変更履歴と�
 | [0006](0006-endpoints.md) | L1 リンク端点表現 (`endpoints`) | **Accepted** | C |
 | drafts/0007 | vNIC / vSwitch / bridges | Draft | A |
 | [drafts/0008](drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 (`parent` / `labels` / `location`) | Draft | C |
-| [drafts/0009](drafts/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 (`attaches_to` / `parent` / `labels`) | Draft | C 相当 |
+| [0009](0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 (`attaches_to` / `parent` / `labels`) | **Accepted** | C 相当 |
 
 **ADR-0009 の経緯**: 「箱への所属」の命名を 6 ラウンド × 5 エージェント並列で検討した。
 20 語以上が既存ネットワーク用語・プロジェクト内用語と衝突して収束せず、最終的に

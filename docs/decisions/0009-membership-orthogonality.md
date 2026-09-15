@@ -1,10 +1,16 @@
 # ADR-0009: メンバーシップ構成子の直交性 — `attaches_to` / `parent` / `labels`
 
-- **Status**: Draft
-- **Date**: 2026-09-15
+- **Status**: Accepted
+- **Date**: 2026-09-15 (Accepted: 2026-09-16)
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: C 相当 (6 ラウンドの 5 エージェント並列評価を経て確定)
 - **関連**: ADR-0001 (attaches_to), ADR-0002 (ID 命名), ADR-0003 (role open-form), ADR-0005 (表現スコープ・D4 判定), drafts/0008 (クラウドネットワーク表現)
+
+> **Accepted の範囲**: 3 構成子の意味論・命名・直交性は確定済み。実装は段階的で、
+> `attaches_to` は Phase 1 実装済み (ADR-0001)、`labels` も Phase 1 実装済み、
+> `parent` は Phase 3+ で drafts/0008 の受理と同時に実装する。
+> 決定そのものは確定しているため、実装段階に関わらず本 ADR は Accepted とする。
+
 
 ## Context
 

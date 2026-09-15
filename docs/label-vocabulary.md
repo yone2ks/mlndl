@@ -2,7 +2,7 @@
 
 > **ステータス: Informative (参考情報)**
 >
-> このドキュメントは [ADR-0009](decisions/drafts/0009-membership-orthogonality.md) D3 に基づく informative リファレンスです。
+> このドキュメントは [ADR-0009](decisions/0009-membership-orthogonality.md) D3 に基づく informative リファレンスです。
 > mlndl コアのバリデーターはこのドキュメントを参照せず、`labels` のキー域・値域チェックを一切行いません。
 > `role` (ADR-0003) と同じ**注釈側構成子**の扱いです。
 
@@ -23,7 +23,7 @@
     env: prod
 ```
 
-三者の役割分担は [ADR-0009](decisions/drafts/0009-membership-orthogonality.md) を参照してください。
+三者の役割分担は [ADR-0009](decisions/0009-membership-orthogonality.md) を参照してください。
 
 ---
 
@@ -65,7 +65,7 @@
   未実装のためです。severity 機構の導入時に `warning` として実装予定。
 - **値は自由文字列**。ADR-0002 の ID 規則に従う必要はありません (`ap-northeast-1a` のようにハイフンを含む値も可)。
 - **値は参照ではありません**。`labels: {pod: pod-tokyo}` の `pod-tokyo` は `layer1.nodes` の ID を
-  指してはいません。属性を持つ箱に所属させたい場合は `parent:` を使ってください ([ADR-0009](decisions/drafts/0009-membership-orthogonality.md) D2)。
+  指してはいません。属性を持つ箱に所属させたい場合は `parent:` を使ってください ([ADR-0009](decisions/0009-membership-orthogonality.md) D2)。
 - **値の型は `str` のみ** (Phase 1)。`labels: {vlan: 100}` は error です。
 
 ---
@@ -120,4 +120,4 @@ mlndl の ADR は動かしません。
 
 ---
 
-*参照: [ADR-0009](decisions/drafts/0009-membership-orthogonality.md) — D1・D2・D3 / [ADR-0003](decisions/0003-role-vocabulary.md) — 注釈側構成子の設計パターン*
+*参照: [ADR-0009](decisions/0009-membership-orthogonality.md) — D1・D2・D3 / [ADR-0003](decisions/0003-role-vocabulary.md) — 注釈側構成子の設計パターン*

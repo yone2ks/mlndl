@@ -6,7 +6,7 @@
   ADR-0006 (endpoints), **ADR-0009 (メンバーシップ構成子の直交性)**, 0007-draft (レイヤー中心モデル=案B)
 
 > **改訂履歴**: 初版は所属参照を `scope: <box-id>` としていたが、6 ラウンドの再検討の結果撤回した。
-> 詳細な却下理由と代替候補の全リストは [ADR-0009](0009-membership-orthogonality.md) を参照。
+> 詳細な却下理由と代替候補の全リストは [ADR-0009](../0009-membership-orthogonality.md) を参照。
 
 ## Context
 
@@ -42,7 +42,7 @@ VPC / VNet / pod / tenant は「要素をまとめる論理的な箱」として
 **箱そのものも普通のノード**: `role: vpc` / `role: pod` (種別は open-form の `role` が担う)。
 箱がノードであることにより、`cidr` / `extent` / `implicit_router` などの属性を持てる。
 
-所属の表現は 2 つの直交した構成子に分ける (詳細は [ADR-0009](0009-membership-orthogonality.md)):
+所属の表現は 2 つの直交した構成子に分ける (詳細は [ADR-0009](../0009-membership-orthogonality.md)):
 
 | 構成子 | 意味論 | 多重性 | 値 |
 |--------|--------|--------|-----|
@@ -151,7 +151,7 @@ Phase 1 で `parent` を入れない理由: L1 単層では用途が `attaches_t
 ### 命名
 
 箱の所属参照および多軸分類キーの命名候補は **20 語以上を検討**した。
-全候補と却下理由の一覧は [ADR-0009 の Alternatives Considered](0009-membership-orthogonality.md#alternatives-considered) に集約している。
+全候補と却下理由の一覧は [ADR-0009 の Alternatives Considered](../0009-membership-orthogonality.md#alternatives-considered) に集約している。
 
 主要な却下語のみ再掲:
 
