@@ -1,0 +1,70 @@
+# ADR-0009: labels（多軸分類）の代表例
+# - attaches_to (Realization) と labels (Classification) が同一ノードに共存する
+# - 軸は障害軸 (az / pod / rack) と管理軸 (tenant / env) が混在する
+# - 推奨語彙にないキー (cost-center / ticket) も valid（コアは値域チェックしない）
+ndl_version: "1.0"
+
+meta:
+  name: labels-multi-axis
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - id: esxi-01
+      name: ESXi Host 01
+      implementation: physical
+      role: hypervisor
+      labels:
+        az: ap-northeast-1a
+        rack: rack-a01
+        tenant: acme
+
+    - id: leaf1
+      name: Leaf-1
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+      attaches_to: esxi-01
+      labels:
+        az: ap-northeast-1a
+        pod: pod-tokyo
+        tenant: acme
+        env: prod
+        cost-center: eng-platform
+        ticket: PROJ-1234
+
+    - id: leaf2
+      name: Leaf-2
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+      attaches_to: esxi-01
+      labels:
+        az: ap-northeast-1c
+        pod: pod-tokyo
+        tenant: acme
+        env: prod
+
+    # labels 未指定でも valid
+    - id: spine1
+      name: Spine-1
+      implementation: vm
+      role: spine
+      device_type: cumulus_linux
+      attaches_to: esxi-01
+
+  interfaces:
+    - id: spine1-swp1
+      node: spine1
+      name: swp1
+
+    - id: leaf1-swp51
+      node: leaf1
+      name: swp51
+
+  links:
+    - id: link-spine1-leaf1
+      endpoints: [spine1-swp1, leaf1-swp51]
+      link_speed: 10G
+      mtu: 9216
+      link_role: underlay

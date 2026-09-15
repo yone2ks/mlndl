@@ -97,6 +97,34 @@ ndl-viz は既定スタイルを用意しており、慣用語として推奨し
 
 ---
 
+## informative 慣用語彙: グルーピングの箱 (Phase 3+)
+
+ADR-0008 / ADR-0009 でクラウド・オンプレの「箱」をノードとして表現する方針が確定した。
+箱の種別も `role` が担うため、以下を慣用語彙として推奨する。CANONICAL_ROLES には含めない
+(ADR-0003 C2 のオープン語彙方針を維持)。
+
+| 語彙 | 意味 | 備考 |
+|------|------|------|
+| `vpc` | クラウドの論理ネットワーク境界 | AWS VPC / Azure VNet / GCP VPC / OCI VCN の総称 |
+| `subnet` | VPC 配下のサブネット | ⚠️ クラウドの subnet は **L2 ブロードキャストドメインではない** (BUM 不在、L3 のみ)。`broadcast_domain` クエリは `location: cloud` の subnet を L2 ドメインと誤認しないこと |
+| `pod` | Clos ファブリックの物理増設単位 | 下記の注意を参照 |
+| `tenant` | テナント (管理・課金の単位) | 1 tenant ⊃ 複数 VPC。ただし AWS RAM の subnet sharing により 1 VPC ⊃ 複数 tenant も実在するため、階層は多対多になりうる |
+| `gateway` | 境界ゲートウェイ | 種別は `kind: internet-gateway` / `nat-gateway` / `transit-gateway` 等で細分 |
+
+> **⚠️ `role: pod` の意味制約 (strongly recommended)**
+>
+> `role: pod` は **Cisco PoD (Point of Delivery) 型の、オンプレ Clos ファブリックの物理増設単位**を指す。
+> ACI Multi-Pod / Facebook F4-F16 の pod / Juniper IP Fabric の pod と同じ意味である。
+>
+> - **Kubernetes Pod ではない**
+> - クラウド VPC / VNet / tenant を表現するのに使わない
+> - 配下 (`parent: pod-*`) は物理機器 (leaf / spine / server / rack) を想定する
+>
+> `labels: {pod: pod-tokyo}` として分類軸に使う場合も同じ意味制約が適用される
+> (`docs/label-vocabulary.md` 参照)。
+
+---
+
 ## 将来の拡張
 
 `role` は open-form (ADR-0003 D1) のため、上記リストにない語彙を使っても mlndl コアは error を出しません。

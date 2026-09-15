@@ -209,6 +209,50 @@ cumulus_linux:
 
 ---
 
+### 10. `labels` — 多軸分類（注釈側構成子）
+
+> **→ 詳細: [ADR-0009](docs/decisions/drafts/0009-membership-orthogonality.md) / 推奨軸名: [docs/label-vocabulary.md](docs/label-vocabulary.md)**
+
+ノードが**同時に複数の直交した軸に所属する**ことを表す key-value マップ。**Phase 1 実装済み**。
+
+```yaml
+- id: leaf1
+  role: leaf
+  attaches_to: esxi-01       # Realization  — どこで動くか（物理基盤）
+  parent: pod-tokyo          # Containment  — どこに属するか（論理階層・Phase 3+）
+  labels:                    # Classification — どんな属性か（多軸）
+    az: ap-northeast-1a
+    tenant: acme
+    env: prod
+```
+
+**三構成子の直交性**（ADR-0009 D1）:
+
+| 構成子 | 意味論 | 多重性 | 値 | 判定基準 |
+|--------|--------|--------|-----|---------|
+| `attaches_to` | Realization（RFC8345 supporting） | 単一 | ID 参照 | これを外すと**動作が止まる** |
+| `parent` | Containment（論理階層） | 単一、連鎖でネスト | ID 参照 | 外しても動くが**分類から外れる** |
+| `labels` | Classification（多軸分類） | 多重（map） | **自由文字列・非参照** | 参照ではない属性 |
+
+**`labels` の性質**:
+
+- キーもバリューも**自由文字列**。コアは値域・キー域チェックを一切しない（`role` と同じ注釈側）
+- 値の型は `str` のみ。`labels: {vlan: 100}` は error
+- 未指定（`None`）でも valid
+- **値は参照ではない** — `labels: {pod: pod-tokyo}` は `pod-tokyo` というノードを指していない。
+  属性を持つ箱に所属させたい場合は `parent:` を使う
+- キーは ADR-0002 D1 の ID 正規表現への準拠を推奨（表記揺れ防止）だが **Phase 1 では未検証**
+  （`validator.py` に severity 機構が未実装のため）
+
+**予約語**（ADR-0002 追記）: bare `label` / `tag` はフィールド名として使用禁止。
+MPLS は `mpls_label` / `label_stack`、802.1Q は `vlan_id`（実装済み）、Q-in-Q は `stag_vlan_id` / `ctag_vlan_id`。
+
+**未解決**: `labels` は障害軸（`az`/`pod`/`rack`）と管理軸（`tenant`/`env`）をフラットに混在させるため、
+Phase 3+ の `blast_radius` クエリが軸の性質を区別できない。当面は `docs/label-vocabulary.md` の分類を
+informative な指針とし、必要が明確になった時点で構造化構成子に昇格させる（加算的変更）。
+
+---
+
 ## NDL YAML フォーマット概要
 
 ```yaml
@@ -226,6 +270,9 @@ layer1:
       attaches_to: eve-server    # 文字列 = ノードID（糖衣構文）
       role: spine                # 自由文字列 (推奨値: docs/role-vocabulary.md 参照)
       device_type: cumulus_linux
+      labels:                    # 任意: 多軸分類（ADR-0009）。キー・値とも自由文字列
+        az: ap-northeast-1a
+        tenant: acme
       overrides:                 # 任意: eve-lab-builder のデフォルト値を上書き
         eve_ng:
           cpu: 4
@@ -425,6 +472,8 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0004](docs/decisions/0004-implementation-role-matrix.md) | `implementation × role` | C | コアは `container × hypervisor = error` のみ。他は上位ツールに委譲 |
 | [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 | C | 三側面 (物理構成図/論理構成図/物理-論理連携)。D4 判定フレームワーク |
 | [ADR-0006](docs/decisions/0006-endpoints.md) | L1 リンク端点表現 | C | `from`/`to` 廃止 → `endpoints: [a, b]`（無向リスト）。Cytoscape/RFC8345 出力のみ source/target にマップ |
+| [ADR-0009](docs/decisions/drafts/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 | C 相当 | `attaches_to`（Realization）/ `parent`（Containment）/ `labels`（Classification）の 3 軸に分離。`scope`・`pod`・`tags` 等 20 語以上を却下 |
+| [ADR-0008](docs/decisions/drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 | C (Draft) | 箱もノード（`role: vpc`）。`location` 軸。所属は `parent` + `labels` |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

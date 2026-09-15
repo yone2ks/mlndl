@@ -57,3 +57,17 @@ Pass A のドラフトは Pass C 完了後も削除しない（変更履歴と�
 | drafts/0005 | 同上 Pass A ドラフト | Draft (archived) | A |
 | drafts/0003v2 | `role` 語彙 再設計 (ADR-0003 Reopen) | Draft (archived) | A2 |
 | evaluations/round1.5 | ラウンド1.5 横断評価メモ | — | — |
+
+### ラウンド2: リンク端点とメンバーシップ (2026-09-13〜)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [0006](0006-endpoints.md) | L1 リンク端点表現 (`endpoints`) | **Accepted** | C |
+| drafts/0007 | vNIC / vSwitch / bridges | Draft | A |
+| [drafts/0008](drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 (`parent` / `labels` / `location`) | Draft | C |
+| [drafts/0009](drafts/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 (`attaches_to` / `parent` / `labels`) | Draft | C 相当 |
+
+**ADR-0009 の経緯**: 「箱への所属」の命名を 6 ラウンド × 5 エージェント並列で検討した。
+20 語以上が既存ネットワーク用語・プロジェクト内用語と衝突して収束せず、最終的に
+**難航の原因が語彙不足ではなく構造の誤り** (階層ネストと多軸分類を 1 構成子で表そうとしていた)
+と判明し、2 構成子への分離で決着した。却下語の全リストは ADR-0009 の Alternatives Considered を参照。

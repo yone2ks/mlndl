@@ -5,6 +5,7 @@
 - role: ADR-0003 C2 — 自由文字列、コアは値域チェックなし
 - implementation: ADR-0004 — vm | physical | container
 - lag: §6 設計決定 — type: lacp | mlag の Discriminated Union
+- labels: ADR-0009 — 多軸分類の注釈側構成子。コアは値域・キー域チェックなし
 - id 命名規則: ADR-0002 — ^[a-z][a-z0-9]*(-[a-z0-9]+)*$（推奨、強制なし）
 """
 
@@ -59,6 +60,9 @@ class L1Node(BaseModel):
     role: str | None = None  # 自由文字列。推奨語彙: docs/role-vocabulary.md
     device_type: str | None = None  # 抽象キー。eve-lab-builder で変換
     attaches_to: AttachesTo | None = None
+    # ADR-0009: 多軸分類。任意の key-value。コアは値域・キー域を検証しない。
+    # 推奨軸名: docs/label-vocabulary.md（informative）
+    labels: dict[str, str] | None = None
     overrides: dict[str, Any] | None = None  # 上位ツール向け任意上書き
 
     @model_validator(mode="after")

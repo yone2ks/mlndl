@@ -104,6 +104,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         if node.role:           data["role"] = node.role
         if node.implementation: data["implementation"] = node.implementation
         if node.device_type:    data["device_type"] = node.device_type
+        if node.labels:         data["labels"] = dict(node.labels)  # ADR-0009 多軸分類
 
         # L3 データを埋め込む（overlay 有効時に参照）
         if lo_ip.get(node.id):        data["lo_ip"]          = lo_ip[node.id]

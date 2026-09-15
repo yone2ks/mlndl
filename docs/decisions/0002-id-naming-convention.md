@@ -121,6 +121,9 @@ NetBox / neteye からのアダプターは次のルールを守る:
 | `isis-adj-` | IS-IS 隣接関係 | ADR-0005 D3-1 でスコープ内確定 (Phase 2 以降) |
 | `tunnel-` | L3 トンネルインターフェース (GRE/IPIP/IPSec-VTI) | ADR-0005 D3-1 `layer3.tunnel_interfaces` (Phase 2 以降) |
 | `subif-` | L2 サブインターフェース (`swp1.100` 等) | ADR-0005 D3-1 `layer2.subinterfaces` (Phase 2 以降) |
+| `vpc-` | クラウド論理ネットワークの箱 | ADR-0008 D2 / ADR-0009 D1 `parent` の参照先 (Phase 3 以降) |
+| `pod-` | オンプレ Clos 増設単位の箱 | 同上。Cisco PoD (Point of Delivery)。**Kubernetes Pod ではない** |
+| `tenant-` | テナントの箱 | 同上 |
 
 ### D8. バリデーション severity の共通定義 (全 ADR で参照)
 
@@ -204,6 +207,35 @@ ADR-0005「mlndl の表現スコープ定義」(Pass C, 2026-05-29) により、
 **SVI の ID 命名パターン**: ADR-0005 D2-2 ケース B で SVI エンティティの id は `<node>-<vlan-id>` パターン (例: `leaf1-vlan-100`) を使うことが暗黙示されている。これは D1 の正規表現に準拠しており D7 の推奨プレフィックスとは別の命名軸 (node 接頭辞 + entity-id 結合) を使う。Phase 2 着手時にスキーマ実装と合わせて D7 補足として明示する。
 
 **severity 定義の帰属**: 本 ADR D8 が `error / warning / info` の基準を定義しており、ADR-0001/0004 はここを参照する。ADR-0004 の Pass A との差分表に `severity 定義 | ADR-0004 内 | ADR-0005 に分離` という誤記があるが、正しくは「**ADR-0002 (本 ADR) D8 に分離**」である。
+
+## ADR-0009 との関係
+
+ADR-0009「メンバーシップ構成子の直交性」(2026-09-15) により、以下 2 点を本 ADR に追加する。
+
+### 予約語: bare `label` / `tag` の禁止
+
+`labels` を多軸分類の構成子として採用した (ADR-0009 D3) ことに伴い、将来のプロトコル拡張との
+衝突を構造的にゼロにするため、**bare `label` / `tag` を mlndl 全体でフィールド名として禁止**する。
+整数セマンティクスのプロトコルフィールドには必ず修飾語を付ける:
+
+| 領域 | 禁止 | 採用する名前 |
+|------|------|-------------|
+| MPLS (Phase 2+) | `label` | `mpls_label` / `label_stack` / `label_action` |
+| 802.1Q | `tag` | `vlan_id` (実装済み) |
+| Q-in-Q (将来) | `tag` | `stag_vlan_id` / `ctag_vlan_id` |
+
+mlndl は既に 802.1Q を `vlan_id` と命名済みであり、この方針は現状と整合する。
+
+### `labels` のキー命名 (推奨、未強制)
+
+`labels` のキーは本 ADR D1 の ID 正規表現 (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`) への準拠を**推奨**する。
+表記揺れ (`az` / `AZ` / `availability_zone` / `availabilityZone`) を避けるためである。
+
+ただし **Phase 1 では検証しない**。`validator.py` に本 ADR D8 の severity 機構 (`warning`) が
+未実装であり、`warning` を返す手段がないため。severity 機構の導入時に `warning` として実装する。
+
+なお `labels` の**値**は本 ADR の ID 規則に従う必要がない (`ap-northeast-1a` のようにハイフンを
+含む値も可)。値は参照ではなく自由文字列である (ADR-0009 D2)。
 
 ## References
 

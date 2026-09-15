@@ -310,3 +310,66 @@ class TestCytoscapeExporter:
         result = cytoscape.export(t)
         assert result == {"nodes": [], "edges": []}
 
+
+# ---------------------------------------------------------------------------
+# labels — 多軸分類 (ADR-0009)
+# ---------------------------------------------------------------------------
+
+class TestLabels:
+    def test_parse_labels_map(self):
+        t = parse_file(FIXTURES / "valid_labels_multi_axis.yaml")
+        leaf1 = next(n for n in t.layer1.nodes if n.id == "leaf1")
+        assert leaf1.labels["az"] == "ap-northeast-1a"
+        assert leaf1.labels["pod"] == "pod-tokyo"
+
+    def test_labels_optional(self):
+        """labels 未指定は valid（None）"""
+        t = parse_file(FIXTURES / "valid_labels_multi_axis.yaml")
+        spine1 = next(n for n in t.layer1.nodes if n.id == "spine1")
+        assert spine1.labels is None
+
+    def test_labels_arbitrary_keys_accepted(self):
+        """推奨語彙にないキーも valid — コアは値域チェックしない (ADR-0009 D3)"""
+        t = parse_file(FIXTURES / "valid_labels_multi_axis.yaml")
+        leaf1 = next(n for n in t.layer1.nodes if n.id == "leaf1")
+        assert leaf1.labels["ticket"] == "PROJ-1234"
+        assert leaf1.labels["cost-center"] == "eng-platform"
+
+    def test_labels_non_string_value_rejected(self):
+        """値は str のみ (Phase 1)"""
+        with pytest.raises(Exception):
+            parse(
+                'ndl_version: "1.0"\n'
+                "layer1:\n"
+                "  nodes:\n"
+                "    - id: leaf1\n"
+                "      labels:\n"
+                "        vlan: 100\n"
+            )
+
+    def test_labels_no_validation_errors(self):
+        t = parse_file(FIXTURES / "valid_labels_multi_axis.yaml")
+        assert validate(t) == []
+
+    def test_labels_not_emitted_when_absent(self):
+        """labels 未指定のノードは YAML 出力に labels キーを持たない"""
+        t = parse_file(FIXTURES / "valid_labels_multi_axis.yaml")
+        out = yaml_exporter.export(t)
+        assert "cost-center: eng-platform" in out
+        # spine1 ブロックに labels が現れないこと
+        spine_block = out.split("id: spine1")[1].split("- id:")[0]
+        assert "labels" not in spine_block
+
+    def test_cytoscape_exports_labels(self):
+        t = parse_file(FIXTURES / "valid_labels_multi_axis.yaml")
+        result = cytoscape.export(t)
+        by_id = {n["data"]["id"]: n["data"] for n in result["nodes"]}
+        assert by_id["leaf1"]["labels"]["pod"] == "pod-tokyo"
+        # 未指定ノードには labels キー自体を出さない
+        assert "labels" not in by_id["spine1"]
+
+    def test_labels_roundtrip(self):
+        t = parse_file(FIXTURES / "valid_labels_multi_axis.yaml")
+        t2 = parse(yaml_exporter.export(t))
+        leaf1 = next(n for n in t2.layer1.nodes if n.id == "leaf1")
+        assert leaf1.labels["env"] == "prod"
