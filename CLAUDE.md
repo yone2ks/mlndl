@@ -2,6 +2,22 @@
 
 **詳細設計**: 初期の設計プラン (リポジトリ外。現在は ADR が正) を参照（全体アーキテクチャ・NDL YAML フォーマット・実装フェーズ）
 
+## エージェント運用ルール
+
+**設計判断・仕様議論・ADR 作成・NDL YAML の設計に関する質問には、必ず以下の 5 エージェントを並列起動してから統合回答を作ること。**
+
+| エージェント | 役割 |
+|---|---|
+| `mlndl-spec-architect` | 仕様統合・ADR 判断 |
+| `mlndl-linguist` | 命名・意味論評価 |
+| `mlndl-dsl-designer` | DSL 構造・直交性 |
+| `network-tech-reviewer` | ネットワーク技術的妥当性 |
+| `mlndl-example-author` | YAML 試し書きによる実証 |
+
+対象外（単独で回答してよい）: コーディング・ファイル操作・単純な質問・動作確認。
+
+---
+
 ## このパッケージの位置づけ
 
 MLNDL 原案 (NAIST, 2011) で提案した**マルチレイヤ NDL（MLNDL）** の現代的再実装。
@@ -221,8 +237,7 @@ layer1:
 
   links:
     - id: link-spine1-leaf1
-      from: spine1-swp1
-      to: leaf1-swp51
+      endpoints: [spine1-swp1, leaf1-swp51]   # 順序非依存（ADR-0006: 物理リンクは無向）
       link_speed: 10G
       mtu: 9216                  # VxLAN 使用時は 1550 以上必須（推奨 9216）
       link_role: underlay        # underlay/access/peer-link/management/uplink
@@ -286,12 +301,14 @@ layer3:
     - id: leaf1-vlan-100
       node: leaf1
       interface: vlan-100
-      ip: 192.168.100.1/24
+      ip: 192.168.100.1/24      # anycast 構成では全 leaf で同一 IP
       vrf: vrf-tenant-a
-      gateway_redundancy:
-        protocol: anycast_gateway   # MLAG+EVPN では VRRP より anycast 推奨
-        vip: 192.168.100.254
-        anycast_mac: "00:00:5E:00:01:64"
+      # VRRP/HSRP が必要な場合のみ fhrp を追加:
+      # fhrp:
+      #   - protocol: vrrp
+      #     group_id: 100
+      #     vip: 192.168.100.254
+      #     priority: 110
 
   routing_adjacencies:
     - id: bgp-peer-spine1-leaf1  # ADR-0002: bgp-peer-* 形式（bgp-adj-* は廃止）
@@ -344,7 +361,7 @@ mlndl/
 │       ├── schema/
 │       │   ├── layer1.py       # L1Node, L1Interface, L1Link, LacpLag, MlagLag
 │       │   ├── layer2.py       # VLAN, VxLAN (l2vni/l3vni)
-│       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, RoutingAdjacency
+│       │   ├── layer3.py       # VRF, L3Interface, FhrpInstance, RoutingAdjacency
 │       │   ├── protocols.py    # BFD, OSPF, BGP
 │       │   └── topology.py     # MLNDLTopology（ルートモデル）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
@@ -407,6 +424,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0003](docs/decisions/0003-role-vocabulary.md) | `role` 語彙 | **C2** | `role` は注釈側構成子。open-form (自由文字列)。推奨 9 語彙は `docs/role-vocabulary.md`。`hypervisor` は normative token |
 | [ADR-0004](docs/decisions/0004-implementation-role-matrix.md) | `implementation × role` | C | コアは `container × hypervisor = error` のみ。他は上位ツールに委譲 |
 | [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 | C | 三側面 (物理構成図/論理構成図/物理-論理連携)。D4 判定フレームワーク |
+| [ADR-0006](docs/decisions/0006-endpoints.md) | L1 リンク端点表現 | C | `from`/`to` 廃止 → `endpoints: [a, b]`（無向リスト）。Cytoscape/RFC8345 出力のみ source/target にマップ |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

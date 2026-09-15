@@ -72,8 +72,28 @@ NetBox から mlndl YAML に変換する際のアダプター参照表 (informat
 |------|------|---------|
 | `vswitch`, `dvswitch` | ソフトウェア機能であり L1 物理「箱」ではない | Phase 2 の `layer2.bridges` 等で設計予定 |
 | `eor` (End of Row) | 物理配置概念であり論理 role 軸と直交 | `leaf` または `core` で表現 |
-| `access`, `distribution` | エンタープライズ 3-Tier 用語。`leaf`/`core` で代替可 | Phase 2 以降で再評価 |
 | `router` | 機能ではなく実装タイプ。`border`/`core` 等で役割を示すほうが明確 | — |
+
+---
+
+## informative 慣用語彙: エンタープライズ 3-Tier キャンパス
+
+DC Clos ファブリック (spine/leaf) とは別に、エンタープライズ キャンパスでは
+**Core / Distribution / Access** の 3 階層モデルが Cisco 由来で広く使われます。
+これらは CANONICAL_ROLES には含めません (ADR-0003 C2 のオープン語彙方針を維持) が、
+ndl-viz は既定スタイルを用意しており、慣用語として推奨します。
+
+| 語彙 | 階層 | 役割 | 備考 |
+|------|------|------|------|
+| `core` | 最上位 | バックボーン / L3 終端 | CANONICAL にも含まれる |
+| `distribution` | 中間 | 集約 / L2-L3 境界 / FHRP (HSRP/VRRP) 終端 | — |
+| `access` | エッジ | ホスト収容 | — |
+
+> **注意 (用語の揺れ)**: ベンダーにより中間層を `aggregation` と呼ぶ場合があります
+> (Arista/Juniper 等)。`aggregation` は「リンク集約 (LAG)」「経路集約 (route aggregation)」
+> とも衝突しうるため、3-Tier 文脈では **`distribution` を推奨**します。
+> また Cisco 3-Tier の `distribution` は L2/L3 境界の集約層であり、ホスト収容は `access`
+> です。中間層を `distribution`、ホスト収容層を `access` と命名してください。
 
 ---
 
