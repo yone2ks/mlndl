@@ -29,14 +29,16 @@ class VRF(BaseModel):
     route_targets: RouteTargets | None = None
 
 
-class GatewayRedundancy(BaseModel):
-    """デフォルトゲートウェイ冗長化設定"""
+class FhrpInstance(BaseModel):
+    """FHRP（VRRP / HSRP）インスタンス設定（per-node SVI スコープ）"""
 
     model_config = ConfigDict(extra="forbid")
 
-    protocol: Literal["anycast_gateway", "vrrp"]
+    protocol: Literal["vrrp", "hsrp"]
+    group_id: int
     vip: str
-    anycast_mac: str | None = None
+    priority: int | None = None
+    preempt: bool | None = None
 
 
 class L3Interface(BaseModel):
@@ -49,8 +51,9 @@ class L3Interface(BaseModel):
     interface: str                  # 論理 IF 名 (lo, vlan-100, swp51 等)
     ip: str | None = None           # IPv4/IPv6 アドレス（CIDR 表記）
     vrf: str | None = None          # layer3.vrfs[].id を参照
+    vlan: str | None = None         # SVI の場合、対応する layer2.vlans[].id への明示参照
     attaches_to: AttachesTo | None = None
-    gateway_redundancy: GatewayRedundancy | None = None
+    fhrp: list[FhrpInstance] = []
 
 
 class RoutingAdjEndpoint(BaseModel):

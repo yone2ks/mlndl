@@ -40,8 +40,7 @@ class TestParser:
         l1 = t.layer1
         assert len(l1.links) == 1
         link = l1.links[0]
-        assert link.from_ == "spine1-swp1"
-        assert link.to == "leaf1-swp51"
+        assert link.endpoints == ["spine1-swp1", "leaf1-swp51"]
         assert link.link_speed == "10G"
         assert link.mtu == 9216
 
@@ -208,7 +207,7 @@ class TestValidator:
         # ghost-node 参照エラー
         assert any("node" in p for p in paths)
         # undefined-interface 参照エラー
-        assert any("to" in p for p in paths)
+        assert any("endpoints" in p for p in paths)
 
     def test_validate_returns_validation_error_objects(self):
         t = parse_file(FIXTURES / "invalid_missing_node.yaml")
@@ -240,12 +239,13 @@ class TestYamlExporter:
         assert "spine1" in result
         assert "leaf1" in result
 
-    def test_export_from_alias(self):
-        """from_ フィールドが from としてシリアライズされること"""
+    def test_export_endpoints(self):
+        """endpoints フィールドが正しくシリアライズされること"""
         t = parse_file(FIXTURES / "valid_l1_simple.yaml")
         result = yaml_exporter.export(t)
-        assert "from:" in result
+        assert "endpoints:" in result
         assert "from_:" not in result
+        assert "from:" not in result
 
     def test_roundtrip(self):
         """parse → export → parse でデータが保持されること"""
@@ -288,8 +288,8 @@ class TestCytoscapeExporter:
         link_edges = [e for e in result["edges"] if e["data"].get("type") == "link"]
         assert len(link_edges) == 1
         edge = link_edges[0]
-        assert edge["data"]["source"] == "spine1-swp1"
-        assert edge["data"]["target"] == "leaf1-swp51"
+        assert edge["data"]["source"] == "spine1"
+        assert edge["data"]["target"] == "leaf1"
 
     def test_export_attaches_to_edge(self):
         t = parse_file(FIXTURES / "valid_l1_simple.yaml")
@@ -309,3 +309,4 @@ class TestCytoscapeExporter:
         t = parse(b'ndl_version: "1.0"\n')
         result = cytoscape.export(t)
         assert result == {"nodes": [], "edges": []}
+

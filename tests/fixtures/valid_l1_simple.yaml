@@ -36,8 +36,7 @@ layer1:
 
   links:
     - id: link-spine1-leaf1
-      from: spine1-swp1
-      to: leaf1-swp51
+      endpoints: [spine1-swp1, leaf1-swp51]
       link_speed: 10G
       mtu: 9216
       link_role: underlay

@@ -13,7 +13,7 @@ from .layer2 import PortRef, VLAN, L2VxLAN, L3VxLAN, VxLAN, L2Layer
 from .layer3 import (
     RouteTargets,
     VRF,
-    GatewayRedundancy,
+    FhrpInstance,
     L3Interface,
     RoutingAdjEndpoint,
     RoutingAdjacency,
@@ -29,7 +29,7 @@ __all__ = [
     # layer2
     "PortRef", "VLAN", "L2VxLAN", "L3VxLAN", "VxLAN", "L2Layer",
     # layer3
-    "RouteTargets", "VRF", "GatewayRedundancy", "L3Interface",
+    "RouteTargets", "VRF", "FhrpInstance", "L3Interface",
     "RoutingAdjEndpoint", "RoutingAdjacency", "L3Layer",
     # protocols
     "BFDConfig", "BGPNeighbor", "BGPNode", "BGPProcess", "Protocols",

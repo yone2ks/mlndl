@@ -60,17 +60,9 @@ class TestFullDCParse:
         assert "spine1-lo" in iface_ids
         assert "leaf1-lo" in iface_ids
 
-    def test_layer3_gateway_redundancy(self):
-        t = parse_file(FIXTURES / "valid_full_dc.yaml")
-        ifaces = {i.id: i for i in t.layer3.interfaces}
-        gw = ifaces["leaf1-vlan100"].gateway_redundancy
-        assert gw is not None
-        assert gw.protocol == "anycast_gateway"
-        assert gw.vip == "192.168.100.254"
-
     def test_layer3_routing_adjacencies(self):
         t = parse_file(FIXTURES / "valid_full_dc.yaml")
-        assert len(t.layer3.routing_adjacencies) == 2
+        assert len(t.layer3.routing_adjacencies) == 4  # spine1×2 + spine2×2
         adj = t.layer3.routing_adjacencies[0]
         assert adj.from_.node == "spine1"
         assert adj.to.node == "leaf1"
@@ -270,7 +262,7 @@ layer2:
         with pytest.raises(Exception):
             parse(yaml_str)
 
-    def test_gateway_redundancy_invalid_protocol(self):
+    def test_fhrp_invalid_protocol(self):
         yaml_str = b"""
 ndl_version: "1.0"
 layer3:
@@ -278,9 +270,11 @@ layer3:
     - id: iface1
       node: node1
       interface: vlan-100
-      gateway_redundancy:
-        protocol: unknown_protocol
-        vip: 10.0.0.1
+      fhrp:
+        - protocol: unknown_protocol
+          group_id: 1
+          vip: 10.0.0.1
 """
         with pytest.raises(Exception):
             parse(yaml_str)
+

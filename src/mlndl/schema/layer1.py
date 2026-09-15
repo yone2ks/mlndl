@@ -92,16 +92,24 @@ class L1Interface(BaseModel):
 # ---------------------------------------------------------------------------
 
 class L1Link(BaseModel):
-    """Layer 1 物理リンク（ケーブル）"""
+    """Layer 1 物理リンク（ケーブル）
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    ADR-0006: 物理リンクは無向。endpoints は順序非依存の 2 要素リスト。
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     id: str
-    from_: str = Field(alias="from")  # Python 予約語回避
-    to: str
+    endpoints: list[str] = Field(min_length=2, max_length=2)
     link_speed: str | None = None   # 例: "10G", "100G"
     mtu: int | None = None
     link_role: str | None = None    # underlay / access / peer-link / management / uplink
+
+    @model_validator(mode="after")
+    def endpoints_distinct(self) -> "L1Link":
+        if self.endpoints[0] == self.endpoints[1]:
+            raise ValueError("endpoints の両端に同一インターフェースを指定できません（self-loop）")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +150,8 @@ class MlagLag(BaseModel):
     peer_link: str                  # 同一 lag リスト内の LacpLag.id を参照
     peer_link_interface: str        # 例: "peerlink.4094"
     domain_id: int | None = None
+    system_mac: str | None = None   # 両ノード共通の MLAG system MAC（例: "44:38:39:ff:00:0a"）
+    client_lag: str | None = None   # 対向ノード側の LacpLag.id（単方向参照）
 
     @model_validator(mode="after")
     def exactly_two_nodes(self) -> "MlagLag":

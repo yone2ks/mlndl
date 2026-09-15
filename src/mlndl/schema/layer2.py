@@ -8,12 +8,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PortRef(BaseModel):
-    """node + interface の参照ペア（trunk_ports / access_ports 用）"""
+    """node + interface の参照ペア（trunk_ports / access_ports 用）
+
+    native: trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。
+    access_ports では常に untagged のため通常は未指定。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     node: str
     interface: str
+    native: bool = False
 
 
 class VLAN(BaseModel):

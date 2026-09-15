@@ -15,8 +15,7 @@ layer1:
       name: swp1
   links:
     - id: link-underlay
-      from: leaf1-swp1
-      to: leaf2-swp1
+      endpoints: [leaf1-swp1, leaf2-swp1]
       mtu: 1500             # ← VxLAN 使用時は 1550 以上必須
       link_role: underlay
 

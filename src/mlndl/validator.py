@@ -115,7 +115,7 @@ def validate(topology: MLNDLTopology) -> list[ValidationError]:
         _validate_l3(
             topology.layer3,
             node_ids, interface_ids, link_ids,
-            l3vni_ids, vrf_ids, l3interface_ids,
+            l3vni_ids, vrf_ids, l3interface_ids, vlan_ids,
             errors,
         )
 
@@ -142,18 +142,14 @@ def _validate_l1(l1, node_ids, interface_ids, lag_ids, link_ids, errors):
                 f"未定義のノード '{iface.node}' を参照しています",
             ))
 
-    # links: from / to 参照
+    # links: endpoints 参照
     for i, link in enumerate(l1.links):
-        if link.from_ not in interface_ids:
-            errors.append(ValidationError(
-                f"layer1.links[{i}].from",
-                f"未定義のインターフェース '{link.from_}' を参照しています",
-            ))
-        if link.to not in interface_ids:
-            errors.append(ValidationError(
-                f"layer1.links[{i}].to",
-                f"未定義のインターフェース '{link.to}' を参照しています",
-            ))
+        for j, ep in enumerate(link.endpoints):
+            if ep not in interface_ids:
+                errors.append(ValidationError(
+                    f"layer1.links[{i}].endpoints[{j}]",
+                    f"未定義のインターフェース '{ep}' を参照しています",
+                ))
 
     # lag: members / node(s) / peer_link
     for i, lag in enumerate(l1.lag):
@@ -181,6 +177,28 @@ def _validate_l1(l1, node_ids, interface_ids, lag_ids, link_ids, errors):
                     f"layer1.lag[{i}].peer_link",
                     f"未定義の lag '{lag.peer_link}' を参照しています",
                 ))
+            # client_lag: 同一 lag リスト内の LacpLag を参照していること
+            if lag.client_lag is not None:
+                if lag.client_lag not in lag_ids:
+                    errors.append(ValidationError(
+                        f"layer1.lag[{i}].client_lag",
+                        f"未定義の lag '{lag.client_lag}' を参照しています",
+                    ))
+                else:
+                    client = next((x for x in l1.lag if x.id == lag.client_lag), None)
+                    if client is not None and not isinstance(client, LacpLag):
+                        errors.append(ValidationError(
+                            f"layer1.lag[{i}].client_lag",
+                            f"client_lag は LacpLag (type: lacp) を参照する必要があります",
+                        ))
+                    # members 数の対称性チェック
+                    if client is not None and isinstance(client, LacpLag):
+                        if len(client.members) != len(lag.nodes):
+                            errors.append(ValidationError(
+                                f"layer1.lag[{i}].client_lag",
+                                f"client_lag '{lag.client_lag}' の members 数 ({len(client.members)}) が"
+                                f" MLAG の nodes 数 ({len(lag.nodes)}) と一致しません",
+                            ))
 
     # attaches_to
     for i, node in enumerate(l1.nodes):
@@ -267,7 +285,7 @@ def _validate_l2(l2, node_ids, interface_ids, vlan_ids, l3vni_ids, vrf_ids, l3in
 # Layer 3
 # ---------------------------------------------------------------------------
 
-def _validate_l3(l3, node_ids, interface_ids, link_ids, l3vni_ids, vrf_ids, l3interface_ids, errors):
+def _validate_l3(l3, node_ids, interface_ids, link_ids, l3vni_ids, vrf_ids, l3interface_ids, vlan_ids, errors):
     # VRF
     for i, vrf in enumerate(l3.vrfs):
         if vrf.l3vni is not None and vrf.l3vni not in l3vni_ids:
@@ -306,6 +324,11 @@ def _validate_l3(l3, node_ids, interface_ids, link_ids, l3vni_ids, vrf_ids, l3in
             errors.append(ValidationError(
                 f"layer3.interfaces[{i}].vrf",
                 f"未定義の VRF '{iface.vrf}' を参照しています",
+            ))
+        if iface.vlan is not None and iface.vlan not in vlan_ids:
+            errors.append(ValidationError(
+                f"layer3.interfaces[{i}].vlan",
+                f"未定義の VLAN '{iface.vlan}' を参照しています（SVI）",
             ))
         if iface.attaches_to is not None:
             _check_attaches_to(
@@ -352,6 +375,21 @@ def _validate_protocols(protocols, node_ids, errors):
                     f"未定義のノード '{nid}' を参照しています",
                 ))
 
+    # 同一ノードが複数 BGP プロセスで異なる local_as を持つ矛盾を検出
+    # (1 台の機器は通常 1 つの BGP AS。VRF 分離/confederation は別途明示が必要)
+    node_local_as: dict[str, set[int]] = {}
+    for bgp in protocols.bgp:
+        for bn in bgp.nodes:
+            if bn.local_as is not None:
+                node_local_as.setdefault(bn.node, set()).add(bn.local_as)
+    for nid, as_set in node_local_as.items():
+        if len(as_set) > 1:
+            errors.append(ValidationError(
+                f"protocols.bgp (node={nid})",
+                f"ノード '{nid}' が複数の異なる local_as {sorted(as_set)} を持っています"
+                f"（VRF 分離/confederation の意図なら設計を明示してください）",
+            ))
+
     # BGP
     for i, bgp in enumerate(protocols.bgp):
         for j, bn in enumerate(bgp.nodes):
@@ -386,19 +424,38 @@ def _validate_protocols(protocols, node_ids, errors):
 # ---------------------------------------------------------------------------
 
 def _validate_mtu(topology: MLNDLTopology, errors: list[ValidationError]) -> None:
-    """VxLAN 使用時に underlay リンクの MTU が 1550 以上であることを確認"""
+    """VxLAN underlay の MTU >= 1550 を確認（VxLAN ドメイン内のリンクのみ対象）
+
+    旧実装はトポロジー全体に VxLAN が 1 つでもあれば全 underlay リンクを検査し、
+    マルチサイト構成で VxLAN を使わないサイトの underlay まで誤検出していた。
+    本実装は VxLAN に参加するノード（VTEP メンバー + vtep_source 保有ノード）
+    集合を求め、両端がその集合に属する underlay リンクのみ検査する。
+    """
     if topology.layer2 is None or topology.layer1 is None:
         return
 
-    has_vxlan = any(True for _ in topology.layer2.vxlan)
-    if not has_vxlan:
+    # VxLAN ドメインに参加するノード集合
+    vtep_nodes: set[str] = set()
+    l3if_node = {i.id: i.node for i in topology.layer3.interfaces} if topology.layer3 else {}
+    for vx in topology.layer2.vxlan:
+        if isinstance(vx, L2VxLAN):
+            vtep_nodes.update(vx.members)
+            if vx.vtep_source in l3if_node:
+                vtep_nodes.add(l3if_node[vx.vtep_source])
+    if not vtep_nodes:
         return
 
+    iface_node = {i.id: i.node for i in topology.layer1.interfaces}
     for i, link in enumerate(topology.layer1.links):
-        if link.link_role == "underlay" and link.mtu is not None and link.mtu < 1550:
+        if link.link_role != "underlay" or link.mtu is None or link.mtu >= 1550:
+            continue
+        # 両端ノードが VxLAN ドメインに属する underlay リンクのみ検査
+        sn = iface_node.get(link.endpoints[0])
+        tn = iface_node.get(link.endpoints[1])
+        if sn in vtep_nodes and tn in vtep_nodes:
             errors.append(ValidationError(
                 f"layer1.links[{i}].mtu",
-                f"VxLAN 使用時は underlay MTU >= 1550 が必要です（現在: {link.mtu}）",
+                f"VxLAN underlay は MTU >= 1550 が必要です（現在: {link.mtu}）",
             ))
 
 

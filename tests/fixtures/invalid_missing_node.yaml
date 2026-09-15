@@ -19,5 +19,4 @@ layer1:
 
   links:
     - id: link-test
-      from: spine1-swp1
-      to: undefined-interface  # 未定義インターフェースへの参照
+      endpoints: [spine1-swp1, undefined-interface]  # 未定義インターフェースへの参照
