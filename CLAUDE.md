@@ -241,8 +241,8 @@ cumulus_linux:
 - 未指定（`None`）でも valid
 - **値は参照ではない** — `labels: {pod: pod-tokyo}` は `pod-tokyo` というノードを指していない。
   属性を持つ箱に所属させたい場合は `parent:` を使う
-- キーは ADR-0002 D1 の ID 正規表現への準拠を推奨（表記揺れ防止）だが **Phase 1 では未検証**
-  （`validator.py` に severity 機構が未実装のため）
+- キーは ADR-0002 D1 の ID 正規表現への準拠を推奨（表記揺れ防止）。違反は **warning**
+  （`validate_all()` / CLI で表示。`validate()` の戻り値には含まれない）
 
 **予約語**（ADR-0002 追記）: bare `label` / `tag` はフィールド名として使用禁止。
 MPLS は `mpls_label` / `label_stack`、802.1Q は `vlan_id`（実装済み）、Q-in-Q は `stag_vlan_id` / `ctag_vlan_id`。
@@ -429,18 +429,24 @@ mlndl/
 
 ## バリデーション項目（validator.py）
 
-| カテゴリ | チェック内容 |
-|---------|------------|
-| 参照整合性 | 全レイヤーで未定義 node/interface への参照がないか |
-| AS 番号 | eBGP ペアで同一 AS / iBGP ペアで異なる AS の矛盾 |
-| VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか |
-| VRF ↔ L3VNI | l3vni フィールドが vxlan に定義済みか |
-| VTEP source | vtep_source.interface_id が layer3.interfaces に存在するか |
-| MTU 整合性 | VxLAN 使用時に underlay MTU が 1550 以上か |
-| LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか |
-| ルーター ID | bgp/ospf の router_id が layer3.interfaces に定義済みか |
-| Route Target | `ASN:NN` または `IP:NN` フォーマットか |
-| VLAN ID | 同一ノードで VLAN ID の重複がないか |
+Severity は ADR-0002 D8 に従う。`validate()` は **error のみ**を返す（後方互換）。
+warning / info も含めて受け取るには `validate_all(topology, strict=False)` → `ValidationResult(errors, warnings, notes)`。
+`strict=True`（CLI は `python -m mlndl validate --strict`）で warning を error に昇格する。
+
+| カテゴリ | チェック内容 | Severity |
+|---------|------------|---------|
+| 参照整合性 | 全レイヤーで未定義 node/interface への参照がないか | error |
+| AS 番号 | eBGP ペアで同一 AS / iBGP ペアで異なる AS の矛盾 | error |
+| VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
+| VRF ↔ L3VNI | l3vni フィールドが vxlan に定義済みか | error |
+| VTEP source | vtep_source.interface_id が layer3.interfaces に存在するか | error |
+| MTU 整合性 | VxLAN 使用時に underlay MTU が 1550 以上か | error |
+| LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
+| Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
+| VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容） | error |
+| 推奨プレフィックス | `link-` / `vlan-` / `vni-` / `vrf-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7）。**LAG は照合しない**（D7 の `bond-` と実態の `lag-` が不一致のため） | warning |
+| labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
+| ルーター ID | bgp/ospf の router_id が layer3.interfaces に定義済みか | **未実装** — スキーマに `router_id` フィールドがない（BGPNode にもなく、OSPF はスキーマ自体が未実装） |
 
 ---
 

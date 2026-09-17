@@ -127,8 +127,8 @@ labels: dict[str, str] | None = None
 
 **キーの構文**: ADR-0002 D1 の ID 正規表現 (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`) への準拠を
 **推奨**する (表記揺れ `az` / `AZ` / `availability_zone` を避けるため) が、
-**Phase 1 では検証しない**。`validator.py` に severity 機構 (ADR-0002 D8 の `warning`) が
-未実装のため。severity 機構の導入時に `warning` として実装する。
+~~Phase 1 では検証しない~~ → **2026-09-17 実装済み**: ADR-0002 D8 の severity 機構を導入し、
+キー構文違反を `warning` として報告する。値は検査しない (D2)。
 
 ### D4. map 形式を採用 (フラットリストは不可)
 
@@ -192,7 +192,7 @@ mlndl は既に 802.1Q を `tag` ではなく `vlan_id` と命名済みであり
 
 - スキーマ: `src/mlndl/schema/layer1.py` — `L1Node.labels: dict[str, str] | None` を追加 (Phase 1)
 - 定数: `src/mlndl/constants.py` — `FAULT_AXIS_LABEL_KEYS` / `MANAGEMENT_AXIS_LABEL_KEYS` (informative)
-- バリデーター: `src/mlndl/validator.py` — Phase 1 では検証を追加しない
+- バリデーター: `src/mlndl/validator.py` — labels キー構文の `warning`（2026-09-17 追加）
 - エクスポーター: `src/mlndl/exporter/cytoscape.py` — `data.labels` に転写
 - サンプル: `tests/fixtures/valid_labels_multi_axis.yaml` (新規)
 - 文書: `docs/label-vocabulary.md` (新規), `CLAUDE.md`, `drafts/0008`

@@ -4,13 +4,14 @@
   python -m mlndl export --format cytoscape topology.yaml > topology.json
   python -m mlndl export --format yaml topology.yaml
   python -m mlndl validate topology.yaml
+  python -m mlndl validate --strict topology.yaml   # warning も error として扱う
 """
 
 import argparse
 import sys
 
 from .parser import parse_file
-from .validator import validate
+from .validator import validate_all
 from .exporter import cytoscape, yaml as yaml_exporter
 
 
@@ -27,13 +28,17 @@ def cmd_export(args):
 
 def cmd_validate(args):
     topology = parse_file(args.file)
-    errors = validate(topology)
-    if errors:
-        for e in errors:
-            print(f"ERROR  {e}", file=sys.stderr)
+    result = validate_all(topology, strict=args.strict)
+    for e in result.errors:
+        print(f"ERROR    {e}", file=sys.stderr)
+    for w in result.warnings:
+        print(f"WARNING  {w}", file=sys.stderr)
+    for n in result.notes:
+        print(f"INFO     {n}", file=sys.stderr)
+    if not result.ok:
         sys.exit(1)
-    else:
-        print("OK — no validation errors")
+    suffix = f" ({len(result.warnings)} warnings)" if result.warnings else ""
+    print(f"OK — no validation errors{suffix}")
 
 
 def main():
@@ -46,6 +51,8 @@ def main():
 
     p_validate = sub.add_parser('validate', help='バリデーション実行')
     p_validate.add_argument('file', help='YAML ファイルパス')
+    p_validate.add_argument('--strict', action='store_true',
+                            help='warning を error に昇格する (ADR-0002 D8)')
 
     args = parser.parse_args()
     if args.command == 'export':

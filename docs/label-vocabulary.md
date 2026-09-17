@@ -61,8 +61,8 @@
 
 - **キーの文字セット**: ADR-0002 D1 の ID 正規表現 (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`) に準拠することを**推奨**します。
   表記揺れ (`az` / `AZ` / `availability_zone` / `availabilityZone`) を避けるためです。
-  ただし**現時点でバリデーターは検証しません** — `validator.py` に severity 機構 (ADR-0002 D8 の `warning`) が
-  未実装のためです。severity 機構の導入時に `warning` として実装予定。
+  違反は **`warning`** になります（`validate_all()` と `python -m mlndl validate` で表示。
+  error ではないので `validate()` の戻り値には含まれず、トポロジーは valid のまま。`--strict` で error に昇格）。
 - **値は自由文字列**。ADR-0002 の ID 規則に従う必要はありません (`ap-northeast-1a` のようにハイフンを含む値も可)。
 - **値は参照ではありません**。`labels: {pod: pod-tokyo}` の `pod-tokyo` は `layer1.nodes` の ID を
   指してはいません。属性を持つ箱に所属させたい場合は `parent:` を使ってください ([ADR-0009](decisions/0009-membership-orthogonality.md) D2)。

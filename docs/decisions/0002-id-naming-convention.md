@@ -117,7 +117,7 @@ NetBox / neteye からのアダプターは次のルールを守る:
 | `ospf-adj-` | OSPF 隣接関係 | OSPF の "adjacency" は業界標準語彙 |
 | `bfd-` | BFD セッション | |
 | `mlag-` | MLAG ドメイン | Pass A から継続 |
-| `bond-` | ポートチャネル (LAG) | CLAUDE.md 例 `leaf1-bond0` と整合。Cumulus Linux 慣習に準拠。`pc-` より業界前例が明確 |
+| `bond-` | ポートチャネル (LAG) | CLAUDE.md 例 `leaf1-bond0` と整合。Cumulus Linux 慣習に準拠。`pc-` より業界前例が明確 ⚠️ **未決**: 現行 CLAUDE.md と全 fixture は `lag-` を使っており本表と食い違う。バリデーターは決着まで LAG を照合しない |
 | `isis-adj-` | IS-IS 隣接関係 | ADR-0005 D3-1 でスコープ内確定 (Phase 2 以降) |
 | `tunnel-` | L3 トンネルインターフェース (GRE/IPIP/IPSec-VTI) | ADR-0005 D3-1 `layer3.tunnel_interfaces` (Phase 2 以降) |
 | `subif-` | L2 サブインターフェース (`swp1.100` 等) | ADR-0005 D3-1 `layer2.subinterfaces` (Phase 2 以降) |
@@ -138,6 +138,11 @@ NetBox / neteye からのアダプターは次のルールを守る:
 **`warning` スペルの確定**: `warn` ではなく `warning` (フルスペル) を採用する。ESLint 等の linter 慣用と一致し、Python logging の `WARNING` とも親族関係にある。
 
 `strict` モード (Phase 2 以降で導入予定): `warning` を `error` に昇格させる。Phase 1 では実装しない (warning が出るルールが `attaches_to` 周辺にほぼ限られ、strict の有用性が低いため)。
+
+> **実装状況 (2026-09-17)**: severity 機構と `strict` モードを実装した。
+> 本 D8 は「error は例外を送出」としているが、既存 API との互換のため例外は送出せず、次の形にした:
+> `validate(topology)` → error のみの list（従来どおり）/ `validate_all(topology, strict=False)` →
+> `ValidationResult(errors, warnings, notes)`。CLI は `python -m mlndl validate [--strict]`。
 
 ## Consequences
 
@@ -231,8 +236,8 @@ mlndl は既に 802.1Q を `vlan_id` と命名済みであり、この方針は�
 `labels` のキーは本 ADR D1 の ID 正規表現 (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`) への準拠を**推奨**する。
 表記揺れ (`az` / `AZ` / `availability_zone` / `availabilityZone`) を避けるためである。
 
-ただし **Phase 1 では検証しない**。`validator.py` に本 ADR D8 の severity 機構 (`warning`) が
-未実装であり、`warning` を返す手段がないため。severity 機構の導入時に `warning` として実装する。
+~~Phase 1 では検証しない~~ → **2026-09-17 実装済み**: 本 ADR D8 の severity 機構の導入に合わせ、
+キー構文違反を `warning` として報告する。
 
 なお `labels` の**値**は本 ADR の ID 規則に従う必要がない (`ap-northeast-1a` のようにハイフンを
 含む値も可)。値は参照ではなく自由文字列である (ADR-0009 D2)。

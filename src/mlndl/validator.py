@@ -38,12 +38,30 @@
 
   MTU 整合性:
     - VxLAN (l2vni/l3vni) が存在する場合、underlay リンクの MTU >= 1550
+
+  VLAN ID:
+    - 同一ノード上で、別の VLAN エントリが同じ vlan_id を使っていないか
+
+  規約 (severity = warning / ADR-0002 D7・ADR-0009 D3):
+    - 推奨プレフィックス: link- / vlan- / vni- / vrf- / bfd- /
+      bgp-peer- / ospf-adj- / isis-adj-
+    - labels のキーが ADR-0002 D1 の ID 正規表現に従っているか
+
+Severity (ADR-0002 D8):
+  error   仕様違反。トポロジーは無効
+  warning 仕様上は合法だが規約違反。validate() の戻り値には含めない
+  info    注意喚起のみ
+
+  validate(topology)              → error のみの list（後方互換）
+  validate_all(topology, strict=) → ValidationResult(errors / warnings / notes)
+                                    strict=True で warning を error に昇格
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from .schema.layer1 import AttachesToObj, LacpLag, MlagLag
 from .schema.layer2 import L2VxLAN, L3VxLAN
@@ -51,23 +69,67 @@ from .schema.topology import MLNDLTopology
 
 _RT_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+:\d+$|^\d+:\d+$")
 
+# ADR-0002 D1
+_ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+
+# ADR-0002 D7 推奨プレフィックス。
+# LAG (D7 は bond-) は既存 fixture / CLAUDE.md がすべて lag- を使っており
+# 仕様と実態が食い違うため、決着するまで照合しない。
+_ADJ_PREFIX = {"bgp": "bgp-peer-", "ospf": "ospf-adj-", "isis": "isis-adj-"}
+
+Severity = Literal["error", "warning", "info"]
+
 
 @dataclass
 class ValidationError:
-    """バリデーションエラー 1 件"""
+    """バリデーション結果 1 件。severity は ADR-0002 D8 に従う"""
     path: str
     message: str
+    severity: Severity = "error"
 
     def __str__(self) -> str:
         return f"{self.path}: {self.message}"
+
+
+@dataclass
+class ValidationResult:
+    """validate_all() の戻り値"""
+    errors: list[ValidationError] = field(default_factory=list)
+    warnings: list[ValidationError] = field(default_factory=list)
+    notes: list[ValidationError] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        """error が 1 件もなければ True（warning / info は問わない）"""
+        return not self.errors
 
 
 def validate(topology: MLNDLTopology) -> list[ValidationError]:
     """トポロジーの参照整合性・整合性ルールを検証する。
 
     Returns:
-        ValidationError のリスト。空リストなら問題なし。
+        severity が error の ValidationError のリスト。空リストなら問題なし。
+        warning / info を含めた結果が必要な場合は validate_all() を使う。
     """
+    return validate_all(topology).errors
+
+
+def validate_all(topology: MLNDLTopology, *, strict: bool = False) -> ValidationResult:
+    """error / warning / info をすべて返す。
+
+    Args:
+        strict: True なら warning を error に昇格する (ADR-0002 D8 の strict モード)
+    """
+    issues = _collect(topology)
+    result = ValidationResult()
+    for issue in issues:
+        if issue.severity == "warning" and strict:
+            issue = ValidationError(issue.path, f"{issue.message} (strict)", "error")
+        {"error": result.errors, "warning": result.warnings, "info": result.notes}[issue.severity].append(issue)
+    return result
+
+
+def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     errors: list[ValidationError] = []
 
     # ── ID レジストリを収集 ──────────────────────────────────────────────
@@ -125,6 +187,9 @@ def validate(topology: MLNDLTopology) -> list[ValidationError]:
 
     # ── MTU 整合性 ───────────────────────────────────────────────────────
     _validate_mtu(topology, errors)
+
+    # ── 規約 (warning) ───────────────────────────────────────────────────
+    _check_conventions(topology, errors)
 
     return errors
 
@@ -244,6 +309,21 @@ def _validate_l2(l2, node_ids, interface_ids, vlan_ids, l3vni_ids, vrf_ids, l3in
                     f"layer2.vlans[{i}].access_ports[{j}].interface",
                     f"未定義のインターフェース '{pr.interface}' を参照しています",
                 ))
+
+    # VLAN ID — 同一ノード上で別の VLAN エントリが同じ vlan_id を使っていないか
+    # (別ノードで同じ番号を使うのはサイトローカルな再利用として許容する)
+    vlans_on_node: dict[tuple[str, int], list[str]] = {}
+    for vlan in l2.vlans:
+        for pr in [*vlan.trunk_ports, *vlan.access_ports]:
+            owners = vlans_on_node.setdefault((pr.node, vlan.vlan_id), [])
+            if vlan.id not in owners:
+                owners.append(vlan.id)
+    for (node, vid), owners in vlans_on_node.items():
+        if len(owners) > 1:
+            errors.append(ValidationError(
+                f"layer2.vlans[{', '.join(owners)}]",
+                f"ノード '{node}' 上で VLAN ID {vid} が重複しています ({' / '.join(owners)})",
+            ))
 
     # VxLAN — VNI 一意性チェック
     seen_vnis: dict[int, str] = {}
@@ -483,3 +563,48 @@ def _check_attaches_to(attaches_to, path, node_ids, interface_ids, link_ids, err
             errors.append(ValidationError(
                 f"{path}.link", f"未定義のリンク '{attaches_to.link}' を参照しています",
             ))
+
+
+# ---------------------------------------------------------------------------
+# 規約 (severity = warning)
+# ---------------------------------------------------------------------------
+
+def _warn_prefix(errors, path: str, entity_id: str, prefix: str, what: str) -> None:
+    if not entity_id.startswith(prefix):
+        errors.append(ValidationError(
+            path,
+            f"{what} の ID '{entity_id}' は推奨プレフィックス '{prefix}' で始まっていません (ADR-0002 D7)",
+            "warning",
+        ))
+
+
+def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -> None:
+    if topology.layer1:
+        for i, link in enumerate(topology.layer1.links):
+            _warn_prefix(errors, f"layer1.links[{i}].id", link.id, "link-", "L1 リンク")
+        for i, node in enumerate(topology.layer1.nodes):
+            for key in (node.labels or {}):
+                if not _ID_PATTERN.match(key):
+                    errors.append(ValidationError(
+                        f"layer1.nodes[{i}].labels.{key}",
+                        f"labels のキー '{key}' は ID 正規表現 ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ に"
+                        f"従っていません。表記揺れの原因になります (ADR-0009 D3)",
+                        "warning",
+                    ))
+
+    if topology.layer2:
+        for i, vlan in enumerate(topology.layer2.vlans):
+            _warn_prefix(errors, f"layer2.vlans[{i}].id", vlan.id, "vlan-", "VLAN")
+        for i, vx in enumerate(topology.layer2.vxlan):
+            _warn_prefix(errors, f"layer2.vxlan[{i}].id", vx.id, "vni-", "VNI")
+
+    if topology.layer3:
+        for i, vrf in enumerate(topology.layer3.vrfs):
+            _warn_prefix(errors, f"layer3.vrfs[{i}].id", vrf.id, "vrf-", "VRF")
+        for i, adj in enumerate(topology.layer3.routing_adjacencies):
+            _warn_prefix(errors, f"layer3.routing_adjacencies[{i}].id", adj.id,
+                         _ADJ_PREFIX[adj.type], f"{adj.type.upper()} 隣接")
+
+    if topology.protocols:
+        for i, bfd in enumerate(topology.protocols.bfd):
+            _warn_prefix(errors, f"protocols.bfd[{i}].id", bfd.id, "bfd-", "BFD")
