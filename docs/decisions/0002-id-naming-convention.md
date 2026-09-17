@@ -116,14 +116,19 @@ NetBox / neteye からのアダプターは次のルールを守る:
 | `bgp-peer-` | BGP 隣接関係 | D2 で `bgp-adj-` から変更 |
 | `ospf-adj-` | OSPF 隣接関係 | OSPF の "adjacency" は業界標準語彙 |
 | `bfd-` | BFD セッション | |
-| `mlag-` | MLAG ドメイン | Pass A から継続 |
-| `bond-` | ポートチャネル (LAG) | CLAUDE.md 例 `leaf1-bond0` と整合。Cumulus Linux 慣習に準拠。`pc-` より業界前例が明確 ⚠️ **未決**: 現行 CLAUDE.md と全 fixture は `lag-` を使っており本表と食い違う。バリデーターは決着まで LAG を照合しない |
+| `mlag-` | MLAG ドメイン（独立エンティティとして将来導入する場合） | Pass A から継続。`lag` リストの `type: mlag` エントリはこれではなく `lag-` を使う |
+| `lag-` | LAG（`layer1.lag` の全エントリ。`type: lacp` / `type: mlag` とも） | 2026-09-17 に `bond-` から変更。構成子名 `lag`（§6 設計決定）と一致し、CLAUDE.md・全 fixture の実態とも一致する |
 | `isis-adj-` | IS-IS 隣接関係 | ADR-0005 D3-1 でスコープ内確定 (Phase 2 以降) |
 | `tunnel-` | L3 トンネルインターフェース (GRE/IPIP/IPSec-VTI) | ADR-0005 D3-1 `layer3.tunnel_interfaces` (Phase 2 以降) |
 | `subif-` | L2 サブインターフェース (`swp1.100` 等) | ADR-0005 D3-1 `layer2.subinterfaces` (Phase 2 以降) |
 | `vpc-` | クラウド論理ネットワークの箱 | ADR-0008 D2 / ADR-0009 D1 `parent` の参照先 (Phase 3 以降) |
 | `pod-` | オンプレ Clos 増設単位の箱 | 同上。Cisco PoD (Point of Delivery)。**Kubernetes Pod ではない** |
 | `tenant-` | テナントの箱 | 同上 |
+
+> **改訂 (2026-09-17)**: LAG の推奨プレフィックスを `bond-` から `lag-` に変更した。
+> `port_channels` / `mlag` を `lag` に統合した設計決定（CLAUDE.md §6）の後、CLAUDE.md と全 fixture は
+> 一貫して `lag-` を使っており、本表だけが旧来の `bond-` のまま残っていた。`bond-` は Linux / Cumulus の
+> 実装語彙であり、mlndl の構成子名 `lag` に合わせる方が内部一貫性が高い。
 
 ### D8. バリデーション severity の共通定義 (全 ADR で参照)
 

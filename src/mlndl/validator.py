@@ -43,7 +43,7 @@
     - 同一ノード上で、別の VLAN エントリが同じ vlan_id を使っていないか
 
   規約 (severity = warning / ADR-0002 D7・ADR-0009 D3):
-    - 推奨プレフィックス: link- / vlan- / vni- / vrf- / bfd- /
+    - 推奨プレフィックス: link- / lag- / vlan- / vni- / vrf- / bfd- /
       bgp-peer- / ospf-adj- / isis-adj-
     - labels のキーが ADR-0002 D1 の ID 正規表現に従っているか
 
@@ -72,9 +72,7 @@ _RT_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+:\d+$|^\d+:\d+$")
 # ADR-0002 D1
 _ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
-# ADR-0002 D7 推奨プレフィックス。
-# LAG (D7 は bond-) は既存 fixture / CLAUDE.md がすべて lag- を使っており
-# 仕様と実態が食い違うため、決着するまで照合しない。
+# ADR-0002 D7 推奨プレフィックス（隣接関係は type ごとに異なる）
 _ADJ_PREFIX = {"bgp": "bgp-peer-", "ospf": "ospf-adj-", "isis": "isis-adj-"}
 
 Severity = Literal["error", "warning", "info"]
@@ -582,6 +580,8 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
     if topology.layer1:
         for i, link in enumerate(topology.layer1.links):
             _warn_prefix(errors, f"layer1.links[{i}].id", link.id, "link-", "L1 リンク")
+        for i, lag in enumerate(topology.layer1.lag):
+            _warn_prefix(errors, f"layer1.lag[{i}].id", lag.id, "lag-", "LAG")
         for i, node in enumerate(topology.layer1.nodes):
             for key in (node.labels or {}):
                 if not _ID_PATTERN.match(key):

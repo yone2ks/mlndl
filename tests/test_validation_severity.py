@@ -122,12 +122,16 @@ class TestPrefixWarnings:
         ng = _topo("protocols:\n  bfd:\n    - {id: timers-default}\n")
         assert self._warn_paths(ng) == ["protocols.bfd[0].id"]
 
-    def test_lag_prefix_not_checked(self):
-        """ADR-0002 D7 (bond-) と既存 fixture (lag-) が食い違うため LAG は照合しない"""
+    @pytest.mark.parametrize("lag_id,warns", [
+        ("lag-leaf1-bond0", False),
+        ("bond-leaf1", True),   # 2026-09-17 に bond- から lag- へ変更
+        ("po1", True),
+    ])
+    def test_lag_prefix(self, lag_id, warns):
         topo = _topo(L1_TWO_NODES + (
-            "  lag:\n    - {id: po1, type: lacp, node: leaf1, members: [leaf1-swp1, leaf1-swp2]}\n"
+            "  lag:\n    - {id: %s, type: lacp, node: leaf1, members: [leaf1-swp1, leaf1-swp2]}\n" % lag_id
         ))
-        assert self._warn_paths(topo) == []
+        assert self._warn_paths(topo) == (["layer1.lag[0].id"] if warns else [])
 
     def test_warning_does_not_affect_reference_resolution(self):
         """D7: プレフィックス違反でも参照解決は通常どおり動く"""

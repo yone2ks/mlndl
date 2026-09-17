@@ -444,7 +444,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容） | error |
-| 推奨プレフィックス | `link-` / `vlan-` / `vni-` / `vrf-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7）。**LAG は照合しない**（D7 の `bond-` と実態の `lag-` が不一致のため） | warning |
+| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
 | ルーター ID | bgp/ospf の router_id が layer3.interfaces に定義済みか | **未実装** — スキーマに `router_id` フィールドがない（BGPNode にもなく、OSPF はスキーマ自体が未実装） |
 
