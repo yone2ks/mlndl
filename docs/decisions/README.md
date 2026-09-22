@@ -71,3 +71,27 @@ Pass A のドラフトは Pass C 完了後も削除しない（変更履歴と�
 20 語以上が既存ネットワーク用語・プロジェクト内用語と衝突して収束せず、最終的に
 **難航の原因が語彙不足ではなく構造の誤り** (階層ネストと多軸分類を 1 構成子で表そうとしていた)
 と判明し、2 構成子への分離で決着した。却下語の全リストは ADR-0009 の Alternatives Considered を参照。
+
+### ラウンド3: 制御プレーンの分離 (2026-09-18〜、**保留中**)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [drafts/0010](drafts/0010-control-plane-separation.md) | control plane と data plane の分離 (`control_plane` / `routing_neighbors`) | Draft (**保留**) | A r2 |
+| [evaluations/adr0010](evaluations/adr0010/README.md) | ADR-0010 実証 YAML | — | — |
+
+**保留の経緯**: 「BGP は Layer 的にどこに入るか」という問いから、`layer1/2/3` が OSI 層番号ではなく
+RFC 8345 のデータプレーン層であること、BGP 隣接が `layer3.routing_adjacencies` と `protocols.bgp` に
+二重に書けて fixture が矛盾を含んだまま valid になっていることが判明した。`control_plane` 新設と
+`routing_neighbors` への改名はユーザー決定済み。BGP エントリの単位 (D8) が未決のまま、
+layer3 までのデータプレーンの表現力を先に確定させるため 2026-09-20 に中断した。
+
+### ラウンド4: layer3 データプレーンの確定 (2026-09-20〜)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [drafts/0011](drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | Draft | A r2 |
+| [evaluations/adr0011](evaluations/adr0011/README.md) | ADR-0011 実測資料 (試し書き / 矛盾の実例 / 案比較) | — | — |
+
+ADR-0010 を保留した上で、先に L1〜L3 のデータプレーンを確定させる作業。
+表現原理 (関係の成立に必要な情報は書き、個別経路は書かない)、スタティックルートのスコープ外化、
+SVI 表現の一本化、`fhrp` → `gateway_redundancy`、デュアルスタック (`ip` / `ipv6`)、トンネルを扱う。

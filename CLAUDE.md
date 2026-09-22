@@ -446,7 +446,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容） | error |
 | 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
-| ルーター ID | bgp/ospf の router_id が layer3.interfaces に定義済みか | **未実装** — スキーマに `router_id` フィールドがない（BGPNode にもなく、OSPF はスキーマ自体が未実装） |
+| ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0010 D5・D6 の一意性チェックに置き換え予定（保留中） |
 
 ---
 
@@ -480,6 +480,8 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0006](docs/decisions/0006-endpoints.md) | L1 リンク端点表現 | C | `from`/`to` 廃止 → `endpoints: [a, b]`（無向リスト）。Cytoscape/RFC8345 出力のみ source/target にマップ |
 | [ADR-0009](docs/decisions/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 | C 相当 | `attaches_to`（Realization）/ `parent`（Containment）/ `labels`（Classification）の 3 軸に分離。`scope`・`pod`・`tags` 等 20 語以上を却下 |
 | [ADR-0008](docs/decisions/drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 | C (Draft) | 箱もノード（`role: vpc`）。`location` 軸。所属は `parent` + `labels` |
+| [ADR-0010](docs/decisions/drafts/0010-control-plane-separation.md) | control plane と data plane の分離 | A r2 (Draft・**保留**) | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（決定済み・**未実装**）。BGP エントリの単位は未決 |
+| [ADR-0011](docs/decisions/drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | A r2 (Draft) | 原理「関係の成立に必要な情報は書き、個別経路は書かない」。スタティックルートはスコープ外。SVI は `attaches_to` に一本化。`fhrp` → `gateway_redundancy`。`ip` (IPv4) / `ipv6`。トンネル追加（**未実装**） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---
