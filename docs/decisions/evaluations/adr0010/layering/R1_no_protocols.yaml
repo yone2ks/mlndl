@@ -1,0 +1,139 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# R1: valid_full_dc.yaml から protocols: と layer3.routing_adjacencies: を
+#     まるごと削除した版。
+#
+# 目的: 「プロトコル情報を削ぎ落とすと論理構成図として何が残るか」の実測。
+# 予測: validator.py は routing_adjacencies / protocols を「あれば検査、
+#       無ければスキップ」する構造なので、参照整合性 error は出ないはず。
+#       => 「プロトコル抜きでも valid」= 二重表現の証拠の一つになる。
+#
+# 静的トレース根拠 (validator.py):
+#   - L1 検査: nodes/interfaces/links/lag の内部参照のみ (protocols 非依存)
+#   - L2 検査: vlan/vxlan は layer3.vrfs / layer3.interfaces を参照するが、
+#     それらは残す
+#   - L3 検査: routing_adjacencies が空リスト (デフォルト) なので何も走らない
+#   - Protocols 検査: topology.protocols is None なのでスキップ (L183)
+#   - MTU / conventions: routing_adjacencies が無いので該当 warning も無し
+#   期待結果: OK (warning が数個出るかは prefix 準拠状況次第だが、error 0)
+# ============================================================================
+
+meta:
+  name: spine-leaf-mlag-evpn-no-protocols
+  description: |
+    valid_full_dc.yaml から protocols / routing_adjacencies を削除。
+    「プロトコル抜き論理構成図」として何が読めるかの実験。
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: spine2, name: Spine-2, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+    - { id: leaf2,  name: Leaf-2,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: spine1-swp2, node: spine1, name: swp2 }
+    - { id: spine2-swp1, node: spine2, name: swp1 }
+    - { id: spine2-swp2, node: spine2, name: swp2 }
+    - { id: leaf1-swp51, node: leaf1, name: swp51 }
+    - { id: leaf1-swp52, node: leaf1, name: swp52 }
+    - { id: leaf1-swp49, node: leaf1, name: swp49 }
+    - { id: leaf1-swp50, node: leaf1, name: swp50 }
+    - { id: leaf1-swp1,  node: leaf1, name: swp1  }
+    - { id: leaf2-swp51, node: leaf2, name: swp51 }
+    - { id: leaf2-swp52, node: leaf2, name: swp52 }
+    - { id: leaf2-swp49, node: leaf2, name: swp49 }
+    - { id: leaf2-swp50, node: leaf2, name: swp50 }
+    - { id: leaf2-swp1,  node: leaf2, name: swp1  }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-mlag-peerlink-1, endpoints: [leaf1-swp49, leaf2-swp49], link_speed: 10G, mtu: 9216, link_role: peer-link }
+    - { id: link-mlag-peerlink-2, endpoints: [leaf1-swp50, leaf2-swp50], link_speed: 10G, mtu: 9216, link_role: peer-link }
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 1G, link_role: access }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 1G, link_role: access }
+
+  lag:
+    - id: lag-peer-link
+      type: lacp
+      node: leaf1
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active, min_links: 1}
+    - id: lag-mlag-server1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-peer-link
+      peer_link_interface: peerlink.4094
+      domain_id: 10
+    - id: lag-server1-bond0
+      type: lacp
+      node: server1
+      members: [server1-eth0, server1-eth1]
+      lacp: {mode: active, min_links: 1}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a
+      trunk_ports:
+        - {node: leaf1, interface: leaf1-swp1}
+        - {node: leaf2, interface: leaf2-swp1}
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vtep_source: leaf1-lo
+      members: [leaf1, leaf2]
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    - { id: spine1-lo, node: spine1, interface: lo, ip: 10.0.0.1/32 }
+    - { id: spine2-lo, node: spine2, interface: lo, ip: 10.0.0.2/32 }
+    - { id: leaf1-lo,  node: leaf1,  interface: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,  node: leaf2,  interface: lo, ip: 10.0.0.12/32 }
+    - id: leaf1-swp51-l3
+      node: leaf1
+      interface: swp51
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+      attaches_to: {interface: leaf1-swp51}
+    - id: leaf2-swp51-l3
+      node: leaf2
+      interface: swp51
+      ip: 10.1.0.3/31
+      vrf: vrf-default
+      attaches_to: {interface: leaf2-swp51}
+    - id: leaf1-vlan100
+      node: leaf1
+      interface: vlan-100
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+
+  # routing_adjacencies: 削除 ← ここが実験の要点
+# protocols:              削除 ← ここも

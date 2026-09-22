@@ -1,0 +1,115 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# R4  OSPF broadcast segment (3 ルータが 1 つの L2 セグメント上で OSPF 隣接)
+#     ADR-0010 未解決事項 4 の実証。
+#
+#     構成: r1 / r2 / r3 が switch1 (物理 L2 スイッチ) に接続され、
+#           全員が vlan-100 (172.16.100.0/24) 上で OSPF area 0 隣接を張る。
+#           DR = r1 (priority=200), BDR = r2 (priority=100), DROther = r3.
+#
+#     ドラフトの `OspfNeighbor.from/to` は 2 端点モデル。broadcast セグメントの
+#     N ノード隣接をどう書くか、DR/BDR/DROther の役割をどう書くかを検証。
+# ============================================================================
+
+meta:
+  name: ospf-broadcast-segment
+  description: 3 routers on shared L2 segment, OSPF broadcast network with DR/BDR
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: r1, name: Router-1, implementation: vm, role: core, device_type: cisco_iosxr }
+    - { id: r2, name: Router-2, implementation: vm, role: core, device_type: cisco_iosxr }
+    - { id: r3, name: Router-3, implementation: vm, role: core, device_type: cisco_iosxr }
+    - { id: switch1, name: L2-Switch, implementation: physical, role: leaf, device_type: cisco_catalyst_9300 }
+
+  interfaces:
+    - { id: r1-ge0, node: r1, name: Ge0/0 }
+    - { id: r2-ge0, node: r2, name: Ge0/0 }
+    - { id: r3-ge0, node: r3, name: Ge0/0 }
+    - { id: switch1-ge1, node: switch1, name: Ge1/1 }
+    - { id: switch1-ge2, node: switch1, name: Ge1/2 }
+    - { id: switch1-ge3, node: switch1, name: Ge1/3 }
+
+  links:
+    - { id: link-r1-sw,  endpoints: [r1-ge0, switch1-ge1], link_speed: 1G, link_role: access }
+    - { id: link-r2-sw,  endpoints: [r2-ge0, switch1-ge2], link_speed: 1G, link_role: access }
+    - { id: link-r3-sw,  endpoints: [r3-ge0, switch1-ge3], link_speed: 1G, link_role: access }
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: ospf-transit
+      access_ports:
+        - { node: r1, interface: r1-ge0 }
+        - { node: r2, interface: r2-ge0 }
+        - { node: r3, interface: r3-ge0 }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+
+  interfaces:
+    - { id: r1-lo, node: r1, interface: lo, ip: 10.0.0.1/32 }
+    - { id: r2-lo, node: r2, interface: lo, ip: 10.0.0.2/32 }
+    - { id: r3-lo, node: r3, interface: lo, ip: 10.0.0.3/32 }
+    - { id: r1-ge0-l3, node: r1, interface: Ge0/0, ip: 172.16.100.1/24, vrf: vrf-default, attaches_to: {interface: r1-ge0} }
+    - { id: r2-ge0-l3, node: r2, interface: Ge0/0, ip: 172.16.100.2/24, vrf: vrf-default, attaches_to: {interface: r2-ge0} }
+    - { id: r3-ge0-l3, node: r3, interface: Ge0/0, ip: 172.16.100.3/24, vrf: vrf-default, attaches_to: {interface: r3-ge0} }
+
+control_plane:
+
+  ospf:
+    # ドラフトの nodes[] にはノード属性しか置けない。broadcast セグメントで
+    # 必要な「このインターフェース上での ospf network-type broadcast」
+    # 「このインターフェース上での ospf priority」等の per-interface 属性を
+    # 書くフィールドが無い。ここは書けない情報。→ feedback。
+    - id: ospf-underlay
+      nodes:
+        - { node: r1, router_id: 10.0.0.1 }
+        - { node: r2, router_id: 10.0.0.2 }
+        - { node: r3, router_id: 10.0.0.3 }
+
+  routing_neighbors:
+    # 【書き方 A: N ノードを N*(N-1)/2 の 2 端点ペアに展開する】
+    # 3 ノードなら 3 ペア (r1-r2, r1-r3, r2-r3)。ただし RFC 2328 §7.3 では
+    # broadcast セグメントでは DR/BDR とのみ Full adjacency を張り、
+    # DROther 同士は 2-Way に留まる。つまり実際の Full adjacency は
+    # r1-r2 (DR-BDR), r1-r3 (DR-DROther), r2-r3 (BDR-DROther) の 3 本だが、
+    # r2-r3 の状態が 2-Way に留まる 事実 (これは正確には adjacency ではない)
+    # や DR/BDR/DROther の役割はドラフトで表現できない。
+    #
+    # 【書き方 B: セグメント全体を 1 エントリで表現する】
+    # ドラフトは 2 端点モデルなので書けない。ADR-0006 の endpoints: [a, b, c]
+    # のように可変長にする必要があるが、from/to は 2 端点固定。
+    #
+    # 以下は書き方 A のみ。DR/BDR は書けないため注釈で示す。
+    - id: ospf-adj-r1-r2
+      type: ospf
+      from: { node: r1, interface: r1-ge0-l3 }   # DR (書けない: priority=200)
+      to:   { node: r2, interface: r2-ge0-l3 }   # BDR (書けない: priority=100)
+      area: "0.0.0.0"
+      bfd: true
+      attaches_to: { link: link-r1-sw }          # 疑問: この隣接が使う物理
+                                                 # リンクは link-r1-sw と
+                                                 # link-r2-sw の 2 本を経由
+                                                 # (switch1 を挟む)。1 本しか
+                                                 # 書けない。→ feedback。
+    - id: ospf-adj-r1-r3
+      type: ospf
+      from: { node: r1, interface: r1-ge0-l3 }   # DR
+      to:   { node: r3, interface: r3-ge0-l3 }   # DROther
+      area: "0.0.0.0"
+      bfd: true
+
+    - id: ospf-adj-r2-r3
+      type: ospf
+      from: { node: r2, interface: r2-ge0-l3 }   # BDR
+      to:   { node: r3, interface: r3-ge0-l3 }   # DROther
+      area: "0.0.0.0"
+      bfd: true
+      # 注: RFC 2328 §7.3 上、この 2 端は本来 2-Way 止まり (Full ではない)。
+      #     ドラフトの routing_neighbors は「adjacency」を表現するもの (D3 の
+      #     命名根拠) だが、broadcast の 2-Way 関係もここに書くしかない。

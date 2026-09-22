@@ -1,0 +1,91 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# 案B: routing_adjacencies を protocols 配下に移す (仮想スキーマ)。
+#
+# 変更点:
+#   - layer3.routing_adjacencies を廃止
+#   - protocols.bgp[].adjacencies[] / protocols.isis[].adjacencies[] 等に集約
+#   - 「type: bgp」というディスクリミネータは protocols のトップキーで
+#     暗黙表現できるので、adjacency エントリには不要
+#
+# ★重要★ 現行 mlndl コアではこの構造は valid にならない:
+#   src/mlndl/schema/protocols.py:
+#     class Protocols: model_config extra="forbid"; fields = bfd, bgp
+#     class BGPProcess: extra="forbid"; fields = id, role, nodes
+#   → adjacencies フィールドも、protocols.isis も、pydantic が拒絶する。
+#   → `python -m mlndl validate` は Extra inputs are not permitted で
+#     エラーになる (実行はしていないが extra="forbid" の意味論から確実)。
+#
+# つまり案B を採用するにはスキーマ変更 (加算的変更ではなく破壊的変更) が必須。
+# ============================================================================
+
+meta:
+  name: r2b-adj-in-protocols-HYPOTHETICAL
+  description: |
+    仮想スキーマ案。現行スキーマではこの YAML は parse エラーで validate 不能。
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: spine2, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+    - { id: leaf2,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: spine1-swp2, node: spine1, name: swp2 }
+    - { id: spine2-swp1, node: spine2, name: swp1 }
+    - { id: spine2-swp2, node: spine2, name: swp2 }
+    - { id: leaf1-swp51, node: leaf1, name: swp51 }
+    - { id: leaf1-swp52, node: leaf1, name: swp52 }
+    - { id: leaf2-swp51, node: leaf2, name: swp51 }
+    - { id: leaf2-swp52, node: leaf2, name: swp52 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], mtu: 9216, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - id: vrf-default
+  interfaces:
+    - { id: spine1-lo, node: spine1, interface: lo, ip: 10.0.0.1/32 }
+    - { id: spine2-lo, node: spine2, interface: lo, ip: 10.0.0.2/32 }
+    - { id: leaf1-lo,  node: leaf1,  interface: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,  node: leaf2,  interface: lo, ip: 10.0.0.12/32 }
+    - { id: leaf1-swp51-l3, node: leaf1, interface: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51} }
+    - { id: leaf2-swp51-l3, node: leaf2, interface: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp51} }
+    - { id: leaf1-swp52-l3, node: leaf1, interface: swp52, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp52} }
+    - { id: leaf2-swp52-l3, node: leaf2, interface: swp52, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp52} }
+  # routing_adjacencies は無し (案B の眼目)
+
+protocols:
+  bfd:
+    - { id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3, nodes: [spine1, spine2, leaf1, leaf2] }
+
+  bgp:
+    - id: bgp-underlay
+      role: underlay
+      nodes:
+        - { node: spine1, local_as: 65000, neighbors: [{node: leaf1, remote_as: 65001, type: ebgp, bfd: true}, {node: leaf2, remote_as: 65002, type: ebgp, bfd: true}] }
+        - { node: spine2, local_as: 65000, neighbors: [{node: leaf1, remote_as: 65001, type: ebgp, bfd: true}, {node: leaf2, remote_as: 65002, type: ebgp, bfd: true}] }
+      # ★新フィールド★ 隣接をここに集約 (現行スキーマでは extra="forbid" で reject)
+      adjacencies:
+        - { id: bgp-peer-spine1-leaf1, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo}, attaches_to: {link: link-spine1-leaf1} }
+        - { id: bgp-peer-spine1-leaf2, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2, update_source: leaf2-lo}, attaches_to: {link: link-spine1-leaf2} }
+        - { id: bgp-peer-spine2-leaf1, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf1, update_source: leaf1-lo}, attaches_to: {link: link-spine2-leaf1} }
+        - { id: bgp-peer-spine2-leaf2, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf2, update_source: leaf2-lo}, attaches_to: {link: link-spine2-leaf2} }
+
+    - id: bgp-evpn
+      role: overlay
+      nodes:
+        - { node: spine1, local_as: 65000, role: route_reflector, neighbors: [{node: leaf1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}, {node: leaf2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}] }
+        - { node: spine2, local_as: 65000, role: route_reflector, neighbors: [{node: leaf1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}, {node: leaf2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}] }
+      adjacencies:
+        # overlay: attaches_to 省略 (loopback-to-loopback、複数ホップの上に張られる)
+        - { id: bgp-peer-spine1-leaf1-evpn, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo} }
+        - { id: bgp-peer-spine1-leaf2-evpn, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2, update_source: leaf2-lo} }
+        - { id: bgp-peer-spine2-leaf1-evpn, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf1, update_source: leaf1-lo} }
+        - { id: bgp-peer-spine2-leaf2-evpn, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf2, update_source: leaf2-lo} }

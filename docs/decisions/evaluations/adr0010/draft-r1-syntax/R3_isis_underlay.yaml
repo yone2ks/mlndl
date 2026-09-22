@@ -1,0 +1,161 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# R3  IS-IS underlay + BGP EVPN overlay (ADR-0010 の新構文で書く)
+#     Spine 2 / Leaf 2。IS-IS は F5 のとおり L2 直載り (ISO/IEC 10589 §7.2)。
+#     ドラフトの IsisNeighbor.interface は「layer1 または layer3 の IF id」と
+#     記述されているが、実際に書いてみるとどちらを指すべきかで悩んだので
+#     feedback に書く。
+# ============================================================================
+
+meta:
+  name: spine-leaf-isis-evpn
+  description: 2 Spine / 2 Leaf — IS-IS underlay (L2 native) + BGP EVPN overlay
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: juniper_qfx }
+    - { id: spine2, name: Spine-2, implementation: vm, role: spine, device_type: juniper_qfx }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: juniper_qfx }
+    - { id: leaf2,  name: Leaf-2,  implementation: vm, role: leaf,  device_type: juniper_qfx }
+
+  interfaces:
+    - { id: spine1-et1, node: spine1, name: et-0/0/1 }
+    - { id: spine1-et2, node: spine1, name: et-0/0/2 }
+    - { id: spine2-et1, node: spine2, name: et-0/0/1 }
+    - { id: spine2-et2, node: spine2, name: et-0/0/2 }
+    - { id: leaf1-et51, node: leaf1, name: et-0/0/51 }
+    - { id: leaf1-et52, node: leaf1, name: et-0/0/52 }
+    - { id: leaf2-et51, node: leaf2, name: et-0/0/51 }
+    - { id: leaf2-et52, node: leaf2, name: et-0/0/52 }
+
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-et1, leaf1-et51], link_speed: 40G, mtu: 9216, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-et2, leaf2-et51], link_speed: 40G, mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-et1, leaf1-et52], link_speed: 40G, mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf2, endpoints: [spine2-et2, leaf2-et52], link_speed: 40G, mtu: 9216, link_role: underlay }
+
+layer2:
+  vxlan:
+    - { id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vtep_source: leaf1-lo, members: [leaf1, leaf2] }
+  vlans:
+    - { id: vlan-100, vlan_id: 100, name: tenant-a }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+
+  interfaces:
+    - { id: spine1-lo, node: spine1, interface: lo0, ip: 10.0.0.1/32 }
+    - { id: spine2-lo, node: spine2, interface: lo0, ip: 10.0.0.2/32 }
+    - { id: leaf1-lo,  node: leaf1,  interface: lo0, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,  node: leaf2,  interface: lo0, ip: 10.0.0.12/32 }
+    # IS-IS は IP 不要だが、実装 (JunOS 等) は L3 IF の family iso を要求する。
+    # ここでは物理 IF に対応する L3 IF を用意 (IP は形式上振っておく)。
+    - { id: spine1-et1-l3, node: spine1, interface: et-0/0/1, ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-et1} }
+    - { id: leaf1-et51-l3, node: leaf1,  interface: et-0/0/51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-et51} }
+    - { id: spine1-et2-l3, node: spine1, interface: et-0/0/2, ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-et2} }
+    - { id: leaf2-et51-l3, node: leaf2,  interface: et-0/0/51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-et51} }
+    - { id: spine2-et1-l3, node: spine2, interface: et-0/0/1, ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: spine2-et1} }
+    - { id: leaf1-et52-l3, node: leaf1,  interface: et-0/0/52, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf1-et52} }
+    - { id: spine2-et2-l3, node: spine2, interface: et-0/0/2, ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: {interface: spine2-et2} }
+    - { id: leaf2-et52-l3, node: leaf2,  interface: et-0/0/52, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf2-et52} }
+
+control_plane:
+
+  isis:
+    # D5: IS-IS には router_id を置かない。NET (net) が識別子。
+    - id: isis-underlay
+      nodes:
+        - { node: spine1, net: 49.0001.0100.0000.0001.00, level: level-2 }
+        - { node: spine2, net: 49.0001.0100.0000.0002.00, level: level-2 }
+        - { node: leaf1,  net: 49.0001.0100.0000.0011.00, level: level-2 }
+        - { node: leaf2,  net: 49.0001.0100.0000.0012.00, level: level-2 }
+
+  bgp:
+    # underlay 経路配布は IS-IS が行う。BGP は overlay (EVPN) 用のみ。
+    - id: bgp-default
+      nodes:
+        # 全ノード同 AS = iBGP (D4 で導出)。
+        - { node: spine1, local_as: 65000, router_id: 10.0.0.1 }
+        - { node: spine2, local_as: 65000, router_id: 10.0.0.2 }
+        - { node: leaf1,  local_as: 65000, router_id: 10.0.0.11 }
+        - { node: leaf2,  local_as: 65000, router_id: 10.0.0.12 }
+
+  bfd:
+    - { id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3, nodes: [spine1, spine2, leaf1, leaf2] }
+
+  routing_neighbors:
+    # ── IS-IS 隣接 (物理 IF 単位で張られる、4 本) ────────────────────────
+    #
+    # 【判断】interface フィールドは layer1 の IF id を指すのが自然。
+    #   根拠:
+    #   (a) F5 のとおり IS-IS は L2 直載りで IP を持たないため、Hello (IIH) の
+    #       送出インターフェースは物理 IF そのもの。
+    #   (b) 一方 layer3.interfaces にも同じ物理 IF に対応する L3 IF がある
+    #       (family iso のため)。ここを指しても JunOS 実装上は通じるが、
+    #       意味論としては「IS-IS が IP に依存している」ように読める。
+    #   → 本例は (a) を採用し、layer1 の IF id を書く。
+    #
+    #   ドラフトの `IgpNeighborEnd.interface` コメント「layer1 または layer3
+    #   の IF id」は OSPF と IS-IS で異なる意味を持つので、プロトコルごとに
+    #   分けたほうがよい。feedback に書く。
+    - id: isis-adj-spine1-leaf1
+      type: isis
+      from: { node: spine1, interface: spine1-et1 }   # layer1 IF id
+      to:   { node: leaf1,  interface: leaf1-et51 }
+      level: level-2
+      bfd: true
+      attaches_to: { link: link-spine1-leaf1 }
+    - id: isis-adj-spine1-leaf2
+      type: isis
+      from: { node: spine1, interface: spine1-et2 }
+      to:   { node: leaf2,  interface: leaf2-et51 }
+      level: level-2
+      bfd: true
+      attaches_to: { link: link-spine1-leaf2 }
+    - id: isis-adj-spine2-leaf1
+      type: isis
+      from: { node: spine2, interface: spine2-et1 }
+      to:   { node: leaf1,  interface: leaf1-et52 }
+      level: level-2
+      bfd: true
+      attaches_to: { link: link-spine2-leaf1 }
+    - id: isis-adj-spine2-leaf2
+      type: isis
+      from: { node: spine2, interface: spine2-et2 }
+      to:   { node: leaf2,  interface: leaf2-et52 }
+      level: level-2
+      bfd: true
+      attaches_to: { link: link-spine2-leaf2 }
+
+    # ── overlay iBGP (loopback 間、l2vpn_evpn) — RR は spine1/spine2 ──
+    # ドラフトの BgpNeighbor スキーマには rr_client / route-reflector-client
+    # フィールドが無い。RR 階層 (現行では BGP プロセスの role: route_reflector
+    # + neighbor 側 role: route_reflector_client) をどこに書くのか未定義。
+    # → feedback。
+    - id: bgp-peer-spine1-leaf1-evpn
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo }
+      to:   { node: leaf1,  update_source: leaf1-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true
+    - id: bgp-peer-spine1-leaf2-evpn
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo }
+      to:   { node: leaf2,  update_source: leaf2-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true
+    - id: bgp-peer-spine2-leaf1-evpn
+      type: bgp
+      from: { node: spine2, update_source: spine2-lo }
+      to:   { node: leaf1,  update_source: leaf1-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true
+    - id: bgp-peer-spine2-leaf2-evpn
+      type: bgp
+      from: { node: spine2, update_source: spine2-lo }
+      to:   { node: leaf2,  update_source: leaf2-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true

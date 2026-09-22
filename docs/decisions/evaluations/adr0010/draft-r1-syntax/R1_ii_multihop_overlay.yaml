@@ -1,0 +1,157 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# R1 (ii)  valid_full_dc.yaml を ADR-0010 の新構文で書き直したもの
+#          F4 の AS 矛盾を「overlay を eBGP multihop に切り替え、underlay と
+#          overlay で異なる BGP セッションを持つ」形で解消したバージョン。
+#          leaf1 の AS は underlay/overlay とも 65001 で一貫する。
+#
+#          overlay は loopback 間で張るため
+#          - attaches_to: {link:} はどの物理リンクも指定できない
+#            (下線の underlay ECMP を流れる)
+#          - ebgp-multihop のホップ数はスキーマにフィールドがない
+#          等、書けない情報がある。feedback 参照。
+# ============================================================================
+
+meta:
+  name: spine-leaf-mlag-evpn-multihop
+  description: 2 Spine / 2 Leaf — underlay eBGP (link-local) + overlay eBGP multihop (loopback) with l2vpn_evpn
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: spine2, name: Spine-2, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+    - { id: leaf2,  name: Leaf-2,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: spine1-swp2, node: spine1, name: swp2 }
+    - { id: spine2-swp1, node: spine2, name: swp1 }
+    - { id: spine2-swp2, node: spine2, name: swp2 }
+    - { id: leaf1-swp51, node: leaf1, name: swp51 }
+    - { id: leaf1-swp52, node: leaf1, name: swp52 }
+    - { id: leaf2-swp51, node: leaf2, name: swp51 }
+    - { id: leaf2-swp52, node: leaf2, name: swp52 }
+
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+
+layer2:
+  vxlan:
+    - { id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vtep_source: leaf1-lo, members: [leaf1, leaf2] }
+    - { id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-tenant-a, irb_mode: symmetric }
+  vlans:
+    - { id: vlan-100, vlan_id: 100, name: tenant-a }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: { import: ["65001:100"], export: ["65001:100"] }
+
+  interfaces:
+    - { id: spine1-lo, node: spine1, interface: lo, ip: 10.0.0.1/32 }
+    - { id: spine2-lo, node: spine2, interface: lo, ip: 10.0.0.2/32 }
+    - { id: leaf1-lo,  node: leaf1,  interface: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,  node: leaf2,  interface: lo, ip: 10.0.0.12/32 }
+    - { id: leaf1-swp51-l3, node: leaf1, interface: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51} }
+    - { id: leaf2-swp51-l3, node: leaf2, interface: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp51} }
+    - { id: leaf1-swp52-l3, node: leaf1, interface: swp52, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp52} }
+    - { id: leaf2-swp52-l3, node: leaf2, interface: swp52, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp52} }
+    - { id: spine1-swp1-l3, node: spine1, interface: swp1, ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-swp1} }
+    - { id: spine1-swp2-l3, node: spine1, interface: swp2, ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-swp2} }
+    - { id: spine2-swp1-l3, node: spine2, interface: swp1, ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: spine2-swp1} }
+    - { id: spine2-swp2-l3, node: spine2, interface: swp2, ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: {interface: spine2-swp2} }
+    - { id: leaf1-vlan100, node: leaf1, interface: vlan-100, ip: 192.168.100.1/24, vrf: vrf-tenant-a }
+    - { id: leaf2-vlan100, node: leaf2, interface: vlan-100, ip: 192.168.100.1/24, vrf: vrf-tenant-a }
+
+control_plane:
+
+  bgp:
+    # D8-a: BGP エントリの単位は VRF。default VRF に underlay と overlay の
+    #        2 種の隣接が共存する。それぞれのセッションは AF で区別する。
+    #        BGPProcess.role は D4 で廃止済 (2 種の役割は隣接側の AF から導出)。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000, router_id: 10.0.0.1 }
+        - { node: spine2, local_as: 65000, router_id: 10.0.0.2 }
+        - { node: leaf1,  local_as: 65001, router_id: 10.0.0.11 }
+        - { node: leaf2,  local_as: 65002, router_id: 10.0.0.12 }
+
+  bfd:
+    - { id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3, nodes: [spine1, spine2, leaf1, leaf2] }
+
+  routing_neighbors:
+    # ── underlay eBGP: 物理リンクを介する ipv4_unicast セッション (4 本) ──
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      from: { node: spine1, update_source: spine1-swp1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-swp51-l3 }
+      address_families: [ipv4_unicast]
+      bfd: true
+      attaches_to: { link: link-spine1-leaf1 }
+
+    - id: bgp-peer-spine1-leaf2
+      type: bgp
+      from: { node: spine1, update_source: spine1-swp2-l3 }
+      to:   { node: leaf2,  update_source: leaf2-swp51-l3 }
+      address_families: [ipv4_unicast]
+      bfd: true
+      attaches_to: { link: link-spine1-leaf2 }
+
+    - id: bgp-peer-spine2-leaf1
+      type: bgp
+      from: { node: spine2, update_source: spine2-swp1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-swp52-l3 }
+      address_families: [ipv4_unicast]
+      bfd: true
+      attaches_to: { link: link-spine2-leaf1 }
+
+    - id: bgp-peer-spine2-leaf2
+      type: bgp
+      from: { node: spine2, update_source: spine2-swp2-l3 }
+      to:   { node: leaf2,  update_source: leaf2-swp52-l3 }
+      address_families: [ipv4_unicast]
+      bfd: true
+      attaches_to: { link: link-spine2-leaf2 }
+
+    # ── overlay eBGP multihop: loopback 間の l2vpn_evpn セッション (4 本) ──
+    # F3 に対応する ID 命名: 同一ノード対の 2 種セッションを "-evpn" 接尾辞で
+    # 区別する (ADR-0010 D7)。
+    - id: bgp-peer-spine1-leaf1-evpn
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo }
+      to:   { node: leaf1,  update_source: leaf1-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true
+      # 書けない: ebgp-multihop <TTL>, next-hop-unchanged 等の EVPN 特有の
+      #          neighbor 設定を書くフィールドがない (D8 未解決事項に相当)。
+      # 書けない: attaches_to はどの link にも該当しない。空欄で放置。
+
+    - id: bgp-peer-spine1-leaf2-evpn
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo }
+      to:   { node: leaf2,  update_source: leaf2-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true
+
+    - id: bgp-peer-spine2-leaf1-evpn
+      type: bgp
+      from: { node: spine2, update_source: spine2-lo }
+      to:   { node: leaf1,  update_source: leaf1-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true
+
+    - id: bgp-peer-spine2-leaf2-evpn
+      type: bgp
+      from: { node: spine2, update_source: spine2-lo }
+      to:   { node: leaf2,  update_source: leaf2-lo }
+      address_families: [l2vpn_evpn]
+      bfd: true

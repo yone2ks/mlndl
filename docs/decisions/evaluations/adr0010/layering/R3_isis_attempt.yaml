@@ -1,0 +1,126 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# R3: IS-IS を現行スキーマに載せる試み。
+#
+# 現行 RoutingAdjacency (src/mlndl/schema/layer3.py):
+#   id, type: Literal["bgp","ospf","isis"], from_, to, attaches_to
+#   RoutingAdjEndpoint: node, update_source: str | None
+#
+# IS-IS の実際の要件 (ISO/IEC 10589, RFC 1195):
+#   - NET (Network Entity Title) = area-id + system-id + NSEL(0x00)
+#     例: 49.0001.1921.6800.1001.00
+#   - Level: L1 / L2 / L1L2
+#   - IIH は L2 上で直接交換 (IP アドレス不要)
+#   - update_source (loopback) は BGP セッションで TCP を張るための概念で、
+#     IS-IS には無い。IIH は物理 IF の MAC/SNPA で交換される。
+#
+# 現行スキーマで書けるもの/書けないもの:
+#   [書ける] type: isis, from/to.node, attaches_to.link
+#   [書けない] NET, level, mesh-group, wide-metric, authentication
+#   [不自然]  update_source を書く場所はあるが、IS-IS には意味がない。
+#             省略 (None) はできるが「省略すべき」という規約は無い。
+#
+# 期待結果: validator は type: isis を素通しし OK を返す。
+#   ただし出力される YAML は「IS-IS が動いている」という事実だけを示し、
+#   L1/L2 レベルもエリア境界も見えないので、実質「isis という文字列があるだけ」。
+#
+# 静的トレース (validator.py L604-606):
+#   _ADJ_PREFIX[adj.type] は "isis" キーで "isis-adj-" を返す。
+#   ID が isis-adj- 始まりなら prefix warning は無い。
+# ============================================================================
+
+meta:
+  name: isis-ring-4nodes-minimal
+  description: |
+    IS-IS レベル1 リング 4 ノード。現行スキーマで書けるところまで書く。
+    NET も level も書けないが、validator は type: isis を通す。
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: r1, implementation: physical, role: core, device_type: cisco_ios }
+    - { id: r2, implementation: physical, role: core, device_type: cisco_ios }
+    - { id: r3, implementation: physical, role: core, device_type: cisco_ios }
+    - { id: r4, implementation: physical, role: core, device_type: cisco_ios }
+
+  interfaces:
+    - { id: r1-ge1, node: r1, name: ge0/0/1 }
+    - { id: r1-ge2, node: r1, name: ge0/0/2 }
+    - { id: r2-ge1, node: r2, name: ge0/0/1 }
+    - { id: r2-ge2, node: r2, name: ge0/0/2 }
+    - { id: r3-ge1, node: r3, name: ge0/0/1 }
+    - { id: r3-ge2, node: r3, name: ge0/0/2 }
+    - { id: r4-ge1, node: r4, name: ge0/0/1 }
+    - { id: r4-ge2, node: r4, name: ge0/0/2 }
+
+  links:
+    - { id: link-r1-r2, endpoints: [r1-ge1, r2-ge2], link_role: uplink }
+    - { id: link-r2-r3, endpoints: [r2-ge1, r3-ge2], link_role: uplink }
+    - { id: link-r3-r4, endpoints: [r3-ge1, r4-ge2], link_role: uplink }
+    - { id: link-r4-r1, endpoints: [r4-ge1, r1-ge2], link_role: uplink }
+
+layer3:
+  # NET (area/system-id) は書く場所が無い。VRF に混ぜるのも意味論違反。
+  # 便宜上 vrf-default だけ書く。
+  vrfs:
+    - id: vrf-default
+
+  interfaces:
+    # ループバックの IP は書けるが、IS-IS の system-id とは無関係。
+    - { id: r1-lo, node: r1, interface: lo0, ip: 10.0.0.1/32 }
+    - { id: r2-lo, node: r2, interface: lo0, ip: 10.0.0.2/32 }
+    - { id: r3-lo, node: r3, interface: lo0, ip: 10.0.0.3/32 }
+    - { id: r4-lo, node: r4, interface: lo0, ip: 10.0.0.4/32 }
+
+    # IS-IS が走る物理 IF の L3 副表現 (でも IS-IS 自体は IP 不要…)
+    - id: r1-ge1-l3
+      node: r1
+      interface: ge0/0/1
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+      attaches_to: {interface: r1-ge1}
+    - id: r2-ge2-l3
+      node: r2
+      interface: ge0/0/2
+      ip: 10.1.0.2/31
+      vrf: vrf-default
+      attaches_to: {interface: r2-ge2}
+
+  routing_adjacencies:
+    # ── ここが問題箇所 ─────────────────────────────────────────────
+    # IS-IS 隣接。update_source は書けてしまうが、意味が無い。
+    # loopback を指定する慣行 (BGP) と混同されがち。空欄でも valid。
+    - id: isis-adj-r1-r2
+      type: isis
+      from: {node: r1}                     # update_source を省略 (IS-IS に無いから)
+      to:   {node: r2}
+      attaches_to: {link: link-r1-r2}
+
+    - id: isis-adj-r2-r3
+      type: isis
+      from: {node: r2, update_source: r2-lo}   # ← 誤って書いてもエラーにならない (仕様の穴)
+      to:   {node: r3, update_source: r3-lo}
+      attaches_to: {link: link-r2-r3}
+
+    - id: isis-adj-r3-r4
+      type: isis
+      from: {node: r3}
+      to:   {node: r4}
+      attaches_to: {link: link-r3-r4}
+
+    - id: isis-adj-r4-r1
+      type: isis
+      from: {node: r4}
+      to:   {node: r1}
+      attaches_to: {link: link-r4-r1}
+
+# protocols: に IS-IS プロセス情報を書く場所が無い。
+# Protocols スキーマは bfd + bgp のみ (src/mlndl/schema/protocols.py)。
+# NET, level, is-type, metric-style, wide-metrics, authentication は
+# どこにも書けない。この YAML は「IS-IS が 4 台の間で 4 本の隣接を組んで
+# いる」という事実だけを示し、
+#   - どのエリア (L1) に属するか
+#   - L1-only か L2-only か L1L2 か
+#   - どの system-id を持つか
+# は完全に不明。EVE-NG デプロイには不足、可視化には十分、という状態。

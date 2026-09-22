@@ -1,0 +1,99 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# 案E: OpenConfig 方式 (layer3.vrfs[].protocols[] として VRF 配下にネスト)
+#
+# 変更点:
+#   - VRF ごとにプロトコル定義を持たせる (OpenConfig の
+#     /network-instances/network-instance/protocols/protocol と同型)
+#   - underlay 用の bgp は VRF vrf-default 配下に、overlay の bgp EVPN も
+#     vrf-default 配下に (EVPN 制御面は underlay VRF に載る)
+#   - テナント VRF が増えたら vrf-tenant-a.protocols[] で per-VRF eBGP を
+#     書ける (これは OpenConfig の強み)
+#   - underlay を書く時は VRF default 決め打ちになる (ややぎこちない)
+#   - BFD は VRF に紐づかないので、どこに置くべきか判断困難 (仕様の穴)
+#
+# ★重要★ 現行 mlndl コアではこの構造は valid にならない:
+#   src/mlndl/schema/layer3.py:
+#     class VRF: extra="forbid"; fields = id, rd, l3vni, route_targets
+#   → protocols フィールドは Extra input として拒絶される。
+#   → BFD は VRF スコープでないため置き場所が構造的に不明確。
+#
+# 特徴的な問題:
+#   - 「レイヤー」の概念と噛み合わない (BGP プロセスが L3 の中に埋まる)
+#   - 隣接 (BGP peer) は 2 台の VRF 間で成立するが、片側の VRF に埋めるのは
+#     Non-idempotent (どちらから書いても同じにならない)
+# ============================================================================
+
+meta:
+  name: r2e-vrf-nested-HYPOTHETICAL
+  description: |
+    仮想スキーマ案。現行スキーマではこの YAML は parse エラー。
+    OpenConfig 風 VRF 配下ネスト。BFD の置き場所が構造的に不明。
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: spine2, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+    - { id: leaf2,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: spine1-swp2, node: spine1, name: swp2 }
+    - { id: spine2-swp1, node: spine2, name: swp1 }
+    - { id: spine2-swp2, node: spine2, name: swp2 }
+    - { id: leaf1-swp51, node: leaf1, name: swp51 }
+    - { id: leaf1-swp52, node: leaf1, name: swp52 }
+    - { id: leaf2-swp51, node: leaf2, name: swp51 }
+    - { id: leaf2-swp52, node: leaf2, name: swp52 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], mtu: 9216, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - id: vrf-default
+      # ★新フィールド★ VRF 配下にプロトコル定義をネスト
+      protocols:
+        - id: bgp-underlay
+          type: bgp
+          role: underlay
+          nodes:
+            - { node: spine1, local_as: 65000, neighbors: [{node: leaf1, remote_as: 65001, type: ebgp, bfd: true}, {node: leaf2, remote_as: 65002, type: ebgp, bfd: true}] }
+            - { node: spine2, local_as: 65000, neighbors: [{node: leaf1, remote_as: 65001, type: ebgp, bfd: true}, {node: leaf2, remote_as: 65002, type: ebgp, bfd: true}] }
+          adjacencies:
+            - { id: bgp-peer-spine1-leaf1, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo}, attaches_to: {link: link-spine1-leaf1} }
+            - { id: bgp-peer-spine1-leaf2, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2, update_source: leaf2-lo}, attaches_to: {link: link-spine1-leaf2} }
+            - { id: bgp-peer-spine2-leaf1, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf1, update_source: leaf1-lo}, attaches_to: {link: link-spine2-leaf1} }
+            - { id: bgp-peer-spine2-leaf2, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf2, update_source: leaf2-lo}, attaches_to: {link: link-spine2-leaf2} }
+
+        - id: bgp-evpn
+          type: bgp
+          role: overlay
+          nodes:
+            - { node: spine1, local_as: 65000, role: route_reflector, neighbors: [{node: leaf1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}, {node: leaf2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}] }
+            - { node: spine2, local_as: 65000, role: route_reflector, neighbors: [{node: leaf1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}, {node: leaf2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}] }
+          adjacencies:
+            - { id: bgp-peer-spine1-leaf1-evpn, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo} }
+            - { id: bgp-peer-spine1-leaf2-evpn, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2, update_source: leaf2-lo} }
+            - { id: bgp-peer-spine2-leaf1-evpn, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf1, update_source: leaf1-lo} }
+            - { id: bgp-peer-spine2-leaf2-evpn, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf2, update_source: leaf2-lo} }
+
+  interfaces:
+    - { id: spine1-lo, node: spine1, interface: lo, ip: 10.0.0.1/32 }
+    - { id: spine2-lo, node: spine2, interface: lo, ip: 10.0.0.2/32 }
+    - { id: leaf1-lo,  node: leaf1,  interface: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,  node: leaf2,  interface: lo, ip: 10.0.0.12/32 }
+    - { id: leaf1-swp51-l3, node: leaf1, interface: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51} }
+    - { id: leaf2-swp51-l3, node: leaf2, interface: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp51} }
+    - { id: leaf1-swp52-l3, node: leaf1, interface: swp52, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp52} }
+    - { id: leaf2-swp52-l3, node: leaf2, interface: swp52, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp52} }
+
+# BFD の置き場所が構造的に不明。VRF スコープでないので vrf.protocols[] に
+# 押し込むのは無理筋。仕方なくトップレベルに残す?
+protocols:
+  bfd:
+    - { id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3, nodes: [spine1, spine2, leaf1, leaf2] }

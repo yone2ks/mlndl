@@ -1,0 +1,134 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# R2  valid_multisite_wan.yaml を ADR-0010 の新構文で書き直したもの
+#     10 対の隣接 (DC 8 本 + WAN 2 本) のうち、WAN 対向 (Campus Core) を
+#     「外部ピア」と見立てた場合に D4 (「両端の local_as から eBGP/iBGP を
+#     導出」) がどう書けるか / 書けないかを実証する。
+#
+#     このファイルでは Campus Core (cm-core1 / cm-core2) を 2 つの読み方で
+#     示す:
+#       (A) mlndl 管理内: Campus 側も full-fledged ノードとして書き、
+#           local_as を control_plane.bgp[].nodes[] に持たせる (書ける)。
+#       (B) mlndl 管理外: Campus 側は「外部 AS」でしかない場合、local_as を
+#           どこに書けばいいか? ドラフトに規定なし (書けない)。
+#     ここでは (A) の形で書き、書けない (B) の課題を feedback に列挙する。
+# ============================================================================
+
+meta:
+  name: multisite-wan
+  description: DC (EVPN/VXLAN/MLAG) + Campus joined by WAN eBGP — ADR-0010 rewrite
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: dc-spine1,  name: DC-Spine-1,  role: spine,  implementation: vm, device_type: cumulus_linux }
+    - { id: dc-spine2,  name: DC-Spine-2,  role: spine,  implementation: vm, device_type: cumulus_linux }
+    - { id: dc-leaf1,   name: DC-Leaf-1,   role: leaf,   implementation: vm, device_type: cumulus_linux }
+    - { id: dc-leaf2,   name: DC-Leaf-2,   role: leaf,   implementation: vm, device_type: cumulus_linux }
+    - { id: dc-border1, name: DC-Border-1, role: border, implementation: vm, device_type: cumulus_linux }
+    - { id: dc-border2, name: DC-Border-2, role: border, implementation: vm, device_type: cumulus_linux }
+    - { id: cm-core1,   name: CM-Core-1,   role: core,   implementation: physical, device_type: cisco_nexus_9508 }
+    - { id: cm-core2,   name: CM-Core-2,   role: core,   implementation: physical, device_type: cisco_nexus_9508 }
+
+  interfaces:
+    - { id: dc-spine1-swp1, node: dc-spine1, name: swp1 }
+    - { id: dc-spine1-swp2, node: dc-spine1, name: swp2 }
+    - { id: dc-spine1-swp3, node: dc-spine1, name: swp3 }
+    - { id: dc-spine1-swp4, node: dc-spine1, name: swp4 }
+    - { id: dc-spine2-swp1, node: dc-spine2, name: swp1 }
+    - { id: dc-spine2-swp2, node: dc-spine2, name: swp2 }
+    - { id: dc-spine2-swp3, node: dc-spine2, name: swp3 }
+    - { id: dc-spine2-swp4, node: dc-spine2, name: swp4 }
+    - { id: dc-leaf1-swp51, node: dc-leaf1, name: swp51 }
+    - { id: dc-leaf1-swp52, node: dc-leaf1, name: swp52 }
+    - { id: dc-leaf2-swp51, node: dc-leaf2, name: swp51 }
+    - { id: dc-leaf2-swp52, node: dc-leaf2, name: swp52 }
+    - { id: dc-border1-swp51, node: dc-border1, name: swp51 }
+    - { id: dc-border1-swp52, node: dc-border1, name: swp52 }
+    - { id: dc-border1-swp1,  node: dc-border1, name: swp1 }
+    - { id: dc-border2-swp51, node: dc-border2, name: swp51 }
+    - { id: dc-border2-swp52, node: dc-border2, name: swp52 }
+    - { id: dc-border2-swp1,  node: dc-border2, name: swp1 }
+    - { id: cm-core1-te1-1, node: cm-core1, name: Te1/1 }
+    - { id: cm-core2-te1-1, node: cm-core2, name: Te1/1 }
+
+  links:
+    - { id: link-dc-spine1-leaf1,   endpoints: [dc-spine1-swp1, dc-leaf1-swp51],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine1-leaf2,   endpoints: [dc-spine1-swp2, dc-leaf2-swp51],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine1-border1, endpoints: [dc-spine1-swp3, dc-border1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine1-border2, endpoints: [dc-spine1-swp4, dc-border2-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-leaf1,   endpoints: [dc-spine2-swp1, dc-leaf1-swp52],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-leaf2,   endpoints: [dc-spine2-swp2, dc-leaf2-swp52],   link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-border1, endpoints: [dc-spine2-swp3, dc-border1-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine2-border2, endpoints: [dc-spine2-swp4, dc-border2-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-wan-border1-core1, endpoints: [dc-border1-swp1, cm-core1-te1-1], link_speed: 10G, mtu: 9216, link_role: uplink }
+    - { id: link-wan-border2-core2, endpoints: [dc-border2-swp1, cm-core2-te1-1], link_speed: 10G, mtu: 9216, link_role: uplink }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+
+  interfaces:
+    - { id: dc-spine1-lo,  node: dc-spine1,  interface: lo, ip: 10.0.0.1/32 }
+    - { id: dc-spine2-lo,  node: dc-spine2,  interface: lo, ip: 10.0.0.2/32 }
+    - { id: dc-leaf1-lo,   node: dc-leaf1,   interface: lo, ip: 10.0.0.11/32 }
+    - { id: dc-leaf2-lo,   node: dc-leaf2,   interface: lo, ip: 10.0.0.12/32 }
+    - { id: dc-border1-lo, node: dc-border1, interface: lo, ip: 10.0.0.21/32 }
+    - { id: dc-border2-lo, node: dc-border2, interface: lo, ip: 10.0.0.22/32 }
+    - { id: cm-core1-lo, node: cm-core1, interface: lo, ip: 10.0.1.1/32 }
+    - { id: cm-core2-lo, node: cm-core2, interface: lo, ip: 10.0.1.2/32 }
+    - { id: dc-border1-swp1-l3, node: dc-border1, interface: swp1, ip: 10.255.0.1/31, vrf: vrf-default, attaches_to: {interface: dc-border1-swp1} }
+    - { id: cm-core1-te1-1-l3, node: cm-core1, interface: Te1/1, ip: 10.255.0.0/31, vrf: vrf-default, attaches_to: {interface: cm-core1-te1-1} }
+    - { id: dc-border2-swp1-l3, node: dc-border2, interface: swp1, ip: 10.255.0.3/31, vrf: vrf-default, attaches_to: {interface: dc-border2-swp1} }
+    - { id: cm-core2-te1-1-l3, node: cm-core2, interface: Te1/1, ip: 10.255.0.2/31, vrf: vrf-default, attaches_to: {interface: cm-core2-te1-1} }
+
+control_plane:
+
+  bfd:
+    - { id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3,
+        nodes: [dc-spine1, dc-spine2, dc-leaf1, dc-leaf2, dc-border1, dc-border2, cm-core1, cm-core2] }
+
+  bgp:
+    # D8-a: default VRF の BGP プロセスに、DC underlay と WAN のノードをすべて
+    #        並べる。ここが D4 (「両端の local_as から導出」) の要になる。
+    #        WAN の対向 (Campus Core) は「別 AS = eBGP 相手」として local_as を
+    #        持たせられる。→ 書ける (今回のケース)。
+    #
+    # 【D4 の限界: 管理外ピア】
+    # Campus Core が mlndl のノードとして書かれない (= ISP 側の外部 AS など)
+    # 場合、local_as を書ける場所がない。
+    #   - control_plane.bgp[].nodes[] は node: <既存 layer1.node.id> が前提。
+    #   - 外部ピア用のダミーノードを layer1 に書くのは物理トポロジーを汚す
+    #     (ADR-0005 D1 の「layer1 は物理トポロジー」に反する)。
+    #   - routing_neighbors[].to.node は既存ノードを指す想定なので、ここに
+    #     asn を直接埋めることもできない。
+    # → 「外部ピア (external-peer / non-managed-node) 表現」がドラフトに未定義。
+    #    feedback で明示的に問う。
+    - id: bgp-default
+      nodes:
+        - { node: dc-spine1, local_as: 65000, router_id: 10.0.0.1 }
+        - { node: dc-spine2, local_as: 65000, router_id: 10.0.0.2 }
+        - { node: dc-leaf1,   local_as: 65001, router_id: 10.0.0.11 }
+        - { node: dc-leaf2,   local_as: 65002, router_id: 10.0.0.12 }
+        - { node: dc-border1, local_as: 65011, router_id: 10.0.0.21 }
+        - { node: dc-border2, local_as: 65012, router_id: 10.0.0.22 }
+        - { node: cm-core1,   local_as: 65100, router_id: 10.0.1.1 }
+        - { node: cm-core2,   local_as: 65100, router_id: 10.0.1.2 }
+
+  routing_neighbors:
+    # ── DC underlay (8 本) — 1 セッション複数 AF (R1(i) と同方針) ──────────
+    - { id: bgp-peer-dc-spine1-leaf1,   type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf1,   update_source: dc-leaf1-lo},   address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine1-leaf1} }
+    - { id: bgp-peer-dc-spine1-leaf2,   type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf2,   update_source: dc-leaf2-lo},   address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine1-leaf2} }
+    - { id: bgp-peer-dc-spine1-border1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border1, update_source: dc-border1-lo}, address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine1-border1} }
+    - { id: bgp-peer-dc-spine1-border2, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border2, update_source: dc-border2-lo}, address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine1-border2} }
+    - { id: bgp-peer-dc-spine2-leaf1,   type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf1,   update_source: dc-leaf1-lo},   address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine2-leaf1} }
+    - { id: bgp-peer-dc-spine2-leaf2,   type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf2,   update_source: dc-leaf2-lo},   address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine2-leaf2} }
+    - { id: bgp-peer-dc-spine2-border1, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border1, update_source: dc-border1-lo}, address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine2-border1} }
+    - { id: bgp-peer-dc-spine2-border2, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border2, update_source: dc-border2-lo}, address_families: [ipv4_unicast, l2vpn_evpn], bfd: true, attaches_to: {link: link-dc-spine2-border2} }
+
+    # ── WAN eBGP (2 本) — border(65011/65012) ↔ core(65100) は別 AS 同士 ──
+    # D4: from = dc-border1 (65011), to = cm-core1 (65100) → eBGP と導出される。
+    #     remote_as / type は書かない。
+    - { id: bgp-peer-wan-border1-core1, type: bgp, from: {node: dc-border1, update_source: dc-border1-swp1-l3}, to: {node: cm-core1, update_source: cm-core1-te1-1-l3}, address_families: [ipv4_unicast], bfd: true, attaches_to: {link: link-wan-border1-core1} }
+    - { id: bgp-peer-wan-border2-core2, type: bgp, from: {node: dc-border2, update_source: dc-border2-swp1-l3}, to: {node: cm-core2, update_source: cm-core2-te1-1-l3}, address_families: [ipv4_unicast], bfd: true, attaches_to: {link: link-wan-border2-core2} }
