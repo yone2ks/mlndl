@@ -1,0 +1,209 @@
+# T2: Spine-Leaf EVPN-VXLAN のデータプレーン (BGP は書かない)
+#
+# 書けなかったこと:
+#   - BGP EVPN (ADR-0010 保留のため意図的に除外)
+#   - Anycast VTEP (MLAG 共有 VTEP IP):
+#       L2VNI.vtep_source は「単一の L3Interface ID」しか取れない。
+#       leaf1-anycast-lo と leaf2-anycast-lo を別 ID で書いて同じ IP を振ることは
+#       できるが、L2VNI に対しては leaf1 側 or leaf2 側 のどちらか片方しか指せない。
+#       → 「MLAG ペアが共有する anycast VTEP」という関係性そのものが
+#         第一級市民として書けない (2 つの L3If を後付けで anycast と読ませるだけ)。
+#   - VTEP source の VNI 別選択: 全 L2VNI 共通 のはずだが、各 vxlan エントリに
+#     vtep_source を持たせているため、同じ情報を N 回書く冗長さがある。
+#   - MLAG anycast MAC 共有: layer1.lag[mlag].system_mac は書けるが、
+#     L2/L3 domain 側からその MAC を "共有 SVI MAC" として参照する語彙はない。
+#
+# 押し込まなかった点:
+#   - anycast VTEP を "L3Interface に無理やり同一 IP を振って両 leaf の loopback として
+#     並記する" 案は採用するが、vtep_source 選択は片側のままにして
+#     曖昧さを残す (書けたことにしない)。
+
+ndl_version: "1.0"
+
+meta:
+  name: spine-leaf-evpn-dataplane
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, name: Spine-1, role: spine, implementation: vm, device_type: cumulus_linux}
+    - {id: spine2, name: Spine-2, role: spine, implementation: vm, device_type: cumulus_linux}
+    - {id: leaf1,  name: Leaf-1,  role: leaf,  implementation: vm, device_type: cumulus_linux}
+    - {id: leaf2,  name: Leaf-2,  role: leaf,  implementation: vm, device_type: cumulus_linux}
+    - {id: leaf3,  name: Leaf-3,  role: leaf,  implementation: vm, device_type: cumulus_linux}
+    - {id: leaf4,  name: Leaf-4,  role: leaf,  implementation: vm, device_type: cumulus_linux}
+    - {id: srv1, name: Srv-1, role: server, implementation: physical}
+    - {id: srv2, name: Srv-2, role: server, implementation: physical}
+    - {id: srv3, name: Srv-3, role: server, implementation: physical}
+    - {id: srv4, name: Srv-4, role: server, implementation: physical}
+
+  interfaces:
+    # Spine1
+    - {id: spine1-swp1, node: spine1, name: swp1}   # → leaf1
+    - {id: spine1-swp2, node: spine1, name: swp2}   # → leaf2
+    - {id: spine1-swp3, node: spine1, name: swp3}   # → leaf3
+    - {id: spine1-swp4, node: spine1, name: swp4}   # → leaf4
+    # Spine2
+    - {id: spine2-swp1, node: spine2, name: swp1}
+    - {id: spine2-swp2, node: spine2, name: swp2}
+    - {id: spine2-swp3, node: spine2, name: swp3}
+    - {id: spine2-swp4, node: spine2, name: swp4}
+    # Leaf1 (MLAG with Leaf2)
+    - {id: leaf1-swp51, node: leaf1, name: swp51}   # → spine1
+    - {id: leaf1-swp52, node: leaf1, name: swp52}   # → spine2
+    - {id: leaf1-swp49, node: leaf1, name: swp49}   # peer-link
+    - {id: leaf1-swp50, node: leaf1, name: swp50}   # peer-link
+    - {id: leaf1-swp1,  node: leaf1, name: swp1}    # MLAG → srv1
+    # Leaf2 (MLAG with Leaf1)
+    - {id: leaf2-swp51, node: leaf2, name: swp51}
+    - {id: leaf2-swp52, node: leaf2, name: swp52}
+    - {id: leaf2-swp49, node: leaf2, name: swp49}
+    - {id: leaf2-swp50, node: leaf2, name: swp50}
+    - {id: leaf2-swp1,  node: leaf2, name: swp1}
+    # Leaf3 (standalone)
+    - {id: leaf3-swp51, node: leaf3, name: swp51}
+    - {id: leaf3-swp52, node: leaf3, name: swp52}
+    - {id: leaf3-swp1,  node: leaf3, name: swp1}    # → srv2
+    - {id: leaf3-swp2,  node: leaf3, name: swp2}    # → srv3
+    # Leaf4 (standalone)
+    - {id: leaf4-swp51, node: leaf4, name: swp51}
+    - {id: leaf4-swp52, node: leaf4, name: swp52}
+    - {id: leaf4-swp1,  node: leaf4, name: swp1}    # → srv4
+    # Servers
+    - {id: srv1-eth0, node: srv1, name: eth0}
+    - {id: srv1-eth1, node: srv1, name: eth1}
+    - {id: srv2-eth0, node: srv2, name: eth0}
+    - {id: srv3-eth0, node: srv3, name: eth0}
+    - {id: srv4-eth0, node: srv4, name: eth0}
+
+  links:
+    # Spine ↔ Leaf underlay (MTU 9216)
+    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf3, endpoints: [spine1-swp3, leaf3-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf4, endpoints: [spine1-swp4, leaf4-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf3, endpoints: [spine2-swp3, leaf3-swp52], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf4, endpoints: [spine2-swp4, leaf4-swp52], link_speed: 100G, mtu: 9216, link_role: underlay}
+    # MLAG peer-link
+    - {id: link-mlag-peerlink-a, endpoints: [leaf1-swp49, leaf2-swp49], link_speed: 100G, mtu: 9216, link_role: peer-link}
+    - {id: link-mlag-peerlink-b, endpoints: [leaf1-swp50, leaf2-swp50], link_speed: 100G, mtu: 9216, link_role: peer-link}
+    # MLAG → srv1
+    - {id: link-leaf1-srv1, endpoints: [leaf1-swp1, srv1-eth0], link_speed: 25G, link_role: access}
+    - {id: link-leaf2-srv1, endpoints: [leaf2-swp1, srv1-eth1], link_speed: 25G, link_role: access}
+    # Leaf3 → srv2, srv3
+    - {id: link-leaf3-srv2, endpoints: [leaf3-swp1, srv2-eth0], link_speed: 25G, link_role: access}
+    - {id: link-leaf3-srv3, endpoints: [leaf3-swp2, srv3-eth0], link_speed: 25G, link_role: access}
+    # Leaf4 → srv4
+    - {id: link-leaf4-srv4, endpoints: [leaf4-swp1, srv4-eth0], link_speed: 25G, link_role: access}
+
+  lag:
+    - id: lag-peer-link
+      type: lacp
+      node: leaf1
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-mlag-srv1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-peer-link
+      peer_link_interface: peerlink.4094
+      domain_id: 10
+      system_mac: "44:38:39:ff:00:0a"
+
+layer2:
+  vlans:
+    # VLAN 100 は leaf1/leaf2 (MLAG) 側で srv1 に払い出し
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a-web
+      trunk_ports:
+        - {node: leaf1, interface: leaf1-swp1}
+        - {node: leaf2, interface: leaf2-swp1}
+        # leaf3/leaf4 では VLAN 100 は VxLAN 越しに存在するだけで L2 access 端点はない
+    # VLAN 200 は leaf3, leaf4 の access
+    - id: vlan-200
+      vlan_id: 200
+      name: tenant-a-app
+      access_ports:
+        - {node: leaf3, interface: leaf3-swp1}   # srv2
+        - {node: leaf3, interface: leaf3-swp2}   # srv3
+        - {node: leaf4, interface: leaf4-swp1}   # srv4
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      # 書けない (曖昧): MLAG anycast VTEP。
+      #   leaf1/leaf2 は共有 anycast IP 10.0.0.100/32 を持つが、
+      #   vtep_source は L3Interface ID 1 つしか取れないので leaf1 側だけ指す。
+      #   実装上は「同名の L3If を各 leaf に用意すれば anycast」ではあるが、
+      #   L2VNI レベルではその共有事実が書けていない。
+      vtep_source: leaf1-lo-anycast
+      members: [leaf1, leaf2]
+
+    - id: vni-10200
+      type: l2vni
+      vni: 10200
+      vlan: vlan-200
+      vtep_source: leaf3-lo   # leaf3 と leaf4 は個別 loopback。ここも 1 つしか指せない
+      members: [leaf3, leaf4]
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets:
+        import: ["65001:100"]
+        export: ["65001:100"]
+
+  interfaces:
+    # ---- Underlay loopbacks (BGP router-id 相当。BGP は書かない) ----
+    - {id: spine1-lo, node: spine1, interface: lo, ip: 10.0.0.1/32,  vrf: vrf-default}
+    - {id: spine2-lo, node: spine2, interface: lo, ip: 10.0.0.2/32,  vrf: vrf-default}
+    - {id: leaf1-lo,  node: leaf1,  interface: lo, ip: 10.0.0.11/32, vrf: vrf-default}
+    - {id: leaf2-lo,  node: leaf2,  interface: lo, ip: 10.0.0.12/32, vrf: vrf-default}
+    - {id: leaf3-lo,  node: leaf3,  interface: lo, ip: 10.0.0.13/32, vrf: vrf-default}
+    - {id: leaf4-lo,  node: leaf4,  interface: lo, ip: 10.0.0.14/32, vrf: vrf-default}
+
+    # ---- Anycast VTEP loopback (MLAG 共有 IP 10.0.0.100/32) ----
+    # 苦し紛れ: 同一 IP を 2 ノードに別 ID で書いて anycast を近似する。
+    # スキーマ側で「これは anycast VTEP」と宣言する語彙はない。
+    - {id: leaf1-lo-anycast, node: leaf1, interface: lo1, ip: 10.0.0.100/32, vrf: vrf-default}
+    - {id: leaf2-lo-anycast, node: leaf2, interface: lo1, ip: 10.0.0.100/32, vrf: vrf-default}
+
+    # ---- Spine ↔ Leaf routed P2P (/31 underlay) ----
+    - {id: leaf1-swp51-l3, node: leaf1, interface: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51}}
+    - {id: leaf1-swp52-l3, node: leaf1, interface: swp52, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp52}}
+    - {id: leaf2-swp51-l3, node: leaf2, interface: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp51}}
+    - {id: leaf2-swp52-l3, node: leaf2, interface: swp52, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp52}}
+    - {id: leaf3-swp51-l3, node: leaf3, interface: swp51, ip: 10.1.0.9/31, vrf: vrf-default, attaches_to: {interface: leaf3-swp51}}
+    - {id: leaf3-swp52-l3, node: leaf3, interface: swp52, ip: 10.1.0.11/31, vrf: vrf-default, attaches_to: {interface: leaf3-swp52}}
+    - {id: leaf4-swp51-l3, node: leaf4, interface: swp51, ip: 10.1.0.13/31, vrf: vrf-default, attaches_to: {interface: leaf4-swp51}}
+    - {id: leaf4-swp52-l3, node: leaf4, interface: swp52, ip: 10.1.0.15/31, vrf: vrf-default, attaches_to: {interface: leaf4-swp52}}
+    # (Spine 側の /31 対向は略記省略のため書いていない。書こうとすればもう 8 本、計 16 本。)
+
+    # ---- Distributed anycast gateway: 全 leaf で同一 SVI IP ----
+    # VLAN 100 (tenant-a-web) — 192.168.100.1/24 anycast on leaf1/leaf2
+    - {id: leaf1-vlan-100, node: leaf1, interface: vlan-100, ip: 192.168.100.1/24, vrf: vrf-tenant-a, vlan: vlan-100}
+    - {id: leaf2-vlan-100, node: leaf2, interface: vlan-100, ip: 192.168.100.1/24, vrf: vrf-tenant-a, vlan: vlan-100}
+    # VLAN 200 (tenant-a-app) — 192.168.200.1/24 anycast on leaf3/leaf4
+    - {id: leaf3-vlan-200, node: leaf3, interface: vlan-200, ip: 192.168.200.1/24, vrf: vrf-tenant-a, vlan: vlan-200}
+    - {id: leaf4-vlan-200, node: leaf4, interface: vlan-200, ip: 192.168.200.1/24, vrf: vrf-tenant-a, vlan: vlan-200}
+    # 書けない: 「これらは distributed anycast gateway として同一 IP を意図的に共有している」
+    # というメタ情報。バリデーターは (node, vlan_id) の重複だけを見ていて、
+    # 意図的な anycast と設定ミスの見分けがつかない (現状は node が異なるので通る)。

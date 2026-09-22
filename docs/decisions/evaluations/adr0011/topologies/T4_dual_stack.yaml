@@ -1,0 +1,145 @@
+# T4: デュアルスタック (T1 の一部 + IPv4/IPv6 両振り)
+#
+# 書けなかったこと:
+#   - 単一の L3Interface に IPv4 と IPv6 の両方を持たせる方法がない:
+#       L3Interface.ip は "str | None" で 1 アドレスのみ。
+#       → 同一 (node, interface) を **別 ID の L3Interface エントリ 2 本** に
+#         分けて書く必要がある。これは論理的な二重管理:
+#           * SVI の性質 (VRRP, vrf, vlan) を 2 回書く
+#           * fhrp を IPv4 と IPv6 (VRRPv3) で別々に書きたいが、
+#             一つの物理 SVI に対して 2 つの L3If エントリを作ることになる
+#           * どちらが "primary" かの区別もつかない
+#   - IPv6 リンクローカル (fe80::/10) の第一級表現なし:
+#       L3Interface.ip に "fe80::1/64" と書けるが、
+#       "これは link-local であって scope=link" という属性が付与できない。
+#       単なる IPv6 アドレスと区別がつかず、意味は読者に委ねられる。
+#   - IPv6 VRRP (VRRPv3) の group_id 空間が IPv4 と衝突: 現在の FhrpInstance は
+#     group_id: int しか持たず、AF (IPv4/IPv6) の区別がないため、
+#     IPv4 VRRP group 10 と IPv6 VRRP group 10 (別プロセス) の区別がつかない。
+#
+# 押し込まなかった点:
+#   - "ip6" フィールドを勝手に作って書くことはしない (extra="forbid" で reject)。
+#     現状スキーマの範囲で書く。
+
+ndl_version: "1.0"
+
+meta:
+  name: dual-stack-3tier-slice
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: core1, role: core, implementation: physical}
+    - {id: dist1, role: distribution, implementation: physical}
+    - {id: dist2, role: distribution, implementation: physical}
+
+  interfaces:
+    - {id: core1-g1, node: core1, name: Gi1/1}
+    - {id: core1-g2, node: core1, name: Gi1/2}
+    - {id: dist1-g1, node: dist1, name: Gi1/1}
+    - {id: dist2-g1, node: dist2, name: Gi1/1}
+
+  links:
+    - {id: link-core1-dist1, endpoints: [core1-g1, dist1-g1], link_speed: 10G, link_role: underlay}
+    - {id: link-core1-dist2, endpoints: [core1-g2, dist2-g1], link_speed: 10G, link_role: underlay}
+
+layer2:
+  vlans:
+    - id: vlan-10
+      vlan_id: 10
+      name: user-dual-stack
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+  interfaces:
+    # ---- Routed P2P /31 & /127 (Core ↔ Dist) ----
+    # IPv4 と IPv6 で L3Interface エントリを別 ID で 2 本ずつ書く。
+    # 同じ物理 IF を指す (node, interface) が 4 エントリ発生する冗長さ。
+    - id: core1-g1-l3-v4
+      node: core1
+      interface: Gi1/1
+      ip: 10.1.0.0/31
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+
+    - id: core1-g1-l3-v6
+      node: core1
+      interface: Gi1/1
+      ip: 2001:db8:1::/127
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+
+    - id: core1-g1-l3-ll   # 書けない (曖昧): IPv6 link-local を単に書くだけ。
+      node: core1          # scope=link 属性が振れない。
+      interface: Gi1/1
+      ip: fe80::1/64
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+
+    - id: dist1-g1-l3-v4
+      node: dist1
+      interface: Gi1/1
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    - id: dist1-g1-l3-v6
+      node: dist1
+      interface: Gi1/1
+      ip: 2001:db8:1::1/127
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    - id: dist1-g1-l3-ll
+      node: dist1
+      interface: Gi1/1
+      ip: fe80::2/64
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    # ---- SVI (VLAN 10) dual-stack + FHRP ----
+    # Dist1 (primary)
+    - id: dist1-vlan-10-v4
+      node: dist1
+      interface: Vlan10
+      ip: 192.168.10.2/24
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1, priority: 110, preempt: true}
+
+    - id: dist1-vlan-10-v6
+      node: dist1
+      interface: Vlan10
+      ip: "2001:db8:10::2/64"
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        # 書けない (曖昧): これは VRRPv3 for IPv6 だが、
+        # protocol: vrrp / group_id: 10 で IPv4 側と group_id が衝突する。
+        # AF 区別が入らないため、実装ツール側が推測するしかない。
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1", priority: 110, preempt: true}
+
+    # Dist2 (backup) — 同上を 2 エントリで書き直す。冗長。
+    - id: dist2-vlan-10-v4
+      node: dist2
+      interface: Vlan10
+      ip: 192.168.10.3/24
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1, priority: 100}
+
+    - id: dist2-vlan-10-v6
+      node: dist2
+      interface: Vlan10
+      ip: "2001:db8:10::3/64"
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1", priority: 100}
+
+    # 書けない: 「dist1-vlan-10-v4 と dist1-vlan-10-v6 は同一 SVI の 2 AF ビュー」
+    #   というグルーピング。読者が (node, interface) の一致から推測するしかない。

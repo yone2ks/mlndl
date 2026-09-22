@@ -1,0 +1,130 @@
+# T4 rewritten with **案 L** (`ipv4: list` + `ipv6: list`、`ip` 廃止)
+#
+# 仕様（仮）:
+#   L3Interface:
+#     # ip:   廃止 (breaking change — 全 fixture の書き換えが必要)
+#     ipv4: list[str] = []
+#     ipv6: list[str] = []
+#
+# 意味論の含意:
+#   - AF の対称性が最も高い。v4/v6 とも複数持てる
+#   - AF は field 名で決まるので `ip: "2001:db8::1"` の混同が原理的に起こらない
+#   - 破壊的変更。既存 fixture の layer3.interfaces を全部書き換える必要がある
+#     (valid_full_dc.yaml で 6 エントリ、`ip:` → `ipv4: [...]` 移行が全部発生)
+#
+# 未実装なので validate は通らない前提。
+
+ndl_version: "1.0"
+
+meta:
+  name: dualstack-variant-L
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: core1, role: core,         implementation: physical}
+    - {id: dist1, role: distribution, implementation: physical}
+    - {id: dist2, role: distribution, implementation: physical}
+  interfaces:
+    - {id: core1-g1, node: core1, name: Gi1/1}
+    - {id: dist1-g1, node: dist1, name: Gi1/1}
+  links:
+    - {id: link-core1-dist1, endpoints: [core1-g1, dist1-g1], link_speed: 10G, link_role: underlay}
+
+layer2:
+  vlans:
+    - {id: vlan-10, vlan_id: 10, name: user-dual-stack}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # ---- Loopback ----
+    - id: dist1-lo
+      node: dist1
+      interface: lo
+      ipv4: ["10.0.0.11/32"]
+      ipv6: ["2001:db8::11/128"]
+      vrf: vrf-default
+
+    - id: dist2-lo
+      node: dist2
+      interface: lo
+      ipv4: ["10.0.0.12/32"]
+      ipv6: ["2001:db8::12/128"]
+      vrf: vrf-default
+
+    # ---- Routed P2P (dual-stack + LL) ----
+    - id: core1-g1-l3
+      node: core1
+      interface: Gi1/1
+      ipv4: ["10.1.0.0/31"]
+      ipv6:
+        - "2001:db8:1::/127"
+        - "fe80::1/64"
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+
+    - id: dist1-g1-l3
+      node: dist1
+      interface: Gi1/1
+      ipv4: ["10.1.0.1/31"]
+      ipv6:
+        - "2001:db8:1::1/127"
+        - "fe80::2/64"
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    # ---- SVI + FHRP ----
+    - id: dist1-vlan-10
+      node: dist1
+      interface: Vlan10
+      ipv4: ["192.168.10.2/24"]
+      ipv6:
+        - "2001:db8:10::2/64"
+        - "fd00:10::2/64"
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1,     priority: 110, preempt: true}
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1", priority: 110, preempt: true}
+
+    - id: dist2-vlan-10
+      node: dist2
+      interface: Vlan10
+      ipv4: ["192.168.10.3/24"]
+      ipv6:
+        - "2001:db8:10::3/64"
+        - "fd00:10::3/64"
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1,     priority: 100}
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1", priority: 100}
+
+    # ==== R2 エッジケース ====
+
+    # (a) IPv6-only IF — OK (ipv4 省略)
+    - id: dist1-mgmt-v6only
+      node: dist1
+      interface: mgmt0
+      ipv6: ["2001:db8:ffff::2/64"]
+      vrf: vrf-default
+
+    # (b) セカンダリ IPv4 — **1 エントリで書ける**。
+    #     案 U / U+ で書けなかった唯一のケースが解消。
+    - id: dist1-vlan-10-with-secondary
+      node: dist1
+      interface: Vlan10-alt        # 実際は同一 SVI に統合したいが、
+                                   # 上の dist1-vlan-10 に merge するのが自然:
+                                   #   ipv4: ["192.168.10.2/24", "192.168.11.2/24"]
+      ipv4: ["192.168.11.2/24"]
+      vrf: vrf-default
+      vlan: vlan-10
+      # 実運用では上記 dist1-vlan-10 に統合可能。ここでは "1 エントリで OK" を示すため
+      # 別名にしただけ。分割せず統合できる点が U/U+ との差。
+
+    # (c) GUA + ULA — OK (上記 dist1-vlan-10 に統合済み)
+
+    # (d) `ip:` 混同問題 — そもそも `ip:` フィールドが無いので発生しない。

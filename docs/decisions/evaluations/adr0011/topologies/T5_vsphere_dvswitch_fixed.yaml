@@ -1,0 +1,100 @@
+# T5: vSphere (ESXi 2台 / VM 4台 / ToR 2台)
+#
+# 目的: tests/fixtures/valid_vsphere_dvswitch.yaml が validate を通らない
+#       (trunk_ports が IF ID ではなく name "Ethernet1" を参照) 問題を修正。
+#
+# 参照バグの本質:
+#   PortRef.interface は「L1 Interface の *ID*」を参照する必要がある
+#   (_validate_l2 で interface_ids 集合を突き合わせている)。
+#   既存 fixture では ID = "tor-sw1-Eth1" だが trunk_ports で "Ethernet1" を書いており、
+#   参照解決に失敗する。命名の曖昧さ (name と ID の混同) が原因。
+#
+# 書けなかったこと:
+#   - dvSwitch / vSwitch / PortGroup そのもの (Phase 2 L2 予定):
+#       * ESXi の "dvs-01" という論理スイッチを **L1 に置く語彙がない**。
+#         vswitch/dvswitch は L1 role として却下されている (CLAUDE.md #9)。
+#       * 結果、VM vNIC は "dvSwitch を介して" ではなく
+#         "L1 リンクで直接 ESXi の vmnic に繋がっている" と嘘を書くか、
+#         **書かない** かの二択。今回は書かない (下記コメント参照)。
+#   - PortGroup ↔ VLAN mapping (pg-web = VLAN 100):
+#       * 現行スキーマでは VLAN に "port group" を紐付ける枠がない。
+#       * VM vNIC を VLAN.access_ports に登録することはできるが、
+#         「pg-web を介した」というホップが消える (直付けと区別つかない)。
+#   - VM ホスト間 vMotion 用の kernel port (vmk0):
+#       * ESXi 上の VMkernel は物理でも VM でもない特殊 IF。表現できない。
+
+ndl_version: "1.0"
+
+meta:
+  name: vsphere-dvswitch-fixed
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - {id: esxi-01, name: ESXi-01, role: hypervisor, implementation: physical, device_type: vmware_esxi}
+    - {id: esxi-02, name: ESXi-02, role: hypervisor, implementation: physical, device_type: vmware_esxi}
+    - {id: tor-sw1, name: ToR-1, role: leaf, implementation: physical, device_type: arista_eos}
+    - {id: tor-sw2, name: ToR-2, role: leaf, implementation: physical, device_type: arista_eos}
+    - {id: web-vm1, name: web-vm1, role: server, implementation: vm, attaches_to: esxi-01}
+    - {id: web-vm2, name: web-vm2, role: server, implementation: vm, attaches_to: esxi-01}
+    - {id: db-vm1,  name: db-vm1,  role: server, implementation: vm, attaches_to: esxi-02}
+    - {id: db-vm2,  name: db-vm2,  role: server, implementation: vm, attaches_to: esxi-02}
+
+  interfaces:
+    # ESXi 物理 vmnic
+    - {id: esxi-01-vmnic0, node: esxi-01, name: vmnic0}
+    - {id: esxi-01-vmnic1, node: esxi-01, name: vmnic1}
+    - {id: esxi-02-vmnic0, node: esxi-02, name: vmnic0}
+    - {id: esxi-02-vmnic1, node: esxi-02, name: vmnic1}
+    # ToR ports
+    - {id: tor-sw1-eth1, node: tor-sw1, name: Ethernet1}
+    - {id: tor-sw1-eth2, node: tor-sw1, name: Ethernet2}
+    - {id: tor-sw2-eth1, node: tor-sw2, name: Ethernet1}
+    - {id: tor-sw2-eth2, node: tor-sw2, name: Ethernet2}
+    # VM vNIC — 物理的な意味では存在するが、dvSwitch を介するので
+    # 「どの vmnic に繋がるか」は runtime で決まる。ここでは vNIC だけ定義。
+    - {id: web-vm1-eth0, node: web-vm1, name: eth0}
+    - {id: web-vm2-eth0, node: web-vm2, name: eth0}
+    - {id: db-vm1-eth0,  node: db-vm1,  name: eth0}
+    - {id: db-vm2-eth0,  node: db-vm2,  name: eth0}
+
+  links:
+    # ESXi → ToR (物理ケーブル、trunk)
+    - {id: link-esxi01-vmnic0-tor1, endpoints: [esxi-01-vmnic0, tor-sw1-eth1], link_speed: 10G, link_role: uplink}
+    - {id: link-esxi01-vmnic1-tor2, endpoints: [esxi-01-vmnic1, tor-sw2-eth1], link_speed: 10G, link_role: uplink}
+    - {id: link-esxi02-vmnic0-tor1, endpoints: [esxi-02-vmnic0, tor-sw1-eth2], link_speed: 10G, link_role: uplink}
+    - {id: link-esxi02-vmnic1-tor2, endpoints: [esxi-02-vmnic1, tor-sw2-eth2], link_speed: 10G, link_role: uplink}
+    # 書けない: VM vNIC → dvSwitch port-group → uplink vmnic の経路。
+    # L1 の点対点 link で書くと嘘 (dvSwitch は L2 bridge であって
+    # 点対点ではない)。今回は書かないことにする。
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: web-tier
+      # ToR 側 trunk ports (fixed: 正しく **ID** を参照)
+      trunk_ports:
+        - {node: tor-sw1, interface: tor-sw1-eth1}
+        - {node: tor-sw1, interface: tor-sw1-eth2}
+        - {node: tor-sw2, interface: tor-sw2-eth1}
+        - {node: tor-sw2, interface: tor-sw2-eth2}
+      # VM vNIC は access port として登録 (dvSwitch/PG は書けないので直付け近似)
+      access_ports:
+        - {node: web-vm1, interface: web-vm1-eth0}
+        - {node: web-vm2, interface: web-vm2-eth0}
+
+    - id: vlan-200
+      vlan_id: 200
+      name: db-tier
+      trunk_ports:
+        - {node: tor-sw1, interface: tor-sw1-eth1}
+        - {node: tor-sw1, interface: tor-sw1-eth2}
+        - {node: tor-sw2, interface: tor-sw2-eth1}
+        - {node: tor-sw2, interface: tor-sw2-eth2}
+      access_ports:
+        - {node: db-vm1, interface: db-vm1-eth0}
+        - {node: db-vm2, interface: db-vm2-eth0}
+
+# 書けない: dvs-01 / dvs-02 (Distributed Virtual Switch) というオブジェクトそのもの。
+#   Phase 2 L2 (layer2.bridges 等) で扱う予定。

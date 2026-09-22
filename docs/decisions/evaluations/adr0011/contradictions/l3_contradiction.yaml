@@ -1,0 +1,18 @@
+ndl_version: "1.0"
+layer1:
+  nodes: [{id: leaf1}]
+  interfaces: [{id: leaf1-swp1, node: leaf1}]
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100, trunk_ports: [{node: leaf1, interface: leaf1-swp1}]}
+    - {id: vlan-42,  vlan_id: 42,  trunk_ports: [{node: leaf1, interface: leaf1-swp1}]}
+layer3:
+  vrfs: [{id: vrf-default}]
+  interfaces:
+    - id: leaf1-vlan-100
+      node: leaf1
+      interface: vlan-999            # 名前は 999
+      vlan: vlan-100                 # vlan 参照は 100
+      attaches_to: {interface: vlan-42}   # attaches_to は 42
+      ip: not-an-ip-address          # IP でもない
+      vrf: vrf-default

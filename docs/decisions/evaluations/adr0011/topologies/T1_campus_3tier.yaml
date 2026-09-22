@@ -1,0 +1,302 @@
+# T1: 企業キャンパス 3-Tier
+#
+# 書けなかったこと（詳細は最終レポート参照）:
+#   - クライアントのデフォルトゲートウェイ（明示できるフィールドなし。
+#     慣習的には Dist の VRRP VIP を指す、と読者に推測させるしかない）
+#   - Core からインターネットへのデフォルトルート（静的経路のスキーマがない）
+#   - インターネット外部（"outside" nexthop）を指す表現（0.0.0.0/0 の next-hop）
+#   - Distribution 間 L2 トランクの明示: Dist1↔Dist2 間のリンクを VLAN の trunk_ports で
+#     カバーしているが「このリンクがトランクである」という link_role: trunk が語彙にない
+#     (link_role は自由文字列だが規約外)
+#
+# 押し込まなかった点:
+#   - デフォルトルートを "特別な L3Interface" として書く選択肢もあり得たが、
+#     ルーティング情報を IF に押し込むことになるので採用しない
+
+ndl_version: "1.0"
+
+meta:
+  name: campus-3tier
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: core1, name: Core-1, role: core, implementation: physical}
+    - {id: core2, name: Core-2, role: core, implementation: physical}
+    - {id: dist1, name: Dist-1, role: distribution, implementation: physical}
+    - {id: dist2, name: Dist-2, role: distribution, implementation: physical}
+    - {id: acc1,  name: Acc-1,  role: access, implementation: physical}
+    - {id: acc2,  name: Acc-2,  role: access, implementation: physical}
+    - {id: acc3,  name: Acc-3,  role: access, implementation: physical}
+    - {id: acc4,  name: Acc-4,  role: access, implementation: physical}
+    - {id: client1, name: Client-1, role: server, implementation: physical}
+    - {id: client2, name: Client-2, role: server, implementation: physical}
+    # 書けない: "internet" を外部ドメインとして表す語彙がない。
+    # ノードにして role: border と書くことはできるが、
+    # そこから先の default route/next-hop を書く手段がない。
+    - {id: internet-edge, name: Internet-Edge, role: border, implementation: physical}
+
+  interfaces:
+    # Core1
+    - {id: core1-g1, node: core1, name: Gi1/1}   # → Dist1 (routed /31)
+    - {id: core1-g2, node: core1, name: Gi1/2}   # → Dist2 (routed /31)
+    - {id: core1-g3, node: core1, name: Gi1/3}   # → Core2
+    - {id: core1-g4, node: core1, name: Gi1/4}   # → internet-edge
+    # Core2
+    - {id: core2-g1, node: core2, name: Gi1/1}
+    - {id: core2-g2, node: core2, name: Gi1/2}
+    - {id: core2-g3, node: core2, name: Gi1/3}
+    # Dist1
+    - {id: dist1-g1, node: dist1, name: Gi1/1}   # ← Core1
+    - {id: dist1-g2, node: dist1, name: Gi1/2}   # ← Core2
+    - {id: dist1-g3, node: dist1, name: Gi1/3}   # ↔ Dist2 (trunk)
+    - {id: dist1-g4, node: dist1, name: Gi1/4}   # → Acc1
+    - {id: dist1-g5, node: dist1, name: Gi1/5}   # → Acc2
+    # Dist2
+    - {id: dist2-g1, node: dist2, name: Gi1/1}
+    - {id: dist2-g2, node: dist2, name: Gi1/2}
+    - {id: dist2-g3, node: dist2, name: Gi1/3}
+    - {id: dist2-g4, node: dist2, name: Gi1/4}   # → Acc3
+    - {id: dist2-g5, node: dist2, name: Gi1/5}   # → Acc4
+    # Access
+    - {id: acc1-up,   node: acc1, name: Gi0/1}   # uplink → Dist1 (trunk)
+    - {id: acc1-c1,   node: acc1, name: Fa0/1}   # → client1 (access user vlan)
+    - {id: acc2-up,   node: acc2, name: Gi0/1}
+    - {id: acc3-up,   node: acc3, name: Gi0/1}
+    - {id: acc4-up,   node: acc4, name: Gi0/1}
+    - {id: acc4-c2,   node: acc4, name: Fa0/1}
+    # Clients
+    - {id: client1-eth0, node: client1, name: eth0}
+    - {id: client2-eth0, node: client2, name: eth0}
+    # Internet edge
+    - {id: internet-edge-g1, node: internet-edge, name: Gi0/0}
+
+  links:
+    # Core - Core
+    - id: link-core1-core2
+      endpoints: [core1-g3, core2-g3]
+      link_speed: 10G
+    # Core - Distribution (routed /31)
+    - id: link-core1-dist1
+      endpoints: [core1-g1, dist1-g1]
+      link_speed: 10G
+      link_role: underlay
+    - id: link-core1-dist2
+      endpoints: [core1-g2, dist2-g1]
+      link_speed: 10G
+      link_role: underlay
+    - id: link-core2-dist1
+      endpoints: [core2-g1, dist1-g2]
+      link_speed: 10G
+      link_role: underlay
+    - id: link-core2-dist2
+      endpoints: [core2-g2, dist2-g2]
+      link_speed: 10G
+      link_role: underlay
+    # Distribution 間トランク
+    - id: link-dist1-dist2
+      endpoints: [dist1-g3, dist2-g3]
+      link_speed: 10G
+      link_role: access   # 書けない: "trunk" が推奨 link_role 語彙にない。access で代用。
+    # Distribution - Access (trunk)
+    - {id: link-dist1-acc1, endpoints: [dist1-g4, acc1-up], link_speed: 1G, link_role: access}
+    - {id: link-dist1-acc2, endpoints: [dist1-g5, acc2-up], link_speed: 1G, link_role: access}
+    - {id: link-dist2-acc3, endpoints: [dist2-g4, acc3-up], link_speed: 1G, link_role: access}
+    - {id: link-dist2-acc4, endpoints: [dist2-g5, acc4-up], link_speed: 1G, link_role: access}
+    # Access - Client
+    - {id: link-acc1-client1, endpoints: [acc1-c1, client1-eth0], link_speed: 1G, link_role: access}
+    - {id: link-acc4-client2, endpoints: [acc4-c2, client2-eth0], link_speed: 1G, link_role: access}
+    # Core - Internet (書けない: 隣接 AS/ISP との BGP は書かないが、
+    #                   このリンクの向こう側=インターネット、を明示できない)
+    - {id: link-core1-internet, endpoints: [core1-g4, internet-edge-g1], link_speed: 10G, link_role: uplink}
+
+layer2:
+  vlans:
+    - id: vlan-10
+      vlan_id: 10
+      name: user
+      trunk_ports:
+        - {node: dist1, interface: dist1-g3}
+        - {node: dist2, interface: dist2-g3}
+        - {node: dist1, interface: dist1-g4}
+        - {node: dist1, interface: dist1-g5}
+        - {node: dist2, interface: dist2-g4}
+        - {node: dist2, interface: dist2-g5}
+        - {node: acc1,  interface: acc1-up}
+        - {node: acc2,  interface: acc2-up}
+        - {node: acc3,  interface: acc3-up}
+        - {node: acc4,  interface: acc4-up}
+      access_ports:
+        - {node: acc1, interface: acc1-c1}
+        - {node: acc4, interface: acc4-c2}
+
+    - id: vlan-20
+      vlan_id: 20
+      name: voice
+      trunk_ports:
+        - {node: dist1, interface: dist1-g3}
+        - {node: dist2, interface: dist2-g3}
+        - {node: dist1, interface: dist1-g4}
+        - {node: dist1, interface: dist1-g5}
+        - {node: dist2, interface: dist2-g4}
+        - {node: dist2, interface: dist2-g5}
+        - {node: acc1,  interface: acc1-up}
+        - {node: acc2,  interface: acc2-up}
+        - {node: acc3,  interface: acc3-up}
+        - {node: acc4,  interface: acc4-up}
+
+    - id: vlan-99
+      vlan_id: 99
+      name: mgmt
+      trunk_ports:
+        - {node: dist1, interface: dist1-g3}
+        - {node: dist2, interface: dist2-g3}
+        - {node: dist1, interface: dist1-g4}
+        - {node: dist1, interface: dist1-g5}
+        - {node: dist2, interface: dist2-g4}
+        - {node: dist2, interface: dist2-g5}
+        - {node: acc1,  interface: acc1-up}
+        - {node: acc2,  interface: acc2-up}
+        - {node: acc3,  interface: acc3-up}
+        - {node: acc4,  interface: acc4-up}
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+  interfaces:
+    # Core ループバック
+    - {id: core1-lo, node: core1, interface: lo0, ip: 10.255.0.1/32, vrf: vrf-default}
+    - {id: core2-lo, node: core2, interface: lo0, ip: 10.255.0.2/32, vrf: vrf-default}
+
+    # Core ↔ Dist routed /31
+    - id: core1-g1-l3
+      node: core1
+      interface: Gi1/1
+      ip: 10.1.0.0/31
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+    - id: dist1-g1-l3
+      node: dist1
+      interface: Gi1/1
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    - id: core1-g2-l3
+      node: core1
+      interface: Gi1/2
+      ip: 10.1.0.2/31
+      vrf: vrf-default
+      attaches_to: {interface: core1-g2}
+    - id: dist2-g1-l3
+      node: dist2
+      interface: Gi1/1
+      ip: 10.1.0.3/31
+      vrf: vrf-default
+      attaches_to: {interface: dist2-g1}
+
+    - id: core2-g1-l3
+      node: core2
+      interface: Gi1/1
+      ip: 10.1.0.4/31
+      vrf: vrf-default
+      attaches_to: {interface: core2-g1}
+    - id: dist1-g2-l3
+      node: dist1
+      interface: Gi1/2
+      ip: 10.1.0.5/31
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g2}
+
+    - id: core2-g2-l3
+      node: core2
+      interface: Gi1/2
+      ip: 10.1.0.6/31
+      vrf: vrf-default
+      attaches_to: {interface: core2-g2}
+    - id: dist2-g2-l3
+      node: dist2
+      interface: Gi1/2
+      ip: 10.1.0.7/31
+      vrf: vrf-default
+      attaches_to: {interface: dist2-g2}
+
+    # SVI on Distribution (VRRP active/standby)
+    # user vlan (10) — Dist1 primary, Dist2 backup
+    - id: dist1-vlan-10
+      node: dist1
+      interface: Vlan10
+      ip: 192.168.10.2/24
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1, priority: 110, preempt: true}
+    - id: dist2-vlan-10
+      node: dist2
+      interface: Vlan10
+      ip: 192.168.10.3/24
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1, priority: 100, preempt: false}
+
+    # voice vlan (20)
+    - id: dist1-vlan-20
+      node: dist1
+      interface: Vlan20
+      ip: 192.168.20.2/24
+      vrf: vrf-default
+      vlan: vlan-20
+      fhrp:
+        - {protocol: vrrp, group_id: 20, vip: 192.168.20.1, priority: 110, preempt: true}
+    - id: dist2-vlan-20
+      node: dist2
+      interface: Vlan20
+      ip: 192.168.20.3/24
+      vrf: vrf-default
+      vlan: vlan-20
+      fhrp:
+        - {protocol: vrrp, group_id: 20, vip: 192.168.20.1, priority: 100, preempt: false}
+
+    # mgmt vlan (99)
+    - id: dist1-vlan-99
+      node: dist1
+      interface: Vlan99
+      ip: 192.168.99.2/24
+      vrf: vrf-default
+      vlan: vlan-99
+      fhrp:
+        - {protocol: vrrp, group_id: 99, vip: 192.168.99.1, priority: 110, preempt: true}
+    - id: dist2-vlan-99
+      node: dist2
+      interface: Vlan99
+      ip: 192.168.99.3/24
+      vrf: vrf-default
+      vlan: vlan-99
+      fhrp:
+        - {protocol: vrrp, group_id: 99, vip: 192.168.99.1, priority: 100, preempt: false}
+
+    # Core ↔ internet-edge (link-net)
+    - id: core1-g4-l3
+      node: core1
+      interface: Gi1/4
+      ip: 203.0.113.1/30
+      vrf: vrf-default
+      attaches_to: {interface: core1-g4}
+    - id: internet-edge-g1-l3
+      node: internet-edge
+      interface: Gi0/0
+      ip: 203.0.113.2/30
+      vrf: vrf-default
+      attaches_to: {interface: internet-edge-g1}
+
+    # 書けない: クライアント側の default gateway 設定。
+    #   Client1 が 192.168.10.1 (= vlan10 VRRP VIP) をデフォルトゲートウェイと
+    #   して使うことを明示するフィールドがない。
+    #   L3Interface に "default_gateway: 192.168.10.1" のような欄はなく、
+    #   client1 のホスト側ルーティングテーブルは表現できない。
+    # 書けない: Core からインターネット向けの default route。
+    #   例: core1 の routing table に "0.0.0.0/0 via 203.0.113.2" — 表現不可。
+    #   layer3 に static_routes フィールドがなく、
+    #   routing_adjacencies は BGP/OSPF/IS-IS だけで static/connected を含まない。

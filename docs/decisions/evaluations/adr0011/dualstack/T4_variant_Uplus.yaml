@@ -1,0 +1,124 @@
+# T4 rewritten with **案 U+** (`ip` は IPv4 単数 / `ipv6` はリスト)
+#
+# 仕様（仮）:
+#   L3Interface:
+#     ip:   str | None            # IPv4 単数
+#     ipv6: list[str] = []        # IPv6 複数可
+#
+# 意味論の含意:
+#   - v4 単数・v6 複数の非対称。理由: 現場で GUA + ULA + LL 併記の需要が v6 側に偏るから
+#   - ただし v4 側にも secondary の需要はある。非対称は "書きにくいケース" を片方に偏らせるだけ
+#
+# 未実装なので validate は通らない前提。
+
+ndl_version: "1.0"
+
+meta:
+  name: dualstack-variant-Uplus
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: core1, role: core,         implementation: physical}
+    - {id: dist1, role: distribution, implementation: physical}
+    - {id: dist2, role: distribution, implementation: physical}
+  interfaces:
+    - {id: core1-g1, node: core1, name: Gi1/1}
+    - {id: dist1-g1, node: dist1, name: Gi1/1}
+  links:
+    - {id: link-core1-dist1, endpoints: [core1-g1, dist1-g1], link_speed: 10G, link_role: underlay}
+
+layer2:
+  vlans:
+    - {id: vlan-10, vlan_id: 10, name: user-dual-stack}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # ---- Loopback (v4 /32 + v6 /128) ----
+    - id: dist1-lo
+      node: dist1
+      interface: lo
+      ip:   10.0.0.11/32
+      ipv6: ["2001:db8::11/128"]
+      vrf: vrf-default
+
+    - id: dist2-lo
+      node: dist2
+      interface: lo
+      ip:   10.0.0.12/32
+      ipv6: ["2001:db8::12/128"]
+      vrf: vrf-default
+
+    # ---- Routed P2P (dual-stack + LL 同居可) ----
+    # 案 U で分割していた LL エントリを 1 つに畳める。これが案 U+ の最大の利益。
+    - id: core1-g1-l3
+      node: core1
+      interface: Gi1/1
+      ip:   10.1.0.0/31
+      ipv6:
+        - "2001:db8:1::/127"     # GUA
+        - "fe80::1/64"           # LL (scope=link 属性は依然として無い)
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+
+    - id: dist1-g1-l3
+      node: dist1
+      interface: Gi1/1
+      ip:   10.1.0.1/31
+      ipv6:
+        - "2001:db8:1::1/127"
+        - "fe80::2/64"
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    # ---- SVI (VLAN 10) dual-stack + FHRP ----
+    - id: dist1-vlan-10
+      node: dist1
+      interface: Vlan10
+      ip:   192.168.10.2/24
+      ipv6:
+        - "2001:db8:10::2/64"    # GUA
+        - "fd00:10::2/64"        # ULA も同エントリに書ける (これが U+ の利益)
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1,     priority: 110, preempt: true}
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1", priority: 110, preempt: true}
+
+    - id: dist2-vlan-10
+      node: dist2
+      interface: Vlan10
+      ip:   192.168.10.3/24
+      ipv6:
+        - "2001:db8:10::3/64"
+        - "fd00:10::3/64"
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1,     priority: 100}
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1", priority: 100}
+
+    # ==== R2 エッジケース ====
+
+    # (a) IPv6-only IF — OK (ip 省略、ipv6 単一要素リスト)
+    - id: dist1-mgmt-v6only
+      node: dist1
+      interface: mgmt0
+      ipv6: ["2001:db8:ffff::2/64"]
+      vrf: vrf-default
+
+    # (b) セカンダリ IPv4 — **依然として書けない**。ip は単数のまま。
+    #     v4 単数 / v6 リストという非対称の代償がここに集中する。
+    - id: dist1-vlan-10-secondary-v4
+      node: dist1
+      interface: Vlan10           # ← 重複エントリで書くしかない
+      ip: 192.168.11.2/24
+      vrf: vrf-default
+      vlan: vlan-10
+
+    # (c) GUA + ULA — OK。上記 dist1-vlan-10 に集約済み。
+
+    # (d) `ip:` に IPv6 誤入力 — 案 U と同じ。model_validator で拒否する必要あり。

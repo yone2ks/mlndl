@@ -1,0 +1,137 @@
+# T3: 支社ルーター (router-on-a-stick + IPsec/GRE VTI で本社接続)
+#
+# 書けなかったこと (致命):
+#   - 802.1Q サブインターフェース の tag 情報:
+#     L3Interface.interface に "eth0.10" と文字列で書けるが、
+#     "この L3If は eth0 の 802.1Q tag 10" というスキーマ的関係が書けない。
+#       * L3Interface に vlan_id フィールド (整数) がない。
+#         SVI 用の vlan: vlan-10 (=VLAN ID 参照) はあるが、
+#         サブインターフェースの 802.1Q タグを直接指定する枠がない。
+#         また vlan-10 を指すと SVI として解釈されるはず (意味論の重複)。
+#       * 親 IF (eth0) との親子関係を表す構成子がない。
+#         attaches_to: {interface: br1-eth0} と書けば "eth0 の物理ポート上に居る" は
+#         書けるが、サブ IF 3 本が同じ eth0 に居ることになる。
+#         これで tag 情報は失われたまま。
+#   - IPsec VTI トンネル:
+#     * トンネルインターフェース (tun0 等) を L3Interface として書くことは
+#       できるが、attaches_to の対象が {node|interface|link} のみで、
+#       "この tun0 は WAN 側 IPsec カプセル化を経由してリモート peer に着地する"
+#       という 2 点間仮想リンクを書く語彙がない。
+#     * リモート peer / トンネル src/dst IP / IKE パラメータの欄がない。
+#   - GRE トンネル: 同上。
+#   - 本社への静的経路:
+#     * 静的ルート / static_routes / route table 表現が layer3 にない。
+#     * "10.0.0.0/8 は tun0 経由" が書けない。
+#
+# 押し込まなかった点:
+#   - サブ IF の vlan-* を SVI として書くと、意味論的に「トランクの VLAN SVI」
+#     と混同する。router-on-a-stick の 802.1Q サブ IF は概念的に別なので
+#     押し込まず、コメントで差分を残す。
+#   - トンネル IF を単なる L3Interface として書き、attaches_to を省略することで
+#     「浮いた IF」にすることはできる。それはやってみるが、
+#     どの物理経路を通るかは書けないので、後段に警告を残す。
+
+ndl_version: "1.0"
+
+meta:
+  name: branch-router-on-a-stick
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: br1, name: BranchRouter-1, role: border, implementation: physical, device_type: cisco_isr}
+    - {id: br1-sw1, name: BranchSwitch-1, role: access, implementation: physical}
+    - {id: hq-gw, name: HQ-Gateway, role: border, implementation: physical}
+    - {id: internet, name: Internet-Cloud, role: border, implementation: physical}  # abstract
+
+  interfaces:
+    - {id: br1-eth0, node: br1, name: Gi0/0}   # LAN 側 trunk (802.1Q)
+    - {id: br1-eth1, node: br1, name: Gi0/1}   # WAN 側 (Internet uplink)
+    - {id: br1-sw1-up, node: br1-sw1, name: Gi0/1}
+    - {id: hq-gw-wan, node: hq-gw, name: Gi0/1}
+    - {id: internet-a, node: internet, name: aif}
+    - {id: internet-b, node: internet, name: bif}
+
+  links:
+    - {id: link-br1-sw1, endpoints: [br1-eth0, br1-sw1-up], link_speed: 1G, link_role: access}
+    - {id: link-br1-internet, endpoints: [br1-eth1, internet-a], link_speed: 1G, link_role: uplink}
+    - {id: link-hq-internet, endpoints: [hq-gw-wan, internet-b], link_speed: 10G, link_role: uplink}
+    # 書けない: IPsec VTI / GRE トンネルは L1 リンクにも L3 リンクにも当たらない。
+    #   endpoints は L1Interface ID を取るので、tun0 のような L3 論理 IF は
+    #   L1 リンクの端点にはできない。
+    #   結果、tun0 → tun0 の "仮想リンク" が書けない。
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+  interfaces:
+    # ---- Router-on-a-stick 802.1Q サブインターフェース ----
+    # 苦し紛れ: interface 名は "Gi0/0.10" 等の文字列で書く。
+    # vlan_id / dot1q tag / 親 IF の親子関係は書けない。
+    - id: br1-eth0-10
+      node: br1
+      interface: Gi0/0.10
+      ip: 192.168.10.1/24
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth0}   # 物理親 IF はここで指せる
+      # 書けない: 802.1Q tag = 10 という数値情報。
+      # vlan: vlan-10 と書きたくなるが、layer2.vlans は L2 スイッチング領域の
+      # 概念で、router subinterface の tag 参照とは意味が違う。
+
+    - id: br1-eth0-20
+      node: br1
+      interface: Gi0/0.20
+      ip: 192.168.20.1/24
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth0}
+      # 書けない: 802.1Q tag = 20
+
+    - id: br1-eth0-30
+      node: br1
+      interface: Gi0/0.30
+      ip: 192.168.30.1/24
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth0}
+      # 書けない: 802.1Q tag = 30
+
+    # ---- WAN 側 physical IF ----
+    - id: br1-eth1-l3
+      node: br1
+      interface: Gi0/1
+      ip: 198.51.100.2/30
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth1}
+
+    - id: hq-gw-wan-l3
+      node: hq-gw
+      interface: Gi0/1
+      ip: 198.51.100.10/30   # 別 subnet。実際はインターネット越し
+      vrf: vrf-default
+      attaches_to: {interface: hq-gw-wan}
+
+    # ---- IPsec VTI / GRE トンネル (苦し紛れ) ----
+    # attaches_to を空欄にして「浮いた IF」として書く。
+    # 書けない: トンネル src (= br1-eth1 の IP) / dst (= hq-gw-wan の IP)
+    # 書けない: プロトコル種別 (IPsec / GRE / VXLAN-encapped)
+    # 書けない: このトンネルが通る物理経路。
+    #           attaches_to: {link: ...} は 1 リンクしか指せず、
+    #           複数ホップの物理経路には対応しない。
+    - id: br1-tun0
+      node: br1
+      interface: Tunnel0
+      ip: 10.255.0.1/30
+      vrf: vrf-default
+
+    - id: hq-gw-tun0
+      node: hq-gw
+      interface: Tunnel0
+      ip: 10.255.0.2/30
+      vrf: vrf-default
+
+    # 書けない: 本社への静的経路。
+    #   layer3 に static_routes フィールドがない。
+    #   例:
+    #     br1: 10.0.0.0/8 next-hop 10.255.0.2 (Tunnel0)
+    #     br1: 0.0.0.0/0  next-hop 198.51.100.1  (Internet)
+    #   これらを表現する語彙が存在しない。

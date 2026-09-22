@@ -1,0 +1,9 @@
+ndl_version: "1.0"
+layer1:
+  nodes: [{id: leaf1}]
+  interfaces: [{id: leaf1-swp1, node: leaf1}]
+layer2:
+  vlans: [{id: vlan-100, vlan_id: 100, trunk_ports: [{node: leaf1, interface: leaf1-swp1}]}]
+layer3:
+  interfaces:
+    - {id: leaf1-vlan-100, node: leaf1, interface: vlan-100, ip: not-an-ip-address}

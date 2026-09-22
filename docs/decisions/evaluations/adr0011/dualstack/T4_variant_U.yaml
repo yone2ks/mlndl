@@ -1,0 +1,155 @@
+# T4 rewritten with **案 U** (ユーザー案)
+#
+# 仕様（仮）:
+#   L3Interface:
+#     ip:   str | None    # IPv4 単数 (CIDR)。既存フィールドを IPv4 専用と再定義
+#     ipv6: str | None    # 新規追加。IPv6 単数 (CIDR)
+#
+# 意味論の含意:
+#   - `ip` は IPv4 専用に狭められる (breaking semantic change だが field 名は据え置き)
+#   - IPv6 を書きたければ必ず `ipv6:` を使う
+#   - デュアルスタック IF は 1 L3Interface で書けるので (v4, v6, LL) の 3 エントリが 1 に減る
+#
+# 未実装なので validate は通らない前提。shell 実行はしない。
+
+ndl_version: "1.0"
+
+meta:
+  name: dualstack-variant-U
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: core1, role: core,         implementation: physical}
+    - {id: dist1, role: distribution, implementation: physical}
+    - {id: dist2, role: distribution, implementation: physical}
+
+  interfaces:
+    - {id: core1-g1, node: core1, name: Gi1/1}
+    - {id: dist1-g1, node: dist1, name: Gi1/1}
+
+  links:
+    - {id: link-core1-dist1, endpoints: [core1-g1, dist1-g1], link_speed: 10G, link_role: underlay}
+
+layer2:
+  vlans:
+    - {id: vlan-10, vlan_id: 10, name: user-dual-stack}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # ---- Loopback (v4 /32 + v6 /128) ----
+    # 1 エントリで両 AF を書ける
+    - id: dist1-lo
+      node: dist1
+      interface: lo
+      ip:   10.0.0.11/32
+      ipv6: "2001:db8::11/128"
+      vrf: vrf-default
+
+    - id: dist2-lo
+      node: dist2
+      interface: lo
+      ip:   10.0.0.12/32
+      ipv6: "2001:db8::12/128"
+      vrf: vrf-default
+
+    # ---- Routed P2P (dual-stack) ----
+    # 前ラウンド T4 は同一 (node,interface) を 3 エントリ (v4/v6/LL) 書いていた。
+    # 案 U では v4 + v6 GUA が 1 エントリに収まる。
+    # LL (fe80::/10) は書けない: `ipv6:` は単数なので GUA と競合する。
+    #   → LL を固定したい場合は依然として別エントリが必要 (下記 core1-g1-ll 参照)
+    - id: core1-g1-l3
+      node: core1
+      interface: Gi1/1
+      ip:   10.1.0.0/31
+      ipv6: "2001:db8:1::/127"
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+
+    - id: core1-g1-ll        # LL 固定用に別エントリ (書きにくさ残る)
+      node: core1
+      interface: Gi1/1
+      ipv6: "fe80::1/64"     # scope=link かどうかの属性は依然として無い
+      vrf: vrf-default
+      attaches_to: {interface: core1-g1}
+
+    - id: dist1-g1-l3
+      node: dist1
+      interface: Gi1/1
+      ip:   10.1.0.1/31
+      ipv6: "2001:db8:1::1/127"
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    - id: dist1-g1-ll
+      node: dist1
+      interface: Gi1/1
+      ipv6: "fe80::2/64"
+      vrf: vrf-default
+      attaches_to: {interface: dist1-g1}
+
+    # ---- SVI (VLAN 10) dual-stack + FHRP ----
+    # v4/v6 が 1 エントリに収まる。vrf/vlan の書き写しが不要になったのが最大の利益。
+    # ただし fhrp の中で v4 VRRP と v6 VRRPv3 が group_id: int を共有するため
+    # AF 区別が付かない問題は残る (この提案の対象外)。
+    - id: dist1-vlan-10
+      node: dist1
+      interface: Vlan10
+      ip:   192.168.10.2/24
+      ipv6: "2001:db8:10::2/64"
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1,       priority: 110, preempt: true}
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1",   priority: 110, preempt: true}
+        #                             ^^ IPv4 と group_id 衝突。VIP の AF から実装が推測するしかない。
+
+    - id: dist2-vlan-10
+      node: dist2
+      interface: Vlan10
+      ip:   192.168.10.3/24
+      ipv6: "2001:db8:10::3/64"
+      vrf: vrf-default
+      vlan: vlan-10
+      fhrp:
+        - {protocol: vrrp, group_id: 10, vip: 192.168.10.1,     priority: 100}
+        - {protocol: vrrp, group_id: 10, vip: "2001:db8:10::1", priority: 100}
+
+    # ==== R2 で問われたエッジケース ====
+
+    # (a) IPv6-only IF (v4 なし) — 案 U で書ける。ip 欄を省略。
+    - id: dist1-mgmt-v6only
+      node: dist1
+      interface: mgmt0
+      ipv6: "2001:db8:ffff::2/64"
+      vrf: vrf-default
+
+    # (b) セカンダリ IPv4 (1 物理 IF に v4 が 2 つ) — **書けない**。
+    #     ip: が単数なので、依然として (node, interface) が同じ別 ID の
+    #     L3Interface を 2 本書くしかない。ipv6: を単数にした対称性のツケ。
+    - id: dist1-vlan-10-secondary-v4
+      node: dist1
+      interface: Vlan10           # ← dist1-vlan-10 と (node,interface) 重複
+      ip: 192.168.11.2/24         # 例: セカンダリ IPv4 サブネット
+      vrf: vrf-default
+      vlan: vlan-10               # 同じ SVI 情報を再度書き写す (冗長)
+
+    # (c) GUA + ULA (v6 を 2 つ) — **書けない**。同じ問題。
+    - id: dist1-vlan-10-ula
+      node: dist1
+      interface: Vlan10
+      ipv6: "fd00:10::2/64"       # ULA
+      vrf: vrf-default
+      vlan: vlan-10
+
+    # (d) `ip:` に IPv6 を書いた場合 — 案 U の意味論下では error になるべき。
+    #     しかしフィールド型が単に "str" だと構文的にはパースが通ってしまう。
+    #     → ipaddress モジュールで IPv4 検証する model_validator が必要 (仕様側の宿題)。
+    # - id: dist1-vlan-10-BAD
+    #   node: dist1
+    #   interface: Vlan10
+    #   ip: "2001:db8::1/64"       # ← ここは IPv6 なので error 期待
+    #   vrf: vrf-default
