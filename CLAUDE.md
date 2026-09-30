@@ -287,7 +287,7 @@ layer1:
       endpoints: [spine1-swp1, leaf1-swp51]   # 順序非依存（ADR-0006: 物理リンクは無向）
       link_speed: 10G
       mtu: 9216                  # VxLAN 使用時は 1550 以上必須（推奨 9216）
-      link_role: underlay        # underlay/access/peer-link/management/uplink
+      link_role: underlay        # 自由文字列。推奨: underlay/access/trunk/peer-link/management/uplink
 
   lag:
     - id: lag-leaf1-bond0           # LACP: 単一ノードの bond
@@ -319,7 +319,7 @@ layer2:
       type: l2vni                # l2vni / l3vni を明示
       vni: 10100
       vlan: vlan-100
-      vtep_source: {layer: layer3, interface_id: leaf1-lo}
+      vtep_source: leaf1-lo      # layer3.interfaces[].id（node は members に含まれること）
       members: [leaf1, leaf2]
     - id: vni-10900
       type: l3vni                # Symmetric IRB 用 L3VNI（必須）
@@ -339,23 +339,41 @@ layer3:
   interfaces:
     - id: leaf1-swp51-l3
       node: leaf1
-      interface: swp51
-      ip: 10.1.0.1/31
+      interface: swp51           # 機器上の名前（参照解決には使わない。ADR-0011 D3）
+      ip: 10.1.0.1/31            # IPv4 専用（ADR-0011 D5）
+      ipv6: 2001:db8:1::1/127    # IPv6 は別フィールド。いずれも単数
       vrf: vrf-default
-      attaches_to:               # オブジェクト形式 = {interface: id} / {link: id} / {node: id}
+      attaches_to:               # 唯一の参照手段。{interface: <L1 IF id または VLAN id>}
         interface: leaf1-swp51  # layer フィールドは不要（グローバル一意 ID）
 
-    - id: leaf1-vlan-100
+    - id: leaf1-vlan-100         # SVI（短縮形）: interface: vlan-N は layer2.vlans[vlan-N] を指す
       node: leaf1
       interface: vlan-100
       ip: 192.168.100.1/24      # anycast 構成では全 leaf で同一 IP
       vrf: vrf-tenant-a
-      # VRRP/HSRP が必要な場合のみ fhrp を追加:
-      # fhrp:
-      #   - protocol: vrrp
-      #     group_id: 100
-      #     vip: 192.168.100.254
-      #     priority: 110
+      gateway_redundancy:        # ADR-0011 D4（旧 fhrp）。mode で分岐する Tagged Union
+        - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+        # VRRP の場合（IPv4 と IPv6 は別エントリ。IPv6 の VIP はリンクローカル）:
+        # - {mode: vrrp, group_id: 100, vip: 192.168.100.254, priority: 110}
+        # - {mode: vrrp, group_id: 100, vip: "fe80::1", priority: 110}
+
+    - id: leaf2-vlan-100         # SVI（正規形）: 機器上の名前を残し、VLAN は attaches_to で指す
+      node: leaf2
+      interface: Vlan100
+      attaches_to: {interface: vlan-100}
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+
+  tunnel_interfaces:             # ADR-0011 D6。source / destination を自分で持つ（tunnel_links はない）
+    - id: tunnel-border1-dc2
+      node: border1
+      type: gre                  # gre / ipip / ipsec_vti / wireguard
+      source: border1-wan        # layer3.interfaces[].id（同じ node のもの）
+      destination_interface: dc2-border1-wan   # トポロジー外なら destination_ip（どちらか一方）
+      ip: 172.31.0.1/30
+      vrf: vrf-tenant-a          # トンネル IF が属する VRF（overlay 側）
+      transport_vrf: vrf-default # 外側パケットが流れる VRF
+      mtu: 1476
 
   routing_adjacencies:
     - id: bgp-peer-spine1-leaf1  # ADR-0002: bgp-peer-* 形式（bgp-adj-* は廃止）
@@ -408,7 +426,7 @@ mlndl/
 │       ├── schema/
 │       │   ├── layer1.py       # L1Node, L1Interface, L1Link, LacpLag, MlagLag
 │       │   ├── layer2.py       # VLAN, VxLAN (l2vni/l3vni)
-│       │   ├── layer3.py       # VRF, L3Interface, FhrpInstance, RoutingAdjacency
+│       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface, RoutingAdjacency
 │       │   ├── protocols.py    # BFD, OSPF, BGP
 │       │   └── topology.py     # MLNDLTopology（ルートモデル）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
@@ -438,13 +456,21 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | 参照整合性 | 全レイヤーで未定義 node/interface への参照がないか | error |
 | AS 番号 | eBGP ペアで同一 AS / iBGP ペアで異なる AS の矛盾 | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
-| VRF ↔ L3VNI | l3vni フィールドが vxlan に定義済みか | error |
-| VTEP source | vtep_source.interface_id が layer3.interfaces に存在するか | error |
+| VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
+| VTEP source | vtep_source が layer3.interfaces に存在し、その node が members に含まれるか | error |
+| ノード所属 | `trunk_ports` / `access_ports` / L3 IF の `attaches_to` が指す L1 IF が、同じ node のものか | error |
+| SVI 参照 | `attaches_to: {interface:}` は L3Interface に限り VLAN も指せる。短縮形 `interface: vlan-N` の VLAN が存在するか。短縮形と明示した `attaches_to` が食い違っていないか | error |
+| L3 IF 重複 | 同一 `(node, interface)` の L3Interface が重複していないか | error |
+| IP アドレス | `ip` は IPv4、`ipv6` は IPv6 の CIDR（型で検証。`ip` に IPv6 を書くと移動先を示すエラー） | error |
+| ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798） | error |
+| トンネル | `source` が同じ node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。VRF 参照 | error |
+| 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
 | MTU 整合性 | VxLAN 使用時に underlay MTU が 1550 以上か | error |
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容） | error |
-| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
+| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
+| SVI の紐づけ忘れ | `interface` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
 | ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0010 D5・D6 の一意性チェックに置き換え予定（保留中） |
 
@@ -481,7 +507,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0009](docs/decisions/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 | C 相当 | `attaches_to`（Realization）/ `parent`（Containment）/ `labels`（Classification）の 3 軸に分離。`scope`・`pod`・`tags` 等 20 語以上を却下 |
 | [ADR-0008](docs/decisions/drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 | C (Draft) | 箱もノード（`role: vpc`）。`location` 軸。所属は `parent` + `labels` |
 | [ADR-0010](docs/decisions/drafts/0010-control-plane-separation.md) | control plane と data plane の分離 | A r2 (Draft・**保留**) | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（決定済み・**未実装**）。BGP エントリの単位は未決 |
-| [ADR-0011](docs/decisions/drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | A r2 (Draft) | 原理「関係の成立に必要な情報は書き、個別経路は書かない」。スタティックルートはスコープ外。SVI は `attaches_to` に一本化。`fhrp` → `gateway_redundancy`。`ip` (IPv4) / `ipv6`。トンネル追加（**未実装**） |
+| [ADR-0011](docs/decisions/drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | A r2 (Draft) | 原理「関係の成立に必要な情報は書き、個別経路は書かない」。スタティックルートはスコープ外。SVI は `attaches_to` に一本化。`fhrp` → `gateway_redundancy`。`ip` (IPv4) / `ipv6`。トンネル追加（D3〜D7・D9 **実装済み**。ADR-0005 の同期 D8 は未着手） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

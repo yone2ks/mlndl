@@ -6,7 +6,7 @@
 ## `topologies/` — 現行スキーマでどこまで書けるか (2026-09-20)
 
 制御プレーン (BGP / OSPF) は書かず、L1 / L2 / L3 のデータプレーンだけで代表トポロジーを書いた。
-**5 本とも `python -m mlndl validate` を通る**が、書けない要素を `# 書けない:` のコメントで
+**ADR-0011 実装前のスキーマでは 5 本とも `python -m mlndl validate` を通った**が、書けない要素を `# 書けない:` のコメントで
 残した結果であり、コメントは合計 27 箇所ある (ADR-0011 F1)。
 
 | ファイル | トポロジー | 主に書けなかったもの |
@@ -20,13 +20,17 @@
 `T5` は壊れている `tests/fixtures/valid_vsphere_dvswitch.yaml` (IF 名を参照している) を
 ID 参照に直した版で、validate を通る。
 
+> **ADR-0011 実装後 (2026-10-01)**: T1 / T2 / T4 は廃止された `L3Interface.vlan` を使っているため、
+> 現行スキーマでは parse エラーになる (移動先を示すメッセージが出る)。
+> 実装前の状態の記録として、書き換えずに残している。
+
 ## `contradictions/` — 矛盾が黙って通る例 (ADR-0011 F2・F4)
 
 | ファイル | 内容 | 現行の結果 |
 |---|---|---|
 | `l3_contradiction.yaml` | `interface` / `vlan` / `attaches_to` が三者三様 + 不正な IP | `attaches_to` の VLAN 参照だけが error (ADR-0005 D2-2 の正規形が通らない = F3) |
-| `l3_contradiction2.yaml` | 食い違う `interface` / `vlan`、不正な IP、`/33`、別ノードの IF 参照 | **すべて通る** |
-| `bad_ip_export.yaml` | 不正な IP を持つ SVI | validate も **cytoscape export も通り**、VLAN のサブネットが警告なく消える |
+| `l3_contradiction2.yaml` | 食い違う `interface` / `vlan`、不正な IP、`/33`、別ノードの IF 参照 | **すべて通る** (実装後は parse エラー) |
+| `bad_ip_export.yaml` | 不正な IP を持つ SVI | validate も **cytoscape export も通り**、VLAN のサブネットが警告なく消える (実装後は parse エラー) |
 
 ## `dualstack/` — デュアルスタック表現の案比較 (ADR-0011 D5)
 

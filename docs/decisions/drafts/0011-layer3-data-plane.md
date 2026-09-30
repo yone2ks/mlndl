@@ -1,6 +1,6 @@
 # ADR-0011: layer3 データプレーンの確定
 
-- **Status**: Draft
+- **Status**: Draft — **D3〜D7・D9・D10 実装済み (2026-10-01)**。D8 (ADR-0005 の同期) は未着手
 - **Date**: 2026-09-20
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A r2 (初回策定 → 5 エージェントレビュー反映。差分は末尾「r1 からの変更」)
@@ -318,11 +318,33 @@ F2 で実測した「黙って通る」ものを塞ぐ。
 |---|---|
 | `ip` の型を `IPv4Interface` に | **0 行** (23 個すべて IPv4) |
 | `ipv6` / `description` / トンネルの追加 | **0 行** (加算) |
-| `fhrp` → `gateway_redundancy`、`protocol` → `mode`、値 `anycast_gateway` | 3 fixture の機械的置換 |
-| `vlan` フィールドの廃止 | **5 fixture の 8 箇所** (`invalid_*` を含む)。`attaches_to` に移すか、`interface: vlan-N` の短縮形に寄せる。旧キーが残っていれば移動先を示す error を出す |
-| `interface: vlan-N` の短縮形の扱い | 5 fixture の 15 箇所。書き方は変わらないが、参照解決の経路が変わる |
+| `fhrp` → `gateway_redundancy`、`protocol` → `mode`、値 `anycast_gateway` | **1 fixture** (`valid_multisite_wan.yaml`) の 6 エントリ |
+| `L3Interface.vlan` フィールドの廃止 | **0 箇所**。旧キーが残っていれば移動先を示す error を出す |
+| `interface: vlan-N` の短縮形の扱い | 3 fixture の 15 箇所。書き方は変わらないが、参照解決の経路が変わる |
 | `ip` の型変更に伴う `exporter/cytoscape.py` の修正 | `IPv4Interface` は `json.dumps` で直列化できない (`TypeError`)。`str()` を挟む |
 | D9 の新規チェック | 既存 fixture が新たに error になる箇所があれば、fixture 側を直す |
+
+> **r2 の移行見積もりの訂正 (実装時に実測)**: r2 は「`vlan:` が 5 fixture 8 箇所」「`fhrp` は 3 fixture」としていたが、
+> fixture の `vlan:` 8 箇所はすべて `layer2.vxlan[].vlan` (VNI → VLAN のマッピング) で、廃止対象の
+> `L3Interface.vlan` ではなかった。`fhrp` を使う fixture も 1 本だけだった。YAML のキー名を grep しただけで、
+> それがどのモデルのフィールドかを確かめていなかったことによる誤り。
+
+### 実装記録 (2026-10-01)
+
+| 項目 | 内容 |
+|---|---|
+| スキーマ | `layer3.py`: `L3Interface` (`ip: IPv4Interface` / `ipv6: IPv6Interface` / `gateway_redundancy` / 廃止キーの検出)、`VrrpGateway` / `HsrpGateway` / `AnycastGateway` の Tagged Union、`TunnelInterface`、`L3Layer.tunnel_interfaces`。layer1 / layer2 の全エンティティに `description` |
+| validator | D9 の全規則。`_check_attaches_to` に `extra_interface_ids` を追加し、VLAN を許すのは `L3Interface` の呼び出しだけにした |
+| エクスポーター | cytoscape: `ip` / `ipv6` の `str()` 化、SVI の VLAN を `attachment_ref()` で解決、`subnet_v6`、`lo_ipv6`、ノードの `tunnels`、トンネル辺の導出 (往復 2 本から 1 本)。不正な IP を握りつぶしていた `try/except ValueError` は型検証に置き換えて削除 |
+| CLI | スキーマ違反をトレースバックではなく `ERROR` 行で報告するようにした (廃止キーの移動先メッセージを利用者に届けるため) |
+| fixture | `valid_multisite_wan.yaml` の `fhrp` を移行。新規 `valid_dual_stack.yaml` / `valid_tunnel.yaml` |
+| テスト | `tests/test_layer3_dataplane.py` (47 件)。新規の検証規則 10 件は、それぞれを無効化すると対応するテストが落ちることを確認済み |
+
+**D7 の適用範囲**: `description` は layer1 / layer2 / layer3 のエンティティに追加した。`RoutingAdjacency` と
+`protocols.*` は ADR-0010 (保留中) で置き換わるため追加していない。`PortRef` / `LacpConfig` / `RouteTargets` /
+`AttachesToObj` は独立したエンティティではないため対象外。
+
+**D11 の残件**: ADR-0005 への実装同期メモと原理 (D1) の追記 (D8)。
 
 ## Consequences
 
