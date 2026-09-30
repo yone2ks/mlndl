@@ -241,3 +241,20 @@ class TestCliSeverity:
         r = self._run(tmp_path, "--strict")
         assert r.returncode == 1
         assert "ERROR" in r.stderr
+
+    def test_schema_error_is_reported_without_traceback(self, tmp_path):
+        """スキーマ違反 (ここでは ADR-0011 で廃止したキー) は ERROR 行で報告し、トレースバックを出さない"""
+        f = tmp_path / "t.yaml"
+        f.write_text(
+            'ndl_version: "1.0"\n'
+            "layer3:\n  interfaces:\n"
+            "    - {id: s1, node: n1, interface: vlan-10, fhrp: []}\n"
+        )
+        r = subprocess.run(
+            [sys.executable, "-m", "mlndl", "validate", str(f)],
+            capture_output=True, text=True,
+        )
+        assert r.returncode == 1
+        assert "Traceback" not in r.stderr
+        assert "ERROR    layer3.interfaces[0]:" in r.stderr
+        assert "gateway_redundancy" in r.stderr

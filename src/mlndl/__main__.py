@@ -10,13 +10,30 @@
 import argparse
 import sys
 
+import pydantic
+
 from .parser import parse_file
 from .validator import validate_all
 from .exporter import cytoscape, yaml as yaml_exporter
 
 
+def _load(path):
+    """YAML を読み込む。スキーマ違反はトレースバックではなく ERROR 行で報告して終了する"""
+    try:
+        return parse_file(path)
+    except pydantic.ValidationError as exc:
+        for err in exc.errors():
+            loc = "".join(f"[{x}]" if isinstance(x, int) else f".{x}" for x in err["loc"]).lstrip(".")
+            msg = err["msg"].removeprefix("Value error, ")
+            print(f"ERROR    {loc}: {msg}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as exc:  # サイズ上限・バージョン不一致など
+        print(f"ERROR    {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_export(args):
-    topology = parse_file(args.file)
+    topology = _load(args.file)
     if args.format == 'cytoscape':
         print(cytoscape.export_json(topology))
     elif args.format == 'yaml':
@@ -27,7 +44,7 @@ def cmd_export(args):
 
 
 def cmd_validate(args):
-    topology = parse_file(args.file)
+    topology = _load(args.file)
     result = validate_all(topology, strict=args.strict)
     for e in result.errors:
         print(f"ERROR    {e}", file=sys.stderr)
