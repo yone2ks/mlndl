@@ -342,43 +342,43 @@ layer3:
       interface: vlan-10
       ip: 172.16.10.2/24
       vrf: vrf-default
-      fhrp:
-        - {protocol: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
     - id: cm-core2-vlan10
       node: cm-core2
       interface: vlan-10
       ip: 172.16.10.3/24
       vrf: vrf-default
-      fhrp:
-        - {protocol: vrrp, group_id: 10, vip: 172.16.10.1, priority: 90}
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 90}
     - id: cm-core1-vlan20
       node: cm-core1
       interface: vlan-20
       ip: 172.16.20.2/24
       vrf: vrf-default
-      fhrp:
-        - {protocol: vrrp, group_id: 20, vip: 172.16.20.1, priority: 110}
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 110}
     - id: cm-core2-vlan20
       node: cm-core2
       interface: vlan-20
       ip: 172.16.20.3/24
       vrf: vrf-default
-      fhrp:
-        - {protocol: vrrp, group_id: 20, vip: 172.16.20.1, priority: 90}
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 90}
     - id: cm-core1-vlan30
       node: cm-core1
       interface: vlan-30
       ip: 172.16.30.2/24
       vrf: vrf-default
-      fhrp:
-        - {protocol: vrrp, group_id: 30, vip: 172.16.30.1, priority: 110}
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 30, vip: 172.16.30.1, priority: 110}
     - id: cm-core2-vlan30
       node: cm-core2
       interface: vlan-30
       ip: 172.16.30.3/24
       vrf: vrf-default
-      fhrp:
-        - {protocol: vrrp, group_id: 30, vip: 172.16.30.1, priority: 90}
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 30, vip: 172.16.30.1, priority: 90}
 
     # ── WAN P2P L3 (DC Border <-> Campus Core) ─────────────────────────
     - id: dc-border1-swp1-l3

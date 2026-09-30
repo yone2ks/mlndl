@@ -1,0 +1,83 @@
+# ADR-0011 D4・D5: デュアルスタックの SVI と VRRP
+#
+# - ip は IPv4、ipv6 は IPv6 (いずれも単数)
+# - VRRP は 1 インスタンス = 単一 AF (RFC 5798)。デュアルスタックでは 2 エントリになる
+# - IPv6 の VIP はリンクローカル (RFC 5798 §5.2.9 / §6.1)
+# - SVI は短縮形 (interface: vlan-N) と正規形 (attaches_to) の両方を使っている
+ndl_version: "1.0"
+
+meta:
+  name: dual-stack-campus
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: dist1, role: core, implementation: physical}
+    - {id: dist2, role: core, implementation: physical}
+    - {id: acc1, role: leaf, implementation: physical}
+  interfaces:
+    - {id: dist1-te1, node: dist1, name: Te1/1}
+    - {id: dist1-te2, node: dist1, name: Te1/2}
+    - {id: dist2-te1, node: dist2, name: Te1/1}
+    - {id: dist2-te2, node: dist2, name: Te1/2}
+    - {id: acc1-te1, node: acc1, name: Te1/1}
+    - {id: acc1-te2, node: acc1, name: Te1/2}
+  links:
+    - {id: link-dist1-dist2, endpoints: [dist1-te1, dist2-te1], link_speed: 10G, link_role: trunk}
+    - {id: link-dist1-acc1, endpoints: [dist1-te2, acc1-te1], link_speed: 10G, link_role: trunk}
+    - {id: link-dist2-acc1, endpoints: [dist2-te2, acc1-te2], link_speed: 10G, link_role: trunk}
+
+layer2:
+  vlans:
+    - id: vlan-10
+      vlan_id: 10
+      name: users
+      trunk_ports:
+        - {node: dist1, interface: dist1-te1}
+        - {node: dist1, interface: dist1-te2}
+        - {node: dist2, interface: dist2-te1}
+        - {node: dist2, interface: dist2-te2}
+        - {node: acc1, interface: acc1-te1}
+        - {node: acc1, interface: acc1-te2}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - id: dist1-lo
+      node: dist1
+      interface: lo
+      ip: 10.255.0.1/32
+      ipv6: 2001:db8:ffff::1/128
+      vrf: vrf-default
+    - id: dist2-lo
+      node: dist2
+      interface: lo
+      ip: 10.255.0.2/32
+      ipv6: 2001:db8:ffff::2/128
+      vrf: vrf-default
+
+    # 短縮形: interface: vlan-10 が layer2.vlans[vlan-10] を指す
+    - id: dist1-vlan-10
+      node: dist1
+      interface: vlan-10
+      ip: 172.16.10.2/24
+      ipv6: 2001:db8:10::2/64
+      vrf: vrf-default
+      description: users ゲートウェイ (active)
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
+        - {mode: vrrp, group_id: 10, vip: "fe80::1", priority: 110}
+
+    # 正規形: 機器上の名前 (Vlan10) を保ったまま、VLAN を attaches_to で指す
+    - id: dist2-vlan-10
+      node: dist2
+      interface: Vlan10
+      attaches_to: {interface: vlan-10}
+      ip: 172.16.10.3/24
+      ipv6: 2001:db8:10::3/64
+      vrf: vrf-default
+      description: users ゲートウェイ (standby)
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 90}
+        - {mode: vrrp, group_id: 10, vip: "fe80::1", priority: 90}

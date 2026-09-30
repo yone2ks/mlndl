@@ -6,6 +6,7 @@
 - implementation: ADR-0004 — vm | physical | container
 - lag: §6 設計決定 — type: lacp | mlag の Discriminated Union
 - labels: ADR-0009 — 多軸分類の注釈側構成子。コアは値域・キー域チェックなし
+- description: ADR-0011 D7 — 全エンティティに任意の自由記述
 - id 命名規則: ADR-0002 — ^[a-z][a-z0-9]*(-[a-z0-9]+)*$（推奨、強制なし）
 """
 
@@ -64,6 +65,7 @@ class L1Node(BaseModel):
     # 推奨軸名: docs/label-vocabulary.md（informative）
     labels: dict[str, str] | None = None
     overrides: dict[str, Any] | None = None  # 上位ツール向け任意上書き
+    description: str | None = None
 
     @model_validator(mode="after")
     def reject_container_hypervisor(self) -> "L1Node":
@@ -89,6 +91,7 @@ class L1Interface(BaseModel):
     node: str  # 所属ノード ID
     name: str | None = None
     attaches_to: AttachesTo | None = None
+    description: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +110,8 @@ class L1Link(BaseModel):
     endpoints: list[str] = Field(min_length=2, max_length=2)
     link_speed: str | None = None   # 例: "10G", "100G"
     mtu: int | None = None
-    link_role: str | None = None    # underlay / access / peer-link / management / uplink
+    link_role: str | None = None    # 自由文字列。推奨: underlay / access / trunk / peer-link / management / uplink
+    description: str | None = None
 
     @model_validator(mode="after")
     def endpoints_distinct(self) -> "L1Link":
@@ -139,6 +143,7 @@ class LacpLag(BaseModel):
     node: str          # 単数形: 1 ノード
     members: list[str]  # インターフェース ID リスト
     lacp: LacpConfig | None = None
+    description: str | None = None
 
 
 class MlagLag(BaseModel):
@@ -156,6 +161,7 @@ class MlagLag(BaseModel):
     domain_id: int | None = None
     system_mac: str | None = None   # 両ノード共通の MLAG system MAC（例: "44:38:39:ff:00:0a"）
     client_lag: str | None = None   # 対向ノード側の LacpLag.id（単方向参照）
+    description: str | None = None
 
     @model_validator(mode="after")
     def exactly_two_nodes(self) -> "MlagLag":

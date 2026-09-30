@@ -1,0 +1,69 @@
+# ADR-0011 D6: トンネル
+#
+# - トンネル IF は source / destination を自分で持つ (tunnel_links は作らない)
+# - 対向がトポロジー内なら destination_interface、外なら destination_ip (排他)
+# - vrf (overlay 側) と transport_vrf (外側パケットの VRF) を区別する
+ndl_version: "1.0"
+
+meta:
+  name: hub-and-branch-gre
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr, role: border, implementation: physical}
+    - {id: br1-rtr, role: border, implementation: physical}
+  interfaces:
+    - {id: hq-rtr-g0, node: hq-rtr, name: Gi0/0}
+    - {id: br1-rtr-g0, node: br1-rtr, name: Gi0/0}
+
+layer3:
+  vrfs:
+    - {id: vrf-internet, description: 外側 (transport)}
+    - {id: vrf-corp, description: 社内 (overlay)}
+  interfaces:
+    - id: hq-rtr-wan
+      node: hq-rtr
+      interface: Gi0/0
+      attaches_to: {interface: hq-rtr-g0}
+      ip: 203.0.113.1/30
+      vrf: vrf-internet
+    - id: br1-rtr-wan
+      node: br1-rtr
+      interface: Gi0/0
+      attaches_to: {interface: br1-rtr-g0}
+      ip: 203.0.113.2/30
+      vrf: vrf-internet
+  tunnel_interfaces:
+    # 本社 ↔ 支社 1: 両端ともトポロジー内。エクスポーターが 1 本の辺を導出する
+    - id: tunnel-hq-br1
+      node: hq-rtr
+      type: gre
+      source: hq-rtr-wan
+      destination_interface: br1-rtr-wan
+      ip: 172.31.1.1/30
+      ipv6: 2001:db8:31:1::1/64
+      vrf: vrf-corp
+      transport_vrf: vrf-internet
+      mtu: 1476
+    - id: tunnel-br1-hq
+      node: br1-rtr
+      type: gre
+      source: br1-rtr-wan
+      destination_interface: hq-rtr-wan
+      ip: 172.31.1.2/30
+      ipv6: 2001:db8:31:1::2/64
+      vrf: vrf-corp
+      transport_vrf: vrf-internet
+      mtu: 1476
+    # 本社 ↔ クラウド VPN: 対向はトポロジー外
+    - id: tunnel-hq-cloud
+      node: hq-rtr
+      type: ipsec_vti
+      source: hq-rtr-wan
+      destination_ip: 198.51.100.10
+      ip: 169.254.10.1/30
+      vrf: vrf-corp
+      transport_vrf: vrf-internet
+      mtu: 1400
+      description: クラウド側の VPN ゲートウェイ

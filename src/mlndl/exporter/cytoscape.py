@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import json
 from collections import defaultdict
 
@@ -33,6 +32,7 @@ def export(topology: MLNDLTopology) -> dict:
     _export_l1_edges(topology, if_to_node, if_to_name, elements)
     _export_l2_overlay(topology, if_to_name, elements)
     _export_l3_overlay(topology, elements)
+    _export_tunnels(topology, elements)
     _export_bgp_overlay(topology, elements)
 
     return elements
@@ -52,23 +52,38 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
 
     # L3 情報をノード別に集約。IP は構造化配列 l3_interfaces として出力する
     # （旧 "ifname:ip" 文字列パッキングは廃止 — lossy・パース脆弱のため）
+    # ip / ipv6 は IPv4Interface / IPv6Interface なので、JSON 化のため str() する (ADR-0011 D5)
     lo_ip:    dict[str, str]         = {}
+    lo_ipv6:  dict[str, str]         = {}
     node_l3ifs: dict[str, list[dict]] = defaultdict(list)
     node_vrfs: dict[str, list[str]]  = defaultdict(list)
+    node_tunnels: dict[str, list[dict]] = defaultdict(list)
+    vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
     if topology.layer3:
         for iface in topology.layer3.interfaces:
-            if iface.interface == "lo" and iface.ip:
-                lo_ip[iface.node] = iface.ip
-            if iface.ip:
-                is_svi = bool(iface.vlan) or iface.interface.startswith("vlan-")
+            if iface.interface == "lo":
+                if iface.ip:   lo_ip[iface.node]   = str(iface.ip)
+                if iface.ipv6: lo_ipv6[iface.node] = str(iface.ipv6)
+            if iface.ip or iface.ipv6:
+                ref = iface.attachment_ref()
+                vlan = ref if ref in vlan_ids else None
                 kind = ("loopback" if iface.interface == "lo"
-                        else "svi" if is_svi else "routed")
-                entry: dict = {"interface": iface.interface, "ip": iface.ip, "kind": kind}
+                        else "svi" if vlan else "routed")
+                entry: dict = {"interface": iface.interface, "kind": kind}
+                if iface.ip:   entry["ip"]   = str(iface.ip)
+                if iface.ipv6: entry["ipv6"] = str(iface.ipv6)
                 if iface.vrf:  entry["vrf"]  = iface.vrf
-                if iface.vlan: entry["vlan"] = iface.vlan
+                if vlan:       entry["vlan"] = vlan
+                gws = [gw.model_dump(mode="json", exclude_none=True)
+                       for gw in iface.gateway_redundancy]
+                if gws:        entry["gateway_redundancy"] = gws
                 node_l3ifs[iface.node].append(entry)
             if iface.vrf and iface.vrf not in node_vrfs[iface.node]:
                 node_vrfs[iface.node].append(iface.vrf)
+        for tun in topology.layer3.tunnel_interfaces:
+            node_tunnels[tun.node].append(
+                tun.model_dump(mode="json", exclude_none=True, exclude={"node"})
+            )
 
     # L2 VLAN メンバーシップをノード別に集約
     node_vlans: dict[str, list[str]] = defaultdict(list)
@@ -108,6 +123,8 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
 
         # L3 データを埋め込む（overlay 有効時に参照）
         if lo_ip.get(node.id):        data["lo_ip"]          = lo_ip[node.id]
+        if lo_ipv6.get(node.id):      data["lo_ipv6"]        = lo_ipv6[node.id]
+        if node_tunnels[node.id]:     data["tunnels"]        = node_tunnels[node.id]
         if node_l3ifs[node.id]:       data["l3_interfaces"]  = node_l3ifs[node.id]
         if node_vrfs[node.id]:        data["vrfs"]           = node_vrfs[node.id]
 
@@ -226,25 +243,22 @@ def _export_l2_overlay(topology, if_to_name, elements):
 
     # VLAN セグメント情報を layer3.interfaces (SVI) からサブネット・VRF を抽出
     # key: vlan.id (例: "vlan-100") → {subnet, vrf}
+    # SVI の VLAN は attaches_to (または短縮形 interface: vlan-N) で解決する (ADR-0011 D3)。
+    # ip は型で検証済みなので、旧実装の try/except ValueError による握りつぶしは不要になった
     vlan_segment: dict[str, dict] = {}
     if topology.layer3:
         vlan_ids = {vlan.id for vlan in topology.layer2.vlans}
         for iface in topology.layer3.interfaces:
-            if iface.interface not in vlan_ids or not iface.ip:
+            key = iface.attachment_ref()
+            if key not in vlan_ids:
                 continue
-            key = iface.interface
-            if key not in vlan_segment:
-                vlan_segment[key] = {}
-            # サブネット計算（192.168.100.1/24 → 192.168.100.0/24）
-            try:
-                net = str(ipaddress.ip_interface(iface.ip).network)
-                if "subnet" not in vlan_segment[key]:
-                    vlan_segment[key]["subnet"] = net
-            except ValueError:
-                pass
-            # VRF
-            if iface.vrf and "vrf" not in vlan_segment[key]:
-                vlan_segment[key]["vrf"] = iface.vrf
+            seg = vlan_segment.setdefault(key, {})
+            if iface.ip and "subnet" not in seg:
+                seg["subnet"] = str(iface.ip.network)       # 192.168.100.1/24 → 192.168.100.0/24
+            if iface.ipv6 and "subnet_v6" not in seg:
+                seg["subnet_v6"] = str(iface.ipv6.network)
+            if iface.vrf and "vrf" not in seg:
+                seg["vrf"] = iface.vrf
 
     # VLAN ノード
     for vlan in topology.layer2.vlans:
@@ -259,6 +273,7 @@ def _export_l2_overlay(topology, if_to_name, elements):
             data["name"] = vlan.name
         seg = vlan_segment.get(vlan.id, {})
         if seg.get("subnet"):  data["subnet"]  = seg["subnet"]
+        if seg.get("subnet_v6"): data["subnet_v6"] = seg["subnet_v6"]
         if seg.get("vrf"):     data["vrf_name"] = seg["vrf"]
         elements["nodes"].append({"data": data})
         # メンバーエッジ（VLAN → L1 ノード）。trunk(tagged) と access(untagged) を
@@ -314,6 +329,41 @@ def _export_l3_overlay(topology, elements):
             "type":     "routing_adjacency",
             "adj_type": adj.type,
         }})
+
+
+# ---------------------------------------------------------------------------
+# トンネル (ADR-0011 D6)
+# ---------------------------------------------------------------------------
+
+def _export_tunnels(topology, elements):
+    """対向がトポロジー内にあるトンネルを辺として出力する。
+
+    トンネル IF は destination を自分で持つので、辺は導出する (tunnel_links は持たない)。
+    A→B と B→A の両方が書かれていれば 1 本にまとめる。対向が destination_ip のみの
+    トンネルは、ノードの data["tunnels"] にだけ現れる。
+    """
+    if not topology.layer3:
+        return
+    l3if_node = {i.id: i.node for i in topology.layer3.interfaces}
+    seen: set[tuple[str, str]] = set()
+    for tun in topology.layer3.tunnel_interfaces:
+        peer = l3if_node.get(tun.destination_interface) if tun.destination_interface else None
+        if peer is None or peer == tun.node:
+            continue
+        pair = tuple(sorted((tun.node, peer)))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        data: dict = {
+            "id":          f"tunnel-{tun.id}",
+            "source":      tun.node,
+            "target":      peer,
+            "layer":       "layer3",
+            "type":        "tunnel",
+            "tunnel_type": tun.type,
+        }
+        if tun.vrf: data["vrf"] = tun.vrf
+        elements["edges"].append({"data": data})
 
 
 # ---------------------------------------------------------------------------

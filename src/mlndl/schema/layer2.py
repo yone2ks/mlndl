@@ -31,6 +31,7 @@ class VLAN(BaseModel):
     name: str | None = None
     trunk_ports: list[PortRef] = []
     access_ports: list[PortRef] = []
+    description: str | None = None
 
 
 class L2VxLAN(BaseModel):
@@ -44,6 +45,7 @@ class L2VxLAN(BaseModel):
     vlan: str               # layer2.vlans[].id を参照
     vtep_source: str        # layer3.interfaces[].id を参照（VTEP ループバック）
     members: list[str] = [] # layer1.nodes[].id を参照
+    description: str | None = None
 
 
 class L3VxLAN(BaseModel):
@@ -56,6 +58,7 @@ class L3VxLAN(BaseModel):
     vni: int
     vrf: str                                           # layer3.vrfs[].id を参照
     irb_mode: Literal["symmetric", "asymmetric"] | None = None
+    description: str | None = None
 
 
 # Discriminated Union

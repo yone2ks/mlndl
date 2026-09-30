@@ -1,12 +1,36 @@
-"""Layer 3 スキーマ定義 (VRF / L3Interface / RoutingAdjacency)"""
+"""Layer 3 スキーマ定義 (VRF / L3Interface / GatewayRedundancy / TunnelInterface / RoutingAdjacency)
+
+設計決定:
+- ADR-0011 D3: SVI の参照手段は attaches_to に一本化。`interface: vlan-N` は短縮形
+- ADR-0011 D4: fhrp → gateway_redundancy。mode を discriminator とする Tagged Union
+- ADR-0011 D5: ip は IPv4、ipv6 は IPv6。いずれも単数
+- ADR-0011 D6: トンネルは自己完結した TunnelInterface で表現する
+- RoutingAdjacency は ADR-0010 (保留中) の対象。本ファイルでは変更しない
+"""
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+from ipaddress import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .layer1 import AttachesTo
+from .layer1 import AttachesTo, AttachesToObj
+
+# ADR-0011 D3: `interface` がこの形のときだけ、attaches_to を省略した短縮形として扱う
+VLAN_SHORTHAND = re.compile(r"^vlan-\d+$")
+
+_MAC_PATTERN = re.compile(r"^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$|^[0-9a-fA-F]{4}(\.[0-9a-fA-F]{4}){2}$")
+
+
+def _reject_ipv6_in_ip(value: Any) -> Any:
+    """`ip` に IPv6 を書いた場合に、移動先を示すエラーを返す (ADR-0011 D5)"""
+    if isinstance(value, str) and ":" in value:
+        raise ValueError(
+            f"ip は IPv4 専用です。IPv6 アドレス '{value}' は ipv6 に書いてください (ADR-0011 D5)"
+        )
+    return value
 
 
 class RouteTargets(BaseModel):
@@ -27,34 +51,199 @@ class VRF(BaseModel):
     rd: str | None = None           # Route Distinguisher — ASN:NN または IP:NN
     l3vni: str | None = None        # layer2.vxlan[l3vni].id を参照
     route_targets: RouteTargets | None = None
+    description: str | None = None
 
 
-class FhrpInstance(BaseModel):
-    """FHRP（VRRP / HSRP）インスタンス設定（per-node SVI スコープ）"""
+# ---------------------------------------------------------------------------
+# gateway_redundancy (ADR-0011 D4)
+# ---------------------------------------------------------------------------
+
+def _require_link_local_v6(vip: IPv4Address | IPv6Address, mode: str) -> None:
+    """RFC 5798 §5.2.9 / §6.1: IPv6 の仮想ルーターの先頭アドレスはリンクローカル"""
+    if isinstance(vip, IPv6Address) and not vip.is_link_local:
+        raise ValueError(
+            f"{mode} の IPv6 VIP はリンクローカル (fe80::/10) である必要があります: '{vip}'"
+            f" (RFC 5798 §5.2.9 / §6.1, ADR-0011 D4)"
+        )
+
+
+class VrrpGateway(BaseModel):
+    """VRRP によるゲートウェイ冗長。1 インスタンスは単一 AF (RFC 5798)"""
 
     model_config = ConfigDict(extra="forbid")
 
-    protocol: Literal["vrrp", "hsrp"]
-    group_id: int
-    vip: str
-    priority: int | None = None
+    mode: Literal["vrrp"]
+    group_id: int = Field(ge=1, le=255)             # VRID (RFC 5798 §5.2.3)
+    vip: IPv4Address | IPv6Address
+    priority: int | None = Field(default=None, ge=1, le=254)
     preempt: bool | None = None
+    description: str | None = None
 
+    @model_validator(mode="after")
+    def ipv6_vip_is_link_local(self) -> "VrrpGateway":
+        _require_link_local_v6(self.vip, "VRRP")
+        return self
+
+
+class HsrpGateway(BaseModel):
+    """HSRP によるゲートウェイ冗長 (Cisco)"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["hsrp"]
+    group_id: int = Field(ge=0, le=4095)            # HSRPv1 0..255 / HSRPv2 0..4095
+    vip: IPv4Address | IPv6Address
+    priority: int | None = Field(default=None, ge=0, le=255)
+    preempt: bool | None = None
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def ipv6_vip_is_link_local(self) -> "HsrpGateway":
+        _require_link_local_v6(self.vip, "HSRP")
+        return self
+
+
+class AnycastGateway(BaseModel):
+    """EVPN distributed anycast gateway (RFC 9135)
+
+    プロトコル交換を持たず、全ノードが同時に active。VIP / group_id は持たない
+    (L3Interface の ip / ipv6 自体が anycast アドレス)。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["anycast_gateway"]
+    anycast_mac: str | None = None   # Cisco anycast-gateway-mac / Arista virtual-router mac 等
+    description: str | None = None
+
+    @field_validator("anycast_mac")
+    @classmethod
+    def mac_format(cls, v: str | None) -> str | None:
+        if v is not None and not _MAC_PATTERN.match(v):
+            raise ValueError(f"anycast_mac の形式が不正です: '{v}'")
+        return v
+
+
+GatewayRedundancy = Annotated[
+    VrrpGateway | HsrpGateway | AnycastGateway, Field(discriminator="mode")
+]
+
+
+# ---------------------------------------------------------------------------
+# L3Interface
+# ---------------------------------------------------------------------------
 
 class L3Interface(BaseModel):
-    """Layer 3 インターフェース（ループバック / SVI / ルーテッドポート）"""
+    """Layer 3 インターフェース（ループバック / SVI / ルーテッドポート）
+
+    - interface: 機器上の名前 (swp51 / Vlan100 / lo)。参照解決には使わない
+    - attaches_to: 唯一の参照手段。{interface: <L1 IF id>} または {interface: <VLAN id>}
+    - `interface` が `vlan-N` 形式で attaches_to が未指定の場合は、validator が
+      {interface: vlan-N} を指しているものとして解決する (短縮形。モデルには書き戻さない)
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     node: str                       # layer1.nodes[].id を参照
-    interface: str                  # 論理 IF 名 (lo, vlan-100, swp51 等)
-    ip: str | None = None           # IPv4/IPv6 アドレス（CIDR 表記）
+    interface: str                  # 機器上の名前
+    ip: IPv4Interface | None = None     # IPv4 (CIDR)
+    ipv6: IPv6Interface | None = None   # IPv6 (CIDR)
     vrf: str | None = None          # layer3.vrfs[].id を参照
-    vlan: str | None = None         # SVI の場合、対応する layer2.vlans[].id への明示参照
     attaches_to: AttachesTo | None = None
-    fhrp: list[FhrpInstance] = []
+    gateway_redundancy: list[GatewayRedundancy] = []
+    description: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_keys(cls, data: Any) -> Any:
+        """ADR-0011 で廃止したキーに、移動先を示すエラーを返す"""
+        if not isinstance(data, dict):
+            return data
+        problems = []
+        if "vlan" in data:
+            problems.append(
+                "vlan は廃止されました。SVI は attaches_to: {interface: <VLAN id>} で書くか、"
+                "interface: vlan-N の短縮形を使ってください (ADR-0011 D3)"
+            )
+        if "fhrp" in data:
+            problems.append(
+                "fhrp は gateway_redundancy に改名されました。protocol は mode に、"
+                "anycast は anycast_gateway になります (ADR-0011 D4)"
+            )
+        for gw in data.get("gateway_redundancy") or []:
+            if isinstance(gw, dict) and "protocol" in gw and "mode" not in gw:
+                problems.append(
+                    "gateway_redundancy の protocol は mode に改名されました (ADR-0011 D4)"
+                )
+                break
+        if problems:
+            raise ValueError(" / ".join(problems))
+        return data
+
+    @field_validator("ip", mode="before")
+    @classmethod
+    def ip_is_ipv4(cls, v: Any) -> Any:
+        return _reject_ipv6_in_ip(v)
+
+    def attachment_ref(self) -> str | None:
+        """attaches_to.interface、または短縮形 `interface: vlan-N` が指す ID を返す。
+
+        参照先が L1 インターフェースか VLAN かは呼び出し側が ID 空間で判定する。
+        """
+        at = self.attaches_to
+        if isinstance(at, AttachesToObj):
+            return at.interface
+        if at is None and VLAN_SHORTHAND.match(self.interface):
+            return self.interface
+        return None
+
+
+# ---------------------------------------------------------------------------
+# TunnelInterface (ADR-0011 D6)
+# ---------------------------------------------------------------------------
+
+class TunnelInterface(BaseModel):
+    """トンネルインターフェース。source / destination を自分で持つ自己完結型。
+
+    対向がトポロジー内なら destination_interface、外なら destination_ip を使う (排他)。
+    両端を結ぶ辺はエクスポーターが導出する (tunnel_links は二重表現になるため作らない)。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str                                         # 推奨プレフィックス tunnel- (ADR-0002 D7)
+    node: str
+    type: Literal["gre", "ipip", "ipsec_vti", "wireguard"]
+    source: str                                     # layer3.interfaces[].id (トンネルの起点)
+    destination_ip: IPv4Address | IPv6Address | None = None   # トポロジー外の対向
+    destination_interface: str | None = None                   # layer3.interfaces[].id
+    ip: IPv4Interface | None = None                 # トンネル IF 自体のアドレス
+    ipv6: IPv6Interface | None = None
+    vrf: str | None = None                          # トンネル IF が属する VRF (overlay 側)
+    transport_vrf: str | None = None                # 外側パケットが流れる VRF
+    mtu: int | None = Field(default=None, ge=68)    # IPv4 最小 MTU (RFC 791)
+    description: str | None = None
+
+    @field_validator("ip", mode="before")
+    @classmethod
+    def ip_is_ipv4(cls, v: Any) -> Any:
+        return _reject_ipv6_in_ip(v)
+
+    @model_validator(mode="after")
+    def exactly_one_destination(self) -> "TunnelInterface":
+        given = [x for x in (self.destination_ip, self.destination_interface) if x is not None]
+        if len(given) != 1:
+            raise ValueError(
+                "destination_ip と destination_interface はどちらか一方だけを指定してください"
+                " (ADR-0011 D6)"
+            )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# RoutingAdjacency — ADR-0010 (保留中) の対象。変更しない
+# ---------------------------------------------------------------------------
 
 class RoutingAdjEndpoint(BaseModel):
     """ルーティング隣接関係の片端"""
@@ -84,4 +273,5 @@ class L3Layer(BaseModel):
 
     vrfs: list[VRF] = []
     interfaces: list[L3Interface] = []
+    tunnel_interfaces: list[TunnelInterface] = []
     routing_adjacencies: list[RoutingAdjacency] = []

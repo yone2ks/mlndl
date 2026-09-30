@@ -262,7 +262,7 @@ layer2:
         with pytest.raises(Exception):
             parse(yaml_str)
 
-    def test_fhrp_invalid_protocol(self):
+    def test_gateway_redundancy_invalid_mode(self):
         yaml_str = b"""
 ndl_version: "1.0"
 layer3:
@@ -270,8 +270,8 @@ layer3:
     - id: iface1
       node: node1
       interface: vlan-100
-      fhrp:
-        - protocol: unknown_protocol
+      gateway_redundancy:
+        - mode: unknown_mode
           group_id: 1
           vip: 10.0.0.1
 """
