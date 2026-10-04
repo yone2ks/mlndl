@@ -53,7 +53,7 @@ Pass A のドラフトは Pass C 完了後も削除しない（変更履歴と�
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [0005](0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 | **Accepted** | C |
+| [0005](0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 (2026-10-04 に ADR-0011 で部分改訂) | **Accepted** | C |
 | drafts/0005 | 同上 Pass A ドラフト | Draft (archived) | A |
 | drafts/0003v2 | `role` 語彙 再設計 (ADR-0003 Reopen) | Draft (archived) | A2 |
 | evaluations/round1.5 | ラウンド1.5 横断評価メモ | — | — |
@@ -89,7 +89,7 @@ layer3 までのデータプレーンの表現力を先に確定させるため 
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [drafts/0011](drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | Draft | A r2 |
+| [drafts/0011](drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 (実装済み・ADR-0005 に反映済み) | Draft | A r2 |
 | [evaluations/adr0011](evaluations/adr0011/README.md) | ADR-0011 実測資料 (試し書き / 矛盾の実例 / 案比較) | — | — |
 
 ADR-0010 を保留した上で、先に L1〜L3 のデータプレーンを確定させる作業。

@@ -5,6 +5,8 @@
 - **Deciders**: mlndl-spec-architect (Pass C), mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, ecosystem-reviewer
 - **Pass**: C (再設計後の最終版)
 - **Supersedes**: drafts/0005-mlndl-expressive-scope.md
+- **Amended by**: [drafts/0011](drafts/0011-layer3-data-plane.md) (2026-10-04) — 表現原理の追加、SVI 規範の改訂、スコープ表の実装同期。
+  改訂箇所には「ADR-0011 で改訂」の注記を入れ、元の記述は履歴として残す。一覧は末尾の「実装同期メモ」を参照
 
 ## Context
 
@@ -130,6 +132,18 @@ layer3:
 - バリデーターは両形式を受理し、内部表現としては B-2 に正規化する
 - `vlan-N` という ID が `layer2.vlans` に存在しない場合は `error` (ADR-0002 D8)
 
+> **ADR-0011 D3 で改訂 (2026-10-04)**: 「内部表現を B-2 に正規化する」は採らない。正規化してモデルに格納すると、
+> 入力になかった `attaches_to` が YAML エクスポートに現れ、往復が壊れるため。
+> B-1 は **validator の内部でだけ** `{interface: vlan-N}` として解決し、モデルには書き戻さない。
+> あわせて以下を定める。
+>
+> - `interface` は**機器上の名前** (`swp51` / `Vlan100` / `lo`) であり、参照解決には使わない。
+>   短縮形として解決するのは `^vlan-\d+$` に一致する場合だけ
+> - 機器上の名前を残したい場合は `interface: Vlan100` と `attaches_to: {interface: vlan-100}` を併記する
+> - 短縮形と明示した `attaches_to` が食い違えば `error`。VLAN らしき名前で `attaches_to` がなければ `warning`
+> - 実装時点で B-2 は「未定義のインターフェース」として **error になっていた** (validator が `layer1.interfaces` しか
+>   見ていなかった)。ADR-0011 で `L3Interface` に限り VLAN を参照先として許すよう修正した
+
 **ケース C: サブインターフェース (例: swp1.100)** — Phase 2 実装、本 ADR で予告のみ
 
 ```yaml
@@ -145,6 +159,11 @@ layer3:
         interface: leaf1-swp1-100
       ip: 10.2.0.1/30
 ```
+
+> **ADR-0011 D8 で改訂 (2026-10-04)**: 親の物理 IF は `parent:` ではなく `attaches_to: {interface: <L1 IF>}` で指す。
+> 親 IF が落ちればサブ IF も動作しないので、この関係は Realization (ADR-0009 D1) である。
+> `parent` は ADR-0009 D1 で Containment に予約されており、値域も node の ID に限られる。
+> サブインターフェース自体は未実装 (ADR-0011 の Known Gap)。
 
 #### D2-3. `attaches_to: {interface: X}` が指せる層
 
@@ -168,6 +187,9 @@ layer3:
 - `mlag.peer_link: id` — MLAG ドメインの意味論的役割
 - `vrf` / `vlan` / `parent` フィールド — 包含関係の宣言
 
+> **ADR-0011 D3 で改訂 (2026-10-04)**: `layer3.interfaces[].vlan` は廃止した。SVI の VLAN は `attaches_to` で指す
+> (`vrf` は引き続き包含関係の宣言)。
+
 ### D3. スコープの確定
 
 本 ADR は **mlndl が記述可能とする概念集合 (= スコープ内)** と、**意図的に扱わない概念 (= スコープ外)** を明示する。
@@ -189,6 +211,11 @@ layer3:
 | (c) | `interfaces[].attaches_to: {interface: id}` — 論理 IF ↔ 物理 IF supporting |
 | 共通 | `description` / `comment`: 全構成要素に optional |
 | メタ | `ndl_version` / `meta.name` / `meta.network_types` |
+
+> **実装同期 (ADR-0011 D8, 2026-10-04)**: 上表の `layer1.links: from, to` は ADR-0006 で `endpoints` に、
+> `layer1.port_channels` / `layer1.mlag` は §6 設計決定で `layer1.lag` (type: lacp | mlag) に統合済み。
+> `description` は `comment` を併記せず `description` の 1 語に絞り、ADR-0011 で全エンティティに実装した。
+> `link_role` は自由文字列であり、推奨語彙に `trunk` を加えた。実装済みの `MlagLag.system_mac` / `client_lag` は上表にない。
 
 ##### スコープ内 (Phase 2 以降で実装予定)
 
@@ -212,6 +239,19 @@ layer3:
 | (c) | `interfaces[].attaches_to: {interface: vlan-N}` | SVI (D2-2 ケース B) |
 | (c) | `tunnel_interfaces[].attaches_to: {interface: ...}` | トンネル発信元 IF |
 | (c) | `routing_adjacencies[].attaches_to: {link: ...}` | BGP セッションが使う物理リンク |
+
+> **実装同期 (ADR-0011 D8, 2026-10-04)**: 上表のうちデータプレーン部分は ADR-0011 で次のように確定・実装した。
+>
+> | 上表の記述 | 実装 |
+> |---|---|
+> | `layer3.interfaces`: ip (IPv4/IPv6) | `ip` (IPv4) / `ipv6` (IPv6)。いずれも単数 (ADR-0011 D5) |
+> | `layer3.interfaces[].gateway_redundancy`: protocol (anycast_gateway\|vrrp), vip | `gateway_redundancy`: `mode` (vrrp \| hsrp \| anycast_gateway) の Tagged Union。IPv6 の VIP はリンクローカル (ADR-0011 D4) |
+> | `layer3.tunnel_interfaces` + `layer3.tunnel_links` (P8) | `tunnel_interfaces` のみ。トンネル IF は source / destination を自分で持つため、`tunnel_links` は二重表現になる (ADR-0011 D6) |
+> | `layer2.vxlan`: vtep_source (旧書式 `{layer: layer3, interface_id: ...}`) | `vtep_source: <L3 IF id>`。`layer` キーは ADR-0001 D2 で廃止済み |
+> | `layer2.subinterfaces` | 未実装 (ADR-0011 の Known Gap) |
+>
+> `layer3.routing_adjacencies` と `protocols.*` は [drafts/0010](drafts/0010-control-plane-separation.md) (保留中) で
+> `control_plane` へ移す方針が決まっているが、未実装のため本表の記述をそのまま残す。
 
 **BGP unnumbered の表現規則 (P6 採用)**:
 
@@ -252,6 +292,11 @@ NetBox → mlndl アダプター実装時の参照表:
 | sFlow / NetFlow / SNMP 設定 | 運用監視層 |
 | L2 トンネル (EoGRE / L2TPv3 / OTV) | Phase 2 で再判断 |
 | 別パラダイムプロトコル (PIM / MPLS-LDP / Segment Routing) | Phase 2+ |
+| **スタティックルート / デフォルトルート / redistribute / network 文** (ADR-0011 D2 で追加) | 上位ツール (Ansible / NetBox config context)。ホストのデフォルトゲートウェイは、同一サブネットの SVI の `ip` または `gateway_redundancy.vip` から導出できる |
+
+> **ADR-0011 D4 / D8 で改訂 (2026-10-04)**: 上表の「MAC アドレス全般」のうち、`gateway_redundancy` の
+> `anycast_mac` (anycast gateway の MAC) と `MlagLag.system_mac` はスコープ内に確定した。前者は設定生成に必須であり、
+> 後者は実装済みだった。それ以外の MAC は引き続きスコープ外。
 
 #### D3-3. 唯一の例外: BFD timer
 
@@ -278,6 +323,28 @@ D3 の振り分け判断、および将来の新概念のスコープ内/外判�
 **段階2 の結論に依存せず確定できる適用例** (P15):
 - `description` / `comment`: 4 軸すべて No → 注釈側として全構成要素に optional 許可
 - `gateway_redundancy.protocol: anycast_gateway` (enum 値): 値の変更で動作意味が変わる → 注釈ではなく運用パラメータ
+
+#### D4 補則. 表現原理 (ADR-0011 D1 で追加, 2026-10-04)
+
+> **関係の成立に必要な情報は書き、関係を流れる個別経路は書かない。**
+
+mlndl は「VRF が存在する」「この SVI がゲートウェイである」「このセッションが張れる」といった関係の成立条件を記述し、
+その関係を通じて運ばれる個別の経路情報 (route entries) は記述しない。
+
+この原理は上の 4 軸判定を置き換えない。**4 軸が「混在」を返したときの解決指針**として働く。
+4 軸すべて Yes の概念は引き続きスコープ内である。混在時は次の順に判定する。
+
+1. それを削除すると、その関係自体が存在できなくなるか (Route Target は Yes、スタティックルートは No)
+2. 数が構造的に上限を持つか (Route Target は数個、経路は数万本)
+3. データプレーンの構造そのものが変わるか
+
+| 書く | 書かない |
+|---|---|
+| `layer3.interfaces` の IP (到達性の起点) | スタティックルートの宛先とネクストホップ |
+| `layer3.vrfs.route_targets` (VPN 境界の定義、RFC 4364) | per-VRF の redistribute ポリシー |
+| `gateway_redundancy` の VIP (ゲートウェイの所在) | ホストのルーティングテーブル |
+
+上の「適用例 — EVPN advertise フラグ群」をこの原理で再判定することは本補則の範囲外とし、ADR-0005 の再設計 (drafts/0005v2) で扱う。
 
 ### D5. 三側面と Phase の対応
 
@@ -372,6 +439,23 @@ D3 の振り分け判断、および将来の新概念のスコープ内/外判�
 - **BFD timer を唯一の例外として保持**: network-tech が構造的正当性を確認 → D3-3 で独立節として定義
 - **EVE-NG 固有情報のスコープ外**: ADR-0004 の原則と一貫 → D3-2 で維持
 - **D4 を判定基準のみ提示し段階2 の結論を先取りしない**: ラウンド1.5 プランの方針を維持
+
+## 実装同期メモ (2026-10-04)
+
+本 ADR の判断 (三側面・D4 判定フレームワーク・スコープの線引き) は維持したまま、後続 ADR で改訂・実装された箇所の一覧。
+各箇所には本文中にも注記を入れている。
+
+| 箇所 | 改訂内容 | 改訂元 |
+|---|---|---|
+| D2-2 ケース B 規範 | B-1 は validator 内でのみ解決し、B-2 への正規化はモデルに格納しない。`interface` は機器上の名前 | ADR-0011 D3 |
+| D2-2 ケース C | サブ IF の親参照は `parent` ではなく `attaches_to` | ADR-0011 D8 |
+| D2-4 | `layer3.interfaces[].vlan` を廃止 | ADR-0011 D3 |
+| D3-1 Phase 1 表 | `endpoints` / `lag` / `description` の 1 語化 / `link_role` に `trunk` | ADR-0006 / §6 / ADR-0011 D7・D8 |
+| D3-1 Phase 2 表 | `ip` / `ipv6`、`gateway_redundancy` の Tagged Union、`tunnel_links` の廃止、`vtep_source` の書式 | ADR-0011 D4〜D6・D8 |
+| D3-2 | スタティックルート等をスコープ外に追加。`anycast_mac` / `system_mac` をスコープ内に確定 | ADR-0011 D2・D4・D8 |
+| D4 | 補則として表現原理を追加 | ADR-0011 D1 |
+
+**未反映**: `layer3.routing_adjacencies` / `protocols.*` の `control_plane` への移動 (drafts/0010、保留中)。
 
 ## References
 

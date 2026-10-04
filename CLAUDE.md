@@ -502,12 +502,12 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0002](docs/decisions/0002-id-naming-convention.md) | ID 命名規則 | C | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`、`vlan-100`・`vni-10100`・`bgp-peer-*` 形式 |
 | [ADR-0003](docs/decisions/0003-role-vocabulary.md) | `role` 語彙 | **C2** | `role` は注釈側構成子。open-form (自由文字列)。推奨 9 語彙は `docs/role-vocabulary.md`。`hypervisor` は normative token |
 | [ADR-0004](docs/decisions/0004-implementation-role-matrix.md) | `implementation × role` | C | コアは `container × hypervisor = error` のみ。他は上位ツールに委譲 |
-| [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 | C | 三側面 (物理構成図/論理構成図/物理-論理連携)。D4 判定フレームワーク |
+| [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 | C（ADR-0011 で部分改訂） | 三側面 (物理構成図/論理構成図/物理-論理連携)。D4 判定フレームワーク。D4 補則として表現原理（ADR-0011 D1） |
 | [ADR-0006](docs/decisions/0006-endpoints.md) | L1 リンク端点表現 | C | `from`/`to` 廃止 → `endpoints: [a, b]`（無向リスト）。Cytoscape/RFC8345 出力のみ source/target にマップ |
 | [ADR-0009](docs/decisions/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 | C 相当 | `attaches_to`（Realization）/ `parent`（Containment）/ `labels`（Classification）の 3 軸に分離。`scope`・`pod`・`tags` 等 20 語以上を却下 |
 | [ADR-0008](docs/decisions/drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 | C (Draft) | 箱もノード（`role: vpc`）。`location` 軸。所属は `parent` + `labels` |
 | [ADR-0010](docs/decisions/drafts/0010-control-plane-separation.md) | control plane と data plane の分離 | A r2 (Draft・**保留**) | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（決定済み・**未実装**）。BGP エントリの単位は未決 |
-| [ADR-0011](docs/decisions/drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | A r2 (Draft) | 原理「関係の成立に必要な情報は書き、個別経路は書かない」。スタティックルートはスコープ外。SVI は `attaches_to` に一本化。`fhrp` → `gateway_redundancy`。`ip` (IPv4) / `ipv6`。トンネル追加（D3〜D7・D9 **実装済み**。ADR-0005 の同期 D8 は未着手） |
+| [ADR-0011](docs/decisions/drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | A r2 (Draft) | 原理「関係の成立に必要な情報は書き、個別経路は書かない」。スタティックルートはスコープ外。SVI は `attaches_to` に一本化。`fhrp` → `gateway_redundancy`。`ip` (IPv4) / `ipv6`。トンネル追加（**実装済み**。完了条件 D11 を満たした。ADR-0005 にも反映済み） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

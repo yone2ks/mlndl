@@ -1,6 +1,6 @@
 # ADR-0011: layer3 データプレーンの確定
 
-- **Status**: Draft — **D3〜D7・D9・D10 実装済み (2026-10-01)**。D8 (ADR-0005 の同期) は未着手
+- **Status**: Draft — **D11 の完了条件をすべて満たした (2026-10-04)**。実装 (D3〜D7・D9・D10) は 2026-10-01、ADR-0005 への反映 (D8) は 2026-10-04。Pass B / C は未実施
 - **Date**: 2026-09-20
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A r2 (初回策定 → 5 エージェントレビュー反映。差分は末尾「r1 からの変更」)
@@ -344,7 +344,18 @@ F2 で実測した「黙って通る」ものを塞ぐ。
 `protocols.*` は ADR-0010 (保留中) で置き換わるため追加していない。`PortRef` / `LacpConfig` / `RouteTargets` /
 `AttachesToObj` は独立したエンティティではないため対象外。
 
-**D11 の残件**: ADR-0005 への実装同期メモと原理 (D1) の追記 (D8)。
+**D8 (2026-10-04)**: ADR-0005 に反映した。Accepted ADR のため元の記述は消さず、改訂箇所の直後に
+「ADR-0011 で改訂」の注記を入れ、末尾に「実装同期メモ」の一覧を置いた。原理 (D1) は ADR-0005 の「D4 補則」として追加した。
+
+**D11 の照合**:
+
+| 観点 | 条件 | 結果 |
+|---|---|---|
+| スキーマ | D3〜D7 のすべてが実装されている | 満たした |
+| バリデーター | D9 の error 規則が実装され、F2 の 4 例がいずれも error になる | 満たした (F2 の 4 例はテストで固定) |
+| エクスポーター | yaml が IPv6・トンネルを含めて往復で同値。cytoscape がトンネルの辺を出力する | 満たした (`test_yaml_round_trip` / `test_cytoscape_derives_one_tunnel_edge_per_pair`) |
+| fixture | 既存 + 新規 2 本 (dual stack / tunnel) が validate を通る | 満たした (`--strict` でも warning なし。`valid_vsphere_dvswitch.yaml` は対象外) |
+| ADR | ADR-0005 に実装同期メモ (D8) と原理 (D1) が追記されている | 満たした |
 
 ## Consequences
 
