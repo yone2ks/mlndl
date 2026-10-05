@@ -410,7 +410,7 @@ F2 で実測した「黙って通る」ものを塞ぐ。
 
 | 項目 | 行き先 |
 |---|---|
-| **802.1Q サブインターフェース** (router-on-a-stick) | Phase 2 の別作業。本 ADR は ADR-0005 の文言修正のみ (D8)。実測 `T3_branch_router_on_a_stick.yaml` では 13 箇所が書けなかった |
+| ~~**802.1Q サブインターフェース** (router-on-a-stick)~~ | **[ADR-0012](0012-subinterfaces.md) で実装済み (2026-10-05)**。LAG 上のサブ IF と routed LAG も書ける。Q-in-Q とネイティブ (タグなし) サブ IF は引き続き書けない |
 | vSwitch / dvSwitch / PortGroup / VMkernel | drafts/0007 |
 | クラウド (VPC 等) | drafts/0008 |
 | 制御プレーン (BGP / OSPF / IS-IS / BFD) | drafts/0010 (保留中) |

@@ -1,0 +1,49 @@
+# T3: Q-in-Q ハンドオフ / vlan_id + inner_vlan_id 風
+#
+# キャリアのハンドオフ: 外側タグ (S-tag) 100・内側タグ (C-tag) 10 のサブ IF。
+# ここでは "普通の" dot1q と同じフィールド名 vlan_id を外側に使い、
+# 内側は inner_vlan_id で追加する素直な記法。
+#
+# 問題:
+#   - vlan_id のセマンティクスが「唯一のタグ」と「S-tag」の 2 通りに揺れる
+#   - inner_vlan_id が空ならシングルタグ、埋まっていれば Q-in-Q という
+#     implicit な分岐が発生 (CLAUDE.md の "Tagged Union" の思想と不整合)
+
+ndl_version: "1.0"
+
+meta:
+  name: qinq-handoff-vlan-inner
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: ce1,     role: border, implementation: physical, description: 顧客拠点 CE}
+    - {id: carrier, role: core,   implementation: physical, description: キャリア PE (abstract)}
+
+  interfaces:
+    - {id: ce1-eth0,     node: ce1,     name: Gi0/0}
+    - {id: carrier-port, node: carrier, name: xe-0/0/0}
+
+  links:
+    - {id: link-ce1-carrier, endpoints: [ce1-eth0, carrier-port], link_speed: 10G, link_role: uplink}
+
+layer2:
+  # Q-in-Q の外側 (S-tag) / 内側 (C-tag) を VLAN エンティティとして書くかは別論点。
+  # ここでは書かないケース (vlan_id 直書き) を示す。
+  subinterfaces:
+    - id: ce1-eth0.100.10
+      attaches_to: {interface: ce1-eth0}
+      vlan_id: 100          # 外側 (S-tag)
+      inner_vlan_id: 10     # 内側 (C-tag)
+      # 問題: vlan_id が「唯一のタグ」なのか「S-tag」なのか文脈依存
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - id: ce1-eth0-100-10-l3
+      node: ce1
+      interface: Gi0/0.100.10
+      ip: 203.0.113.2/30
+      vrf: vrf-default
+      attaches_to: {interface: ce1-eth0.100.10}

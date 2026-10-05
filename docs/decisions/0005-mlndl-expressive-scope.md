@@ -5,7 +5,7 @@
 - **Deciders**: mlndl-spec-architect (Pass C), mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, ecosystem-reviewer
 - **Pass**: C (再設計後の最終版)
 - **Supersedes**: drafts/0005-mlndl-expressive-scope.md
-- **Amended by**: [drafts/0011](drafts/0011-layer3-data-plane.md) (2026-10-04) — 表現原理の追加、SVI 規範の改訂、スコープ表の実装同期。
+- **Amended by**: [drafts/0011](drafts/0011-layer3-data-plane.md) (2026-10-04)、[drafts/0012](drafts/0012-subinterfaces.md) (2026-10-05) — 表現原理の追加、SVI 規範の改訂、スコープ表の実装同期。
   改訂箇所には「ADR-0011 で改訂」の注記を入れ、元の記述は履歴として残す。一覧は末尾の「実装同期メモ」を参照
 
 ## Context
@@ -163,7 +163,8 @@ layer3:
 > **ADR-0011 D8 で改訂 (2026-10-04)**: 親の物理 IF は `parent:` ではなく `attaches_to: {interface: <L1 IF>}` で指す。
 > 親 IF が落ちればサブ IF も動作しないので、この関係は Realization (ADR-0009 D1) である。
 > `parent` は ADR-0009 D1 で Containment に予約されており、値域も node の ID に限られる。
-> サブインターフェース自体は未実装 (ADR-0011 の Known Gap)。
+> サブインターフェースは ADR-0012 で実装した。上の例の ID `leaf1-swp1-100` は L1 IF の ID と区別できないため、
+> `subif-leaf1-swp1-100` とする (ADR-0002 D7)。`vlan_id` はリンク上のタグ番号であり、`layer2.vlans` への参照ではない。
 
 #### D2-3. `attaches_to: {interface: X}` が指せる層
 
@@ -174,6 +175,11 @@ layer3:
 | L1 物理 IF | `interface: leaf1-swp51` | L3 routed 物理 IF (ケース A) |
 | L2 VLAN (SVI 経由) | `interface: vlan-100` | SVI (ケース B) |
 | L2 サブインターフェース (Phase 2) | `interface: leaf1-swp1-100` | L3 over sub-IF (ケース C) |
+
+> **ADR-0012 D5 で改訂 (2026-10-05)**: X が指せるものを `attaches_to` を持つエンティティごとに固定した。
+> `layer3.interfaces` は L1 IF / LAG / VLAN / サブ IF、`layer2.subinterfaces` は L1 IF / LAG、それ以外は L1 IF のみ。
+> LAG を加えたことで、LAG 上のサブ IF と routed LAG が書ける。前提となる ID のグローバル一意性 (ADR-0002 D5) は
+> validator の error として検証する。
 
 `layer` フィールドなしで層が一意に決定する (ADR-0001 D2)。
 
@@ -248,7 +254,7 @@ layer3:
 > | `layer3.interfaces[].gateway_redundancy`: protocol (anycast_gateway\|vrrp), vip | `gateway_redundancy`: `mode` (vrrp \| hsrp \| anycast_gateway) の Tagged Union。IPv6 の VIP はリンクローカル (ADR-0011 D4) |
 > | `layer3.tunnel_interfaces` + `layer3.tunnel_links` (P8) | `tunnel_interfaces` のみ。トンネル IF は source / destination を自分で持つため、`tunnel_links` は二重表現になる (ADR-0011 D6) |
 > | `layer2.vxlan`: vtep_source (旧書式 `{layer: layer3, interface_id: ...}`) | `vtep_source: <L3 IF id>`。`layer` キーは ADR-0001 D2 で廃止済み |
-> | `layer2.subinterfaces` | 未実装 (ADR-0011 の Known Gap) |
+> | `layer2.subinterfaces` | ADR-0012 で実装: id, attaches_to (L1 IF または LAG), vlan_id, name, description。`node` と VLAN 参照は持たない |
 >
 > `layer3.routing_adjacencies` と `protocols.*` は [drafts/0010](drafts/0010-control-plane-separation.md) (保留中) で
 > `control_plane` へ移す方針が決まっているが、未実装のため本表の記述をそのまま残す。
@@ -452,6 +458,7 @@ mlndl は「VRF が存在する」「この SVI がゲートウェイである�
 | D2-4 | `layer3.interfaces[].vlan` を廃止 | ADR-0011 D3 |
 | D3-1 Phase 1 表 | `endpoints` / `lag` / `description` の 1 語化 / `link_role` に `trunk` | ADR-0006 / §6 / ADR-0011 D7・D8 |
 | D3-1 Phase 2 表 | `ip` / `ipv6`、`gateway_redundancy` の Tagged Union、`tunnel_links` の廃止、`vtep_source` の書式 | ADR-0011 D4〜D6・D8 |
+| D2-2 ケース C / D2-3 / D3-1 | サブインターフェースを実装。`{interface:}` が指せる ID 空間をエンティティごとに固定 | ADR-0012 |
 | D3-2 | スタティックルート等をスコープ外に追加。`anycast_mac` / `system_mac` をスコープ内に確定 | ADR-0011 D2・D4・D8 |
 | D4 | 補則として表現原理を追加 | ADR-0011 D1 |
 

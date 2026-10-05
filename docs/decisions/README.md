@@ -91,6 +91,8 @@ layer3 までのデータプレーンの表現力を先に確定させるため 
 |-----|---------|--------|------|
 | [drafts/0011](drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 (実装済み・ADR-0005 に反映済み) | Draft | A r2 |
 | [evaluations/adr0011](evaluations/adr0011/README.md) | ADR-0011 実測資料 (試し書き / 矛盾の実例 / 案比較) | — | — |
+| [drafts/0012](drafts/0012-subinterfaces.md) | 802.1Q サブインターフェース (実装済み) | Draft | A |
+| [evaluations/adr0012](evaluations/adr0012/README.md) | ADR-0012 設計比較 YAML | — | — |
 
 ADR-0010 を保留した上で、先に L1〜L3 のデータプレーンを確定させる作業。
 表現原理 (関係の成立に必要な情報は書き、個別経路は書かない)、スタティックルートのスコープ外化、

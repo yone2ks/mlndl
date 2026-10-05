@@ -1,0 +1,45 @@
+# T3: Q-in-Q ハンドオフ / stag_vlan_id + ctag_vlan_id (ADR-0002 予約語)
+#
+# ADR-0002 の予約語に沿って、外側 = stag_vlan_id / 内側 = ctag_vlan_id を使う。
+# CLAUDE.md 本文: 「Q-in-Q は stag_vlan_id / ctag_vlan_id」と明記されている。
+#
+# この書き方では vlan_id フィールドは使わない。Q-in-Q であることが
+# フィールド名そのもので表現されるので、implicit な分岐が消える。
+
+ndl_version: "1.0"
+
+meta:
+  name: qinq-handoff-stag-ctag
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: ce1,     role: border, implementation: physical}
+    - {id: carrier, role: core,   implementation: physical, description: キャリア PE (abstract)}
+
+  interfaces:
+    - {id: ce1-eth0,     node: ce1,     name: Gi0/0}
+    - {id: carrier-port, node: carrier, name: xe-0/0/0}
+
+  links:
+    - {id: link-ce1-carrier, endpoints: [ce1-eth0, carrier-port], link_speed: 10G, link_role: uplink}
+
+layer2:
+  subinterfaces:
+    - id: ce1-eth0.100.10
+      attaches_to: {interface: ce1-eth0}
+      stag_vlan_id: 100    # 外側 (service tag)
+      ctag_vlan_id: 10     # 内側 (customer tag)
+      # vlan_id は書かない。Q-in-Q が discriminator で分岐するなら、
+      # type: dot1q_qinq のような Tagged Union にする選択肢もある。
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - id: ce1-eth0-100-10-l3
+      node: ce1
+      interface: Gi0/0.100.10
+      ip: 203.0.113.2/30
+      vrf: vrf-default
+      attaches_to: {interface: ce1-eth0.100.10}

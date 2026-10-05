@@ -1,0 +1,144 @@
+# T1: 支社 router-on-a-stick / 802.1Q サブ IF 設計案 C (VLAN 参照あり)
+#
+# 案 C の形:
+#   layer2.subinterfaces:
+#     - id: <subif-id>
+#       attaches_to: {interface: <L1 IF id>}
+#       vlan: <layer2.vlans の id>            # VLAN エンティティを指す
+#   (vlan_id は持たない。番号は VLAN エンティティから引く)
+#
+# これにより「このサブ IF は vlan-10 ブロードキャストドメインの L3 境界点」が
+# スキーマレベルで表現できる。トランク (sw1-g1 の vlan-10) と同じエンティティを
+# 指すため、両者が同じドメインにつながっていることが YAML から読み取れる。
+
+ndl_version: "1.0"
+
+meta:
+  name: branch-router-on-a-stick-variant-c
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: br1,   role: border, implementation: physical, device_type: cisco_isr}
+    - {id: sw1,   role: leaf,   implementation: physical}
+    - {id: hq-rtr, role: border, implementation: physical}
+    - {id: pc10,  role: server, implementation: physical}
+    - {id: pc20,  role: server, implementation: physical}
+    - {id: pc30,  role: server, implementation: physical}
+
+  interfaces:
+    - {id: br1-eth0,  node: br1,   name: Gi0/0}
+    - {id: br1-eth1,  node: br1,   name: Gi0/1}
+    - {id: sw1-g1,    node: sw1,   name: Gi1/0/1}
+    - {id: sw1-g2,    node: sw1,   name: Gi1/0/2}
+    - {id: sw1-g3,    node: sw1,   name: Gi1/0/3}
+    - {id: sw1-g4,    node: sw1,   name: Gi1/0/4}
+    - {id: hq-rtr-g0, node: hq-rtr, name: Gi0/0}
+    - {id: pc10-eth0, node: pc10,  name: eth0}
+    - {id: pc20-eth0, node: pc20,  name: eth0}
+    - {id: pc30-eth0, node: pc30,  name: eth0}
+
+  links:
+    - {id: link-br1-sw1,   endpoints: [br1-eth0, sw1-g1],    link_speed: 1G, link_role: trunk}
+    - {id: link-br1-wan,   endpoints: [br1-eth1, hq-rtr-g0], link_speed: 1G, link_role: uplink}
+    - {id: link-sw1-pc10,  endpoints: [sw1-g2, pc10-eth0],   link_speed: 1G, link_role: access}
+    - {id: link-sw1-pc20,  endpoints: [sw1-g3, pc20-eth0],   link_speed: 1G, link_role: access}
+    - {id: link-sw1-pc30,  endpoints: [sw1-g4, pc30-eth0],   link_speed: 1G, link_role: access}
+
+layer2:
+  vlans:
+    - id: vlan-10
+      vlan_id: 10
+      trunk_ports:
+        - {node: br1, interface: br1-eth0}
+        - {node: sw1, interface: sw1-g1}
+      access_ports:
+        - {node: pc10, interface: pc10-eth0}
+    - id: vlan-20
+      vlan_id: 20
+      trunk_ports:
+        - {node: br1, interface: br1-eth0}
+        - {node: sw1, interface: sw1-g1}
+      access_ports:
+        - {node: pc20, interface: pc20-eth0}
+    - id: vlan-30
+      vlan_id: 30
+      trunk_ports:
+        - {node: br1, interface: br1-eth0}
+        - {node: sw1, interface: sw1-g1}
+      access_ports:
+        - {node: pc30, interface: pc30-eth0}
+
+  # ---- 案 C: VLAN エンティティを参照 (vlan_id は持たない) ----
+  # サブ IF の属する L2 ドメインが vlan-10 と明示される。
+  # tag 番号 (10) は VLAN エンティティから引く → 二重定義が消える。
+  subinterfaces:
+    - id: br1-eth0.10
+      attaches_to: {interface: br1-eth0}
+      vlan: vlan-10
+    - id: br1-eth0.20
+      attaches_to: {interface: br1-eth0}
+      vlan: vlan-20
+    - id: br1-eth0.30
+      attaches_to: {interface: br1-eth0}
+      vlan: vlan-30
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    - id: br1-eth0-10-l3
+      node: br1
+      interface: Gi0/0.10
+      ip:   192.168.10.1/24
+      ipv6: 2001:db8:10::1/64
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth0.10}
+    - id: br1-eth0-20-l3
+      node: br1
+      interface: Gi0/0.20
+      ip:   192.168.20.1/24
+      ipv6: 2001:db8:20::1/64
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth0.20}
+    - id: br1-eth0-30-l3
+      node: br1
+      interface: Gi0/0.30
+      ip:   192.168.30.1/24
+      ipv6: 2001:db8:30::1/64
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth0.30}
+
+    - id: br1-eth1-l3
+      node: br1
+      interface: Gi0/1
+      ip: 198.51.100.2/30
+      vrf: vrf-default
+      attaches_to: {interface: br1-eth1}
+    - id: hq-rtr-wan
+      node: hq-rtr
+      interface: Gi0/0
+      ip: 198.51.100.1/30
+      vrf: vrf-default
+      attaches_to: {interface: hq-rtr-g0}
+
+  tunnel_interfaces:
+    - id: tunnel-br1-hq
+      node: br1
+      type: gre
+      source: br1-eth1-l3
+      destination_interface: hq-rtr-wan
+      ip: 10.255.0.1/30
+      vrf: vrf-default
+      transport_vrf: vrf-default
+      mtu: 1476
+    - id: tunnel-hq-br1
+      node: hq-rtr
+      type: gre
+      source: hq-rtr-wan
+      destination_interface: br1-eth1-l3
+      ip: 10.255.0.2/30
+      vrf: vrf-default
+      transport_vrf: vrf-default
+      mtu: 1476

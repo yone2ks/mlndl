@@ -1,0 +1,86 @@
+# T2: LAG 上の 802.1Q サブ IF / attaches_to: {interface: <LAG id>}
+#
+# br1 の eth0 / eth1 を LACP で lag-br1-bond0 に束ね、
+# その上に bond0.10 / bond0.20 のサブ IF を載せる。
+#
+# このファイルは「サブ IF の親を {interface: <LAG id>} で指す」案。
+# つまり LAG を L1 Interface と同じ ID 空間として扱い、
+# attaches_to.interface で参照する。
+#
+# ベースは案 A (node なし / vlan_id のみ)。LAG 参照の仕方だけが論点。
+
+ndl_version: "1.0"
+
+meta:
+  name: branch-lag-with-subif-attaches-interface
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: br1, role: border, implementation: physical}
+    - {id: sw1, role: leaf,   implementation: physical}
+
+  interfaces:
+    - {id: br1-eth0, node: br1, name: Gi0/0}
+    - {id: br1-eth1, node: br1, name: Gi0/1}
+    - {id: sw1-g1,   node: sw1, name: Gi1/0/1}
+    - {id: sw1-g2,   node: sw1, name: Gi1/0/2}
+
+  links:
+    - {id: link-br1-sw1-a, endpoints: [br1-eth0, sw1-g1], link_speed: 10G, link_role: trunk}
+    - {id: link-br1-sw1-b, endpoints: [br1-eth1, sw1-g2], link_speed: 10G, link_role: trunk}
+
+  lag:
+    - id: lag-br1-bond0
+      type: lacp
+      node: br1
+      members: [br1-eth0, br1-eth1]
+      lacp: {mode: active, min_links: 1}
+
+layer2:
+  vlans:
+    - id: vlan-10
+      vlan_id: 10
+      trunk_ports:
+        # 問題: trunk_ports は {node, interface} ペア。LAG は L1 Interface ではないので
+        # interface に lag-br1-bond0 を書いていいのか曖昧 (現行スキーマは PortRef のみ)。
+        # 案 C 系では vlan 参照で解決するが、ここでは暫定でメンバー物理 IF を書く。
+        - {node: br1, interface: br1-eth0}
+        - {node: br1, interface: br1-eth1}
+    - id: vlan-20
+      vlan_id: 20
+      trunk_ports:
+        - {node: br1, interface: br1-eth0}
+        - {node: br1, interface: br1-eth1}
+
+  # ---- 案 A ベース: LAG の指し方は {interface: <LAG id>} ----
+  # LAG の id を L1 Interface と同じキー (interface:) で指す。
+  # AttachesToObj の interface フィールドは任意の ID 空間を受けるため、
+  # LAG id もここに書けば構文的には通る。意味論は「同じ ID 空間」。
+  subinterfaces:
+    - id: br1-bond0.10
+      attaches_to: {interface: lag-br1-bond0}    # LAG を interface キーで参照
+      vlan_id: 10
+    - id: br1-bond0.20
+      attaches_to: {interface: lag-br1-bond0}
+      vlan_id: 20
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    - id: br1-bond0-10-l3
+      node: br1
+      interface: Bond0.10
+      ip:   192.168.10.1/24
+      ipv6: 2001:db8:10::1/64
+      vrf: vrf-default
+      attaches_to: {interface: br1-bond0.10}
+    - id: br1-bond0-20-l3
+      node: br1
+      interface: Bond0.20
+      ip:   192.168.20.1/24
+      ipv6: 2001:db8:20::1/64
+      vrf: vrf-default
+      attaches_to: {interface: br1-bond0.20}

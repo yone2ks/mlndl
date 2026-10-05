@@ -327,6 +327,13 @@ layer2:
       vrf: vrf-tenant-a
       irb_mode: symmetric
 
+  subinterfaces:                 # ADR-0012。L3 の routed サブ IF（router-on-a-stick 等）
+    - id: subif-border1-swp5-200 # 推奨プレフィックス subif-
+      attaches_to: {interface: border1-swp5}   # 親: L1 IF または LAG の id
+      vlan_id: 200               # このリンク上の 802.1Q タグ番号（layer2.vlans への参照ではない）
+      name: swp5.200             # 機器上の名前
+      # node は持たない（親から導出）。ip / vrf は layer3.interfaces 側に書く
+
 layer3:
   vrfs:
     - id: vrf-tenant-a
@@ -363,6 +370,13 @@ layer3:
       attaches_to: {interface: vlan-100}
       ip: 192.168.100.1/24
       vrf: vrf-tenant-a
+
+    - id: border1-swp5-200       # サブ IF に載る L3
+      node: border1
+      interface: swp5.200
+      attaches_to: {interface: subif-border1-swp5-200}
+      ip: 10.200.0.1/30
+      vrf: vrf-default
 
   tunnel_interfaces:             # ADR-0011 D6。source / destination を自分で持つ（tunnel_links はない）
     - id: tunnel-border1-dc2
@@ -425,7 +439,7 @@ mlndl/
 │       ├── __init__.py
 │       ├── schema/
 │       │   ├── layer1.py       # L1Node, L1Interface, L1Link, LacpLag, MlagLag
-│       │   ├── layer2.py       # VLAN, VxLAN (l2vni/l3vni)
+│       │   ├── layer2.py       # VLAN, VxLAN (l2vni/l3vni), Subinterface
 │       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface, RoutingAdjacency
 │       │   ├── protocols.py    # BFD, OSPF, BGP
 │       │   └── topology.py     # MLNDLTopology（ルートモデル）
@@ -460,6 +474,9 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | VTEP source | vtep_source が layer3.interfaces に存在し、その node が members に含まれるか | error |
 | ノード所属 | `trunk_ports` / `access_ports` / L3 IF の `attaches_to` が指す L1 IF が、同じ node のものか | error |
 | SVI 参照 | `attaches_to: {interface:}` は L3Interface に限り VLAN も指せる。短縮形 `interface: vlan-N` の VLAN が存在するか。短縮形と明示した `attaches_to` が食い違っていないか | error |
+| `{interface:}` の参照先 | `layer3.interfaces` は L1 IF / LAG / VLAN / サブ IF、`layer2.subinterfaces` は L1 IF / LAG、それ以外は L1 IF のみ（ADR-0012 D5）。L3 IF の node が参照先の node（群）に含まれるか | error |
+| ID の一意性 | L1 IF / LAG / VLAN / サブ IF の ID が互いに重複していないか（ADR-0002 D5） | error |
+| サブ IF | `vlan_id` が 1..4094 か。同じ親の上でタグが重複していないか。`attaches_to` が `{interface:}` 形式か。タグと `layer2.vlans` の照合は**しない**（ADR-0012 D3） | error |
 | L3 IF 重複 | 同一 `(node, interface)` の L3Interface が重複していないか | error |
 | IP アドレス | `ip` は IPv4、`ipv6` は IPv6 の CIDR（型で検証。`ip` に IPv6 を書くと移動先を示すエラー） | error |
 | ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798） | error |
@@ -469,7 +486,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容） | error |
-| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
+| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
 | SVI の紐づけ忘れ | `interface` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
 | ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0010 D5・D6 の一意性チェックに置き換え予定（保留中） |
@@ -508,6 +525,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0008](docs/decisions/drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 | C (Draft) | 箱もノード（`role: vpc`）。`location` 軸。所属は `parent` + `labels` |
 | [ADR-0010](docs/decisions/drafts/0010-control-plane-separation.md) | control plane と data plane の分離 | A r2 (Draft・**保留**) | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（決定済み・**未実装**）。BGP エントリの単位は未決 |
 | [ADR-0011](docs/decisions/drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | A r2 (Draft) | 原理「関係の成立に必要な情報は書き、個別経路は書かない」。スタティックルートはスコープ外。SVI は `attaches_to` に一本化。`fhrp` → `gateway_redundancy`。`ip` (IPv4) / `ipv6`。トンネル追加（**実装済み**。完了条件 D11 を満たした。ADR-0005 にも反映済み） |
+| [ADR-0012](docs/decisions/drafts/0012-subinterfaces.md) | 802.1Q サブインターフェース | A (Draft) | `layer2.subinterfaces`。`node` と VLAN 参照は持たず、`vlan_id` はリンク上のタグ番号。親は `{interface:}` で L1 IF または LAG を指す。`{interface:}` が指せる ID 空間をエンティティごとに固定（**実装済み**） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---
