@@ -1,10 +1,12 @@
-"""Layer 2 スキーマ定義 (VLAN / VxLAN)"""
+"""Layer 2 スキーマ定義 (VLAN / VxLAN / Subinterface)"""
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .layer1 import AttachesToObj
 
 
 class PortRef(BaseModel):
@@ -65,6 +67,47 @@ class L3VxLAN(BaseModel):
 VxLAN = Annotated[L2VxLAN | L3VxLAN, Field(discriminator="type")]
 
 
+class Subinterface(BaseModel):
+    """802.1Q サブインターフェース (ADR-0012)
+
+    物理 IF または LAG を 802.1Q タグで分割した論理 IF。L3 は
+    layer3.interfaces[].attaches_to: {interface: <サブ IF の id>} で載る。
+
+    - node は持たない。親 (L1 IF / LAG) から導出できるため (二重表現を作らない)
+    - vlan_id はこのリンク上の 802.1Q タグ番号であり、layer2.vlans への参照ではない。
+      タグの書き換えや拠点ごとの番号再利用でタグと VLAN エンティティは一致しないことがある
+    - Q-in-Q (stag_vlan_id / ctag_vlan_id)、ネイティブ (タグなし) サブ IF、
+      L2 のサービスインスタンスは範囲外
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str                                 # 推奨プレフィックス subif- (ADR-0002 D7)
+    attaches_to: AttachesToObj              # {interface: <L1 IF の id または LAG の id>}
+    vlan_id: int = Field(ge=1, le=4094)     # IEEE 802.1Q VID。0 と 4095 は予約
+    name: str | None = None                 # 機器上の名前 (eth0.10 / Gi0/0.10 / bond0.10)
+    description: str | None = None
+
+    @field_validator("attaches_to", mode="before")
+    @classmethod
+    def object_form_only(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            raise ValueError(
+                "サブインターフェースの attaches_to は {interface: <L1 IF または LAG の id>} で"
+                "書いてください。文字列はノード ID の糖衣構文です (ADR-0001, ADR-0012)"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def parent_is_interface(self) -> "Subinterface":
+        if self.attaches_to.interface is None:
+            raise ValueError(
+                "サブインターフェースの attaches_to は interface キーで親 (L1 IF または LAG) を"
+                "指してください (ADR-0012)"
+            )
+        return self
+
+
 class L2Layer(BaseModel):
     """Layer 2 全体"""
 
@@ -72,3 +115,4 @@ class L2Layer(BaseModel):
 
     vlans: list[VLAN] = []
     vxlan: list[VxLAN] = []
+    subinterfaces: list[Subinterface] = []

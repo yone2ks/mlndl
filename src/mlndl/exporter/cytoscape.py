@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from ..schema.layer1 import MlagLag
+from ..schema.layer1 import LacpLag, MlagLag
 from ..schema.layer2 import L2VxLAN, L3VxLAN
 from ..schema.topology import MLNDLTopology
 
@@ -58,7 +58,22 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     node_l3ifs: dict[str, list[dict]] = defaultdict(list)
     node_vrfs: dict[str, list[str]]  = defaultdict(list)
     node_tunnels: dict[str, list[dict]] = defaultdict(list)
+    node_subifs: dict[str, list[dict]] = defaultdict(list)
     vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
+
+    # サブ IF は親 (L1 IF / LAG) のノードに埋め込む。MLAG 上のサブ IF は両ノードに存在する (ADR-0012)
+    parent_nodes: dict[str, list[str]] = {}
+    for iface in topology.layer1.interfaces:
+        parent_nodes[iface.id] = [iface.node]
+    for lag in topology.layer1.lag:
+        parent_nodes[lag.id] = [lag.node] if isinstance(lag, LacpLag) else list(lag.nodes)
+    subifs = {si.id: si for si in topology.layer2.subinterfaces} if topology.layer2 else {}
+    for si in subifs.values():
+        entry = {"id": si.id, "parent": si.attaches_to.interface, "vlan_id": si.vlan_id}
+        if si.name: entry["name"] = si.name
+        for nid in parent_nodes.get(si.attaches_to.interface, []):
+            node_subifs[nid].append(entry)
+    lag_ids = {lag.id for lag in topology.layer1.lag}
     if topology.layer3:
         for iface in topology.layer3.interfaces:
             if iface.interface == "lo":
@@ -67,13 +82,19 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
             if iface.ip or iface.ipv6:
                 ref = iface.attachment_ref()
                 vlan = ref if ref in vlan_ids else None
+                subif = subifs.get(ref)
                 kind = ("loopback" if iface.interface == "lo"
-                        else "svi" if vlan else "routed")
+                        else "svi" if vlan
+                        else "subinterface" if subif else "routed")
                 entry: dict = {"interface": iface.interface, "kind": kind}
                 if iface.ip:   entry["ip"]   = str(iface.ip)
                 if iface.ipv6: entry["ipv6"] = str(iface.ipv6)
                 if iface.vrf:  entry["vrf"]  = iface.vrf
                 if vlan:       entry["vlan"] = vlan
+                if subif:
+                    entry["subinterface"] = subif.id
+                    entry["vlan_id"]      = subif.vlan_id
+                if ref in lag_ids: entry["lag"] = ref
                 gws = [gw.model_dump(mode="json", exclude_none=True)
                        for gw in iface.gateway_redundancy]
                 if gws:        entry["gateway_redundancy"] = gws
@@ -125,6 +146,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         if lo_ip.get(node.id):        data["lo_ip"]          = lo_ip[node.id]
         if lo_ipv6.get(node.id):      data["lo_ipv6"]        = lo_ipv6[node.id]
         if node_tunnels[node.id]:     data["tunnels"]        = node_tunnels[node.id]
+        if node_subifs[node.id]:      data["subinterfaces"]  = node_subifs[node.id]
         if node_l3ifs[node.id]:       data["l3_interfaces"]  = node_l3ifs[node.id]
         if node_vrfs[node.id]:        data["vrfs"]           = node_vrfs[node.id]
 

@@ -1,0 +1,108 @@
+# ADR-0012: 802.1Q サブインターフェース
+#
+# - 支社の router-on-a-stick: br1 の eth0 に VLAN タグ 10 / 20 のサブ IF を作り、それぞれに IP を振る
+# - LAG 上のサブ IF: br1 の bond0 (eth1 + eth2) にタグ 100 のサブ IF
+# - routed LAG: bond0 自体にも IP を振る (タグなしのトラフィック)
+# - サブ IF の vlan_id はこのリンク上のタグ番号であり、layer2.vlans への参照ではない。
+#   sw1 側の VLAN (vlan-10 など) とのつながりは、L1 リンクをたどって導出する
+ndl_version: "1.0"
+
+meta:
+  name: branch-router-on-a-stick
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: br1, role: border, implementation: physical, description: 支社ルーター}
+    - {id: sw1, role: leaf, implementation: physical, description: 支社アクセススイッチ}
+    - {id: pc10, role: server, implementation: physical}
+    - {id: pc20, role: server, implementation: physical}
+  interfaces:
+    - {id: br1-eth0, node: br1, name: eth0}
+    - {id: br1-eth1, node: br1, name: eth1}
+    - {id: br1-eth2, node: br1, name: eth2}
+    - {id: sw1-g1, node: sw1, name: Gi1/0/1}
+    - {id: sw1-g2, node: sw1, name: Gi1/0/2}
+    - {id: sw1-g3, node: sw1, name: Gi1/0/3}
+    - {id: sw1-g10, node: sw1, name: Gi1/0/10}
+    - {id: sw1-g20, node: sw1, name: Gi1/0/20}
+    - {id: pc10-eth0, node: pc10, name: eth0}
+    - {id: pc20-eth0, node: pc20, name: eth0}
+  links:
+    - {id: link-br1-sw1-trunk, endpoints: [br1-eth0, sw1-g1], link_speed: 1G, link_role: trunk}
+    - {id: link-br1-sw1-bond-a, endpoints: [br1-eth1, sw1-g2], link_speed: 1G, link_role: uplink}
+    - {id: link-br1-sw1-bond-b, endpoints: [br1-eth2, sw1-g3], link_speed: 1G, link_role: uplink}
+    - {id: link-sw1-pc10, endpoints: [sw1-g10, pc10-eth0], link_speed: 1G, link_role: access}
+    - {id: link-sw1-pc20, endpoints: [sw1-g20, pc20-eth0], link_speed: 1G, link_role: access}
+  lag:
+    - {id: lag-br1-bond0, type: lacp, node: br1, members: [br1-eth1, br1-eth2]}
+    - {id: lag-sw1-po1, type: lacp, node: sw1, members: [sw1-g2, sw1-g3]}
+
+layer2:
+  vlans:
+    # sw1 側の VLAN。br1 のサブ IF からは参照しない
+    - id: vlan-10
+      vlan_id: 10
+      name: users
+      trunk_ports: [{node: sw1, interface: sw1-g1}]
+      access_ports: [{node: sw1, interface: sw1-g10}]
+    - id: vlan-20
+      vlan_id: 20
+      name: voice
+      trunk_ports: [{node: sw1, interface: sw1-g1}]
+      access_ports: [{node: sw1, interface: sw1-g20}]
+  subinterfaces:
+    - id: subif-br1-eth0-10
+      attaches_to: {interface: br1-eth0}
+      vlan_id: 10
+      name: eth0.10
+    - id: subif-br1-eth0-20
+      attaches_to: {interface: br1-eth0}
+      vlan_id: 20
+      name: eth0.20
+    - id: subif-br1-bond0-100
+      attaches_to: {interface: lag-br1-bond0}   # LAG も {interface:} で指す (ADR-0012)
+      vlan_id: 100
+      name: bond0.100
+      description: 管理用
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+    - {id: vrf-mgmt}
+  interfaces:
+    - id: br1-eth0-10
+      node: br1
+      interface: eth0.10
+      attaches_to: {interface: subif-br1-eth0-10}
+      ip: 192.168.10.1/24
+      ipv6: 2001:db8:10::1/64
+      vrf: vrf-default
+    - id: br1-eth0-20
+      node: br1
+      interface: eth0.20
+      attaches_to: {interface: subif-br1-eth0-20}
+      ip: 192.168.20.1/24
+      vrf: vrf-default
+    - id: br1-bond0-100
+      node: br1
+      interface: bond0.100
+      attaches_to: {interface: subif-br1-bond0-100}
+      ip: 10.0.100.1/30
+      vrf: vrf-mgmt
+    - id: br1-bond0
+      node: br1
+      interface: bond0
+      attaches_to: {interface: lag-br1-bond0}   # routed LAG
+      ip: 10.0.0.1/30
+      vrf: vrf-default
+    - id: pc10-eth0-l3
+      node: pc10
+      interface: eth0
+      attaches_to: {interface: pc10-eth0}
+      ip: 192.168.10.10/24
+    - id: pc20-eth0-l3
+      node: pc20
+      interface: eth0
+      attaches_to: {interface: pc20-eth0}
+      ip: 192.168.20.10/24
