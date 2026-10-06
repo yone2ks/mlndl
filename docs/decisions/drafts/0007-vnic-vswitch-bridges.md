@@ -172,6 +172,22 @@ vSphere の PortGroup 名（"PG-Web" 等）を残したい場合の `name` フ�
 
 ---
 
+## 試し書き YAML
+
+`tests/fixtures/` にある 3 本は、本ドラフトの案を比べるための記録である (pytest からは読まれない)。
+
+| ファイル | 案 | 現行スキーマでの validate (2026-10-06) |
+|---|---|---|
+| `experimental_vswitch_A_chain.yaml` | vSwitch 概念を持たず、vNIC を vmnic に `attaches_to` で連鎖させる | 通る |
+| `experimental_vswitch_B_vlanonly.yaml` | vSwitch 概念を持たず、VLAN の `access_ports` / `trunk_ports` だけで表す | 通る |
+| `experimental_vswitch_C_bridge.yaml` | `layer2.bridges` を導入する (本ドラフトの方向) | 通らない (`layer2.bridges` が未実装。意図どおり) |
+
+> **2026-10-06 の修正**: A と B はこれまで validate を通らなかったが、原因は案の良し悪しではなく、
+> `trunk_ports` / `access_ports` が IF の ID ではなく機器上の名前 (`Ethernet1` / `eth0` / `vmnic0`) を
+> 参照していたことだった。ID 参照に直したところ、A と B は現行スキーマでそのまま書けることが分かった。
+> あわせて ID `tor-sw1-Eth1` を ADR-0002 D1 に従い `tor-sw1-eth1` に直した。同じ誤りは
+> `valid_vsphere_dvswitch.yaml` にもあり、同時に直している。
+
 ## 関連 ADR
 
 - [ADR-0001](../0001-attaches-to.md): attaches_to（単一値・supporting 関係）

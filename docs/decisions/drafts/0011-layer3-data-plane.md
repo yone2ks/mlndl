@@ -354,7 +354,7 @@ F2 で実測した「黙って通る」ものを塞ぐ。
 | スキーマ | D3〜D7 のすべてが実装されている | 満たした |
 | バリデーター | D9 の error 規則が実装され、F2 の 4 例がいずれも error になる | 満たした (F2 の 4 例はテストで固定) |
 | エクスポーター | yaml が IPv6・トンネルを含めて往復で同値。cytoscape がトンネルの辺を出力する | 満たした (`test_yaml_round_trip` / `test_cytoscape_derives_one_tunnel_edge_per_pair`) |
-| fixture | 既存 + 新規 2 本 (dual stack / tunnel) が validate を通る | 満たした (`--strict` でも warning なし。`valid_vsphere_dvswitch.yaml` は対象外) |
+| fixture | 既存 + 新規 2 本 (dual stack / tunnel) が validate を通る | 満たした (`--strict` でも warning なし。`valid_vsphere_dvswitch.yaml` は当時対象外。2026-10-06 に修正し、現在はこれも通る) |
 | ADR | ADR-0005 に実装同期メモ (D8) と原理 (D1) が追記されている | 満たした |
 
 ## Consequences
@@ -416,7 +416,7 @@ F2 で実測した「黙って通る」ものを塞ぐ。
 | 制御プレーン (BGP / OSPF / IS-IS / BFD) | drafts/0010 (保留中) |
 | D5 / D4 / D6 で書けないもの | 上記 Consequences を参照 |
 
-`tests/fixtures/valid_vsphere_dvswitch.yaml` は drafts/0007 待ちとして対象外とする
+~~`tests/fixtures/valid_vsphere_dvswitch.yaml` は drafts/0007 待ちとして対象外とする~~ **2026-10-06 に解消**: 壊れていた原因は vSwitch の表現ではなく、IF の名前を ID の代わりに参照していたことだった。参照を直して validate を通るようにし、テストの除外 (`KNOWN_BROKEN`) も外した。vSwitch 自体は引き続き drafts/0007 で扱う
 (ID 参照に直した版は `evaluations/adr0011/topologies/T5_vsphere_dvswitch_fixed.yaml` にある)。
 
 ## Alternatives Considered

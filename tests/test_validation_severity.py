@@ -12,10 +12,6 @@ from mlndl import parse, parse_file, validate, validate_all, ValidationResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-# 元から validate に失敗することが分かっている valid_ fixture（要改名・別途対応）
-KNOWN_BROKEN = {"valid_vsphere_dvswitch.yaml"}
-
-
 def _topo(body: str):
     return parse('ndl_version: "1.0"\n' + body)
 
@@ -71,7 +67,7 @@ class TestSeverity:
 
     @pytest.mark.parametrize(
         "fixture",
-        sorted(p.name for p in FIXTURES.glob("valid_*.yaml") if p.name not in KNOWN_BROKEN),
+        sorted(p.name for p in FIXTURES.glob("valid_*.yaml")),
     )
     def test_valid_fixtures_have_no_warnings(self, fixture):
         """規約 warning が既存の valid fixture で誤検知しないこと"""
