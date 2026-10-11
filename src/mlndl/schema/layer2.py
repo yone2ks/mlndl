@@ -10,16 +10,20 @@ from .layer1 import AttachesToObj
 
 
 class PortRef(BaseModel):
-    """node + interface の参照ペア（trunk_ports / access_ports 用）
+    """VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）
 
-    native: trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。
-    access_ports では常に untagged のため通常は未指定。
+    interface: L1 IF の id または LAG の id。LAG のときはメンバーではなく LAG を指す
+               (VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する)
+    node:      省略可。interface から導出できる。書いた場合は validator が照合する。
+               MLAG は両ノードに効くので node を書けない
+    native:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。
+               access_ports では常に untagged のため通常は未指定。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    node: str
     interface: str
+    node: str | None = None
     native: bool = False
 
 

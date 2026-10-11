@@ -42,6 +42,22 @@ def export_json(topology: MLNDLTopology, indent: int = 2) -> str:
     return json.dumps(export(topology), ensure_ascii=False, indent=indent)
 
 
+def _interface_nodes(topology: MLNDLTopology) -> dict[str, list[str]]:
+    """L1 IF / LAG の id → それが載るノード群。MLAG は 2 ノード"""
+    nodes: dict[str, list[str]] = {}
+    if topology.layer1:
+        for iface in topology.layer1.interfaces:
+            nodes[iface.id] = [iface.node]
+        for lag in topology.layer1.lag:
+            nodes[lag.id] = [lag.node] if isinstance(lag, LacpLag) else list(lag.nodes)
+    return nodes
+
+
+def _port_nodes(pr, interface_nodes: dict[str, list[str]]) -> list[str]:
+    """PortRef が載るノード群。node は省略できるので interface から導出する (ADR-0013)"""
+    return interface_nodes.get(pr.interface) or ([pr.node] if pr.node else [])
+
+
 # ---------------------------------------------------------------------------
 # ノード（L1 のみ、全レイヤー情報を data に埋め込む）
 # ---------------------------------------------------------------------------
@@ -62,11 +78,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
 
     # サブ IF は親 (L1 IF / LAG) のノードに埋め込む。MLAG 上のサブ IF は両ノードに存在する (ADR-0012)
-    parent_nodes: dict[str, list[str]] = {}
-    for iface in topology.layer1.interfaces:
-        parent_nodes[iface.id] = [iface.node]
-    for lag in topology.layer1.lag:
-        parent_nodes[lag.id] = [lag.node] if isinstance(lag, LacpLag) else list(lag.nodes)
+    parent_nodes = _interface_nodes(topology)
     subifs = {si.id: si for si in topology.layer2.subinterfaces} if topology.layer2 else {}
     for si in subifs.values():
         entry = {"id": si.id, "parent": si.attaches_to.interface, "vlan_id": si.vlan_id}
@@ -111,8 +123,9 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     if topology.layer2:
         for vlan in topology.layer2.vlans:
             for pr in [*vlan.trunk_ports, *vlan.access_ports]:
-                if vlan.id not in node_vlans[pr.node]:
-                    node_vlans[pr.node].append(vlan.id)
+                for nid in _port_nodes(pr, parent_nodes):
+                    if vlan.id not in node_vlans[nid]:
+                        node_vlans[nid].append(vlan.id)
 
     # BGP AS 番号をノード別に集約（BGP overlay での AS 番号表示用）
     # local_as が直接定義されているノード優先、次に neighbor の remote_as から逆引き
@@ -262,6 +275,7 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
 def _export_l2_overlay(topology, if_to_name, elements):
     if not topology.layer2:
         return
+    interface_nodes = _interface_nodes(topology)
 
     # VLAN セグメント情報を layer3.interfaces (SVI) からサブネット・VRF を抽出
     # key: vlan.id (例: "vlan-100") → {subnet, vrf}
@@ -301,14 +315,17 @@ def _export_l2_overlay(topology, if_to_name, elements):
         # メンバーエッジ（VLAN → L1 ノード）。trunk(tagged) と access(untagged) を
         # 区別して保持する（ビューワのリンク沿い VLAN 表示用）。
         # trunk_ports のうち native=True は untagged 扱い。
+        # LAG を指すポートは LAG の id のまま出す。MLAG は両ノードに出す (ADR-0013)
         tagged: dict[str, list[str]] = {}
         untagged: dict[str, list[str]] = {}
         for pr in vlan.trunk_ports:
             name = if_to_name.get(pr.interface, pr.interface)
-            (untagged if pr.native else tagged).setdefault(pr.node, []).append(name)
+            for nid in _port_nodes(pr, interface_nodes):
+                (untagged if pr.native else tagged).setdefault(nid, []).append(name)
         for pr in vlan.access_ports:
             name = if_to_name.get(pr.interface, pr.interface)
-            untagged.setdefault(pr.node, []).append(name)
+            for nid in _port_nodes(pr, interface_nodes):
+                untagged.setdefault(nid, []).append(name)
         for node_id in {*tagged, *untagged}:
             data_e: dict = {
                 "id":     f"vlan-{vlan.id}-{node_id}",

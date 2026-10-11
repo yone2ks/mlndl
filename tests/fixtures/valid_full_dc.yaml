@@ -208,8 +208,7 @@ layer2:
       vlan_id: 100
       name: tenant-a
       trunk_ports:
-        - {node: leaf1, interface: leaf1-swp1}
-        - {node: leaf2, interface: leaf2-swp1}
+        - {interface: lag-mlag-server1}   # MLAG は 1 エントリで leaf1 / leaf2 の両方 (ADR-0013)
 
   vxlan:
     - id: vni-10100

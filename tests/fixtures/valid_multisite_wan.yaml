@@ -223,10 +223,8 @@ layer2:
       vlan_id: 100
       name: dc-tenant-a
       trunk_ports:
-        - {node: dc-leaf1, interface: dc-leaf1-swp1}
-        - {node: dc-leaf2, interface: dc-leaf2-swp1}
-        - {node: dc-leaf1, interface: dc-leaf1-swp2}
-        - {node: dc-leaf2, interface: dc-leaf2-swp2}
+        - {interface: lag-dc-mlag-server1}   # MLAG は両 leaf に効く (ADR-0013)
+        - {interface: lag-dc-mlag-server2}
 
     # ── Campus VLAN (tag x3, Core-Agg トランク全通し, Dist-Host access) ─
     # NOTE: トランクポートは Core/Agg 間/Agg-Dist 間で全通し。
