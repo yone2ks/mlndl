@@ -1,0 +1,54 @@
+# ありがちなミス 2: MLAG を 1 エントリで書いたが、node を片方だけ明示 (他方が落ちる)
+#
+# 期待する検出:
+# - 案 A: node 必須なので「node: leaf1」+「interface: lag-mlag-server1」の 1 エントリは
+#   leaf2 側がまったく書かれていないと見なされ、warning か silent miss。
+#   → node を 2 エントリ書かせる案 A は "片方忘れ" を機械検出しにくい。
+# - 案 B: node 省略ならば lag.nodes [leaf1, leaf2] が自動で全員適用され、ミスにならない。
+#   → ここでは「node: leaf1」が明示されているので「leaf2 側はこの VLAN に属さない」と
+#     読み取るか、「node を書くな (省略すべき)」と warning するかの仕様判断が必要。
+# - 案 C: lag: フィールドは node を取らない設計にすれば問題は起きない。
+
+ndl_version: "1.0"
+
+meta:
+  name: c4-mistake-mlag-one-node-only
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf1, implementation: vm, role: leaf }
+    - { id: leaf2, implementation: vm, role: leaf }
+    - { id: server1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0] }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1] }
+
+  lag:
+    - id: lag-mlag-server1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active}
+      peer_link: lag-peer-link
+      peer_link_interface: peerlink.4094
+    - id: lag-peer-link
+      type: lacp
+      node: leaf1
+      members: []
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        # MLAG なのに leaf1 側しか書かれていない (leaf2 側の記述が漏れている)
+        - {node: leaf1, interface: lag-mlag-server1}

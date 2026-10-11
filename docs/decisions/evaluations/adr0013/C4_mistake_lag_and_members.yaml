@@ -1,0 +1,43 @@
+# ありがちなミス 1: LAG id と、その members (L1 IF) の両方を trunk_ports に書く
+#
+# 期待する検出 (案 B 前提): error "LAG lag-leaf3-server2 とそのメンバー leaf3-swp1 が
+# 同じ VLAN の trunk_ports に重複して現れる (二重表現)"
+#
+# なぜやりがちか: 「LAG を書いたけど念のためメンバーも書いておこう」や、既存の L1 IF 版
+# を残したまま LAG 行を追記するリファクタ時の消し忘れ。
+
+ndl_version: "1.0"
+
+meta:
+  name: c4-mistake-lag-and-members
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf3, implementation: vm, role: leaf }
+    - { id: server2, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf3-swp1, node: leaf3, name: swp1 }
+    - { id: leaf3-swp2, node: leaf3, name: swp2 }
+    - { id: server2-eth0, node: server2, name: eth0 }
+    - { id: server2-eth1, node: server2, name: eth1 }
+
+  links:
+    - { id: link-leaf3-server2-1, endpoints: [leaf3-swp1, server2-eth0] }
+    - { id: link-leaf3-server2-2, endpoints: [leaf3-swp2, server2-eth1] }
+
+  lag:
+    - id: lag-leaf3-server2
+      type: lacp
+      node: leaf3
+      members: [leaf3-swp1, leaf3-swp2]
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {interface: lag-leaf3-server2}            # LAG 全体
+        - {node: leaf3, interface: leaf3-swp1}      # そのメンバー (重複)

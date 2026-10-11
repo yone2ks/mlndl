@@ -1,0 +1,53 @@
+# 案 C: 新キー lag: を追加 (interface: と排他) / MLAG は 1 エントリ / node 省略可
+#
+# 書きやすさ:
+# - 「物理ポート参照」と「LAG 参照」が別フィールドで、人間にとって読み分けが即可。
+# 書きにくさ:
+# - PortRef に排他フィールドが増え、Discriminated Union に近づくが type: キーがない。
+#   どちらを埋めてよいか・両方書いたらどうなるかの仕様を人間が覚える必要あり。
+# - ADR-0012 で attaches_to: {interface: <L1 IF/LAG>} と合流させた既定路線と逆行。
+
+ndl_version: "1.0"
+
+meta:
+  name: c1-planC-mlag-server1
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf1, implementation: vm, role: leaf }
+    - { id: leaf2, implementation: vm, role: leaf }
+    - { id: server1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_role: access }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_role: access }
+
+  lag:
+    - id: lag-mlag-server1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-peer-link
+      peer_link_interface: peerlink.4094
+
+    - id: lag-peer-link
+      type: lacp
+      node: leaf1
+      members: []
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        # 案 C: lag: フィールドを使う (interface: は使わない)
+        - {lag: lag-mlag-server1}

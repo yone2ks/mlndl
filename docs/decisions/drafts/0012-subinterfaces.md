@@ -4,6 +4,7 @@
 - **Date**: 2026-10-05
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A (設計ラウンドで 5 エージェントの評価を取り、割れた 2 点をユーザーが判断した上で策定)
+- **Amended by**: drafts/0013 (D5 の表に VLAN の `trunk_ports` / `access_ports` の行を追加)
 - **関連**: ADR-0001 (attaches_to), ADR-0002 (ID 命名 D1・D5・D7), ADR-0005 (D2-2 ケース C・D2-3), ADR-0009 (parent), drafts/0011 (layer3 データプレーン)
 
 ## Context
@@ -112,6 +113,8 @@ dsl-designer の懸念 (「呼び出し元ごとに `{interface:}` が指せる 
 
 この表にない組み合わせは error である。新しい組み合わせを足すときは、この表を改訂する ADR を書く。
 
+> **ADR-0013 で追加**: `layer2.vlans[].trunk_ports[].interface` / `access_ports[].interface` は L1 IF ∪ LAG を指せる。
+
 **前提として、L1 IF / LAG / VLAN / サブ IF の ID は互いに重複してはならない** (ADR-0002 D5)。
 `{interface: X}` は X をこれらの空間で引くため、重複すると解決先が曖昧になる。これを validator の error にした
 (これまで ADR-0002 D5 は規範としてあったが、検証されていなかった)。
@@ -157,8 +160,8 @@ ADR-0005 D2-2 ケース C の例 `leaf1-swp1-100` はプレフィックスがな
     単一タグと Tagged Union にする (`GatewayRedundancy` と同じ形)。今の `vlan_id` を単一タグの既定として残せば非破壊で拡張できる
   - ネイティブ (タグなし) サブ IF (Cisco `encapsulation dot1Q 1 native`)。タグなしの通信は親 IF に載せた `L3Interface` で表す
   - L2 のサブ IF (service instance / EFP)、VLAN の書き換え
-- スイッチ側の `trunk_ports` は LAG を指せない (`PortRef.interface` は L1 IF のみ)。LAG の trunk はメンバーの物理ポートを
-  列挙するしかない。サブ IF とは独立した問題として残す (設計ラウンドで example-author が発見)
+- ~~スイッチ側の `trunk_ports` は LAG を指せない (`PortRef.interface` は L1 IF のみ)。LAG の trunk はメンバーの物理ポートを
+  列挙するしかない。サブ IF とは独立した問題として残す (設計ラウンドで example-author が発見)~~ → ADR-0013 で解決
 - ルーター側のサブ IF とスイッチ側の VLAN のつながりは、YAML の参照としては書かれない (D3)。導出が必要
 
 ### 影響を受けるコンポーネント

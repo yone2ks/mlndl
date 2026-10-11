@@ -309,10 +309,11 @@ layer2:
   vlans:
     - id: vlan-100              # ADR-0002: vlan-<N> 形式
       vlan_id: 100
-      trunk_ports:
-        - {node: leaf1, interface: swp3}   # node/interface ペア形式（曖昧さなし）
+      trunk_ports:               # interface は L1 IF または LAG の id（ADR-0013）。機器上の名前ではない
+        - {interface: lag-mlag-server1}    # LAG はメンバーでなく LAG を指す。MLAG は 1 行で両ノード（node は書けない）
+        - {node: leaf1, interface: leaf1-swp4}   # node は省略可。書いた場合は interface の node と照合される
       access_ports:
-        - {node: server1, interface: eth0}
+        - {interface: server1-eth0}
 
   vxlan:
     - id: vni-10100             # ADR-0002: vni-<N> 形式
@@ -472,9 +473,10 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
 | VTEP source | vtep_source が layer3.interfaces に存在し、その node が members に含まれるか | error |
-| ノード所属 | `trunk_ports` / `access_ports` / L3 IF の `attaches_to` が指す L1 IF が、同じ node のものか | error |
+| ノード所属 | `trunk_ports` / `access_ports` に書いた `node` や L3 IF の `node` が、参照先の L1 IF / LAG の node と一致するか。MLAG を指すポートには `node` を書けない（ADR-0013 D2） | error |
+| VLAN のポート | `trunk_ports` / `access_ports` の `interface` は L1 IF または LAG。同じ VLAN に LAG とそのメンバーを併記していないか（error）。同じ VLAN に同じ端点を 2 回書いていないか（error）。LAG のメンバーだけを書いていたら LAG を指すよう促す（warning）（ADR-0013） | error / warning |
 | SVI 参照 | `attaches_to: {interface:}` は L3Interface に限り VLAN も指せる。短縮形 `interface: vlan-N` の VLAN が存在するか。短縮形と明示した `attaches_to` が食い違っていないか | error |
-| `{interface:}` の参照先 | `layer3.interfaces` は L1 IF / LAG / VLAN / サブ IF、`layer2.subinterfaces` は L1 IF / LAG、それ以外は L1 IF のみ（ADR-0012 D5）。L3 IF の node が参照先の node（群）に含まれるか | error |
+| `{interface:}` の参照先 | `layer3.interfaces` は L1 IF / LAG / VLAN / サブ IF、`layer2.subinterfaces` と VLAN のポートは L1 IF / LAG、それ以外は L1 IF のみ（ADR-0012 D5・ADR-0013）。L3 IF の node が参照先の node（群）に含まれるか | error |
 | ID の文法 | すべてのエンティティの `id` が `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` に従い、63 文字以内か（ADR-0002 D1）。違反理由をまとめて示す | error |
 | ID の一意性 | L1 IF / LAG / VLAN / サブ IF の ID が互いに重複していないか（ADR-0002 D5） | error |
 | サブ IF | `vlan_id` が 1..4094 か。同じ親の上でタグが重複していないか。`attaches_to` が `{interface:}` 形式か。タグと `layer2.vlans` の照合は**しない**（ADR-0012 D3） | error |
@@ -486,7 +488,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | MTU 整合性 | VxLAN 使用時に underlay MTU が 1550 以上か | error |
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
-| VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容） | error |
+| VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。MLAG に載せた VLAN は両ノードで数える） | error |
 | 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
 | SVI の紐づけ忘れ | `interface` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
@@ -527,6 +529,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0010](docs/decisions/drafts/0010-control-plane-separation.md) | control plane と data plane の分離 | A r2 (Draft・**保留**) | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（決定済み・**未実装**）。BGP エントリの単位は未決 |
 | [ADR-0011](docs/decisions/drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | A r2 (Draft) | 原理「関係の成立に必要な情報は書き、個別経路は書かない」。スタティックルートはスコープ外。SVI は `attaches_to` に一本化。`fhrp` → `gateway_redundancy`。`ip` (IPv4) / `ipv6`。トンネル追加（**実装済み**。完了条件 D11 を満たした。ADR-0005 にも反映済み） |
 | [ADR-0012](docs/decisions/drafts/0012-subinterfaces.md) | 802.1Q サブインターフェース | A (Draft) | `layer2.subinterfaces`。`node` と VLAN 参照は持たず、`vlan_id` はリンク上のタグ番号。親は `{interface:}` で L1 IF または LAG を指す。`{interface:}` が指せる ID 空間をエンティティごとに固定（**実装済み**） |
+| [ADR-0013](docs/decisions/drafts/0013-vlan-ports-on-lag.md) | VLAN のポートから LAG を指す | A (Draft) | `trunk_ports` / `access_ports` の `interface` で LAG も指す（新キーは作らない）。`node` は常に省略可（導出）。MLAG は 1 エントリで両ノード。LAG とメンバーの併記は error、メンバーだけは warning（**実装済み**） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

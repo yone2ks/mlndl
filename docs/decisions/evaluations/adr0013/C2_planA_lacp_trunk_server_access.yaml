@@ -1,0 +1,55 @@
+# 案 A: LACP port-channel (単一ノード bond) を trunk、サーバー側 bond は access_ports に載せない
+#
+# 判断: サーバー側 bond (lag-server2-bond0) を access_ports に書くかどうか
+#   → 書かない。サーバーはスイッチングしていないので「VLAN メンバー」概念は
+#     ToR 側 (leaf3) にしか成立しない。サーバー側 bond の VLAN 所属は意味が薄い。
+#
+# 案 A の書きにくさ: LACP は node が 1 つ (leaf3) しかないので node 必須は冗長。
+# node を書き忘れても検出できるが、情報的には lag.node から導出可能。
+
+ndl_version: "1.0"
+
+meta:
+  name: c2-planA-lacp-trunk
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf3, implementation: vm, role: leaf }
+    - { id: server2, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf3-swp1, node: leaf3, name: swp1 }
+    - { id: leaf3-swp2, node: leaf3, name: swp2 }
+    - { id: server2-eth0, node: server2, name: eth0 }
+    - { id: server2-eth1, node: server2, name: eth1 }
+
+  links:
+    - { id: link-leaf3-server2-1, endpoints: [leaf3-swp1, server2-eth0], link_role: access }
+    - { id: link-leaf3-server2-2, endpoints: [leaf3-swp2, server2-eth1], link_role: access }
+
+  lag:
+    - id: lag-leaf3-server2
+      type: lacp
+      node: leaf3
+      members: [leaf3-swp1, leaf3-swp2]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-server2-bond0
+      type: lacp
+      node: server2
+      members: [server2-eth0, server2-eth1]
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        # 案 A: LACP でも node 必須
+        - {node: leaf3, interface: lag-leaf3-server2}
+    - id: vlan-200
+      vlan_id: 200
+      trunk_ports:
+        - {node: leaf3, interface: lag-leaf3-server2}
+      # サーバー側 bond は access_ports に書かない (スイッチングしないので VLAN メンバー概念が宿らない)

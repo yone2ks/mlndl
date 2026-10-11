@@ -1,0 +1,49 @@
+# 案 B: LACP port-channel を trunk、node は LAG から導出で省略
+#
+# 書きやすさ: node 省略で 1 行の情報量が最小化。
+# サーバー側 bond: 載せない方針 (スイッチングしないため)。
+
+ndl_version: "1.0"
+
+meta:
+  name: c2-planB-lacp-trunk
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf3, implementation: vm, role: leaf }
+    - { id: server2, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf3-swp1, node: leaf3, name: swp1 }
+    - { id: leaf3-swp2, node: leaf3, name: swp2 }
+    - { id: server2-eth0, node: server2, name: eth0 }
+    - { id: server2-eth1, node: server2, name: eth1 }
+
+  links:
+    - { id: link-leaf3-server2-1, endpoints: [leaf3-swp1, server2-eth0], link_role: access }
+    - { id: link-leaf3-server2-2, endpoints: [leaf3-swp2, server2-eth1], link_role: access }
+
+  lag:
+    - id: lag-leaf3-server2
+      type: lacp
+      node: leaf3
+      members: [leaf3-swp1, leaf3-swp2]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-server2-bond0
+      type: lacp
+      node: server2
+      members: [server2-eth0, server2-eth1]
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {interface: lag-leaf3-server2}       # node は lag.node (leaf3) から導出
+    - id: vlan-200
+      vlan_id: 200
+      trunk_ports:
+        - {interface: lag-leaf3-server2}

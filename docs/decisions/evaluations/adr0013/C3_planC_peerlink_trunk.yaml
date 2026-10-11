@@ -1,0 +1,42 @@
+# 案 C: 新キー lag:。peer-link bond 2 本をそれぞれ指す。
+
+ndl_version: "1.0"
+
+meta:
+  name: c3-planC-peerlink
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf1, implementation: vm, role: leaf }
+    - { id: leaf2, implementation: vm, role: leaf }
+
+  interfaces:
+    - { id: leaf1-swp49, node: leaf1, name: swp49 }
+    - { id: leaf1-swp50, node: leaf1, name: swp50 }
+    - { id: leaf2-swp49, node: leaf2, name: swp49 }
+    - { id: leaf2-swp50, node: leaf2, name: swp50 }
+
+  links:
+    - { id: link-peerlink-1, endpoints: [leaf1-swp49, leaf2-swp49], link_role: peer-link }
+    - { id: link-peerlink-2, endpoints: [leaf1-swp50, leaf2-swp50], link_role: peer-link }
+
+  lag:
+    - id: lag-peer-link-leaf1
+      type: lacp
+      node: leaf1
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active}
+    - id: lag-peer-link-leaf2
+      type: lacp
+      node: leaf2
+      members: [leaf2-swp49, leaf2-swp50]
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {lag: lag-peer-link-leaf1}
+        - {lag: lag-peer-link-leaf2}

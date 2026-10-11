@@ -1,0 +1,44 @@
+# ありがちなミス 3: 別ノードの LAG id を node と組み合わせる
+#
+# 期待する検出: error "trunk_ports.node (server2) が LAG lag-leaf3-server2 の
+# node/nodes (leaf3) に含まれません"
+#
+# なぜやりがちか:
+# - LAG id を自動補完した際に、node を元の L1 IF の node のまま残す
+# - サーバー側 bond と ToR 側 bond の名前が似ている場合の取り違え
+
+ndl_version: "1.0"
+
+meta:
+  name: c4-mistake-lag-wrong-node
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf3, implementation: vm, role: leaf }
+    - { id: server2, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf3-swp1, node: leaf3, name: swp1 }
+    - { id: leaf3-swp2, node: leaf3, name: swp2 }
+    - { id: server2-eth0, node: server2, name: eth0 }
+    - { id: server2-eth1, node: server2, name: eth1 }
+
+  links:
+    - { id: link-leaf3-server2-1, endpoints: [leaf3-swp1, server2-eth0] }
+    - { id: link-leaf3-server2-2, endpoints: [leaf3-swp2, server2-eth1] }
+
+  lag:
+    - id: lag-leaf3-server2
+      type: lacp
+      node: leaf3                 # leaf3 の bond
+      members: [leaf3-swp1, leaf3-swp2]
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        # 誤: lag-leaf3-server2 は leaf3 のものなのに node に server2 を指定
+        - {node: server2, interface: lag-leaf3-server2}

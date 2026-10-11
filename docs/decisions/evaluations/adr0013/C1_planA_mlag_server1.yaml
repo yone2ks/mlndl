@@ -1,0 +1,52 @@
+# 案 A: interface: に LAG id を許す / node 必須 / MLAG は両ノード分 2 エントリ
+#
+# 書きにくさ:
+# - MLAG lag-mlag-server1 は nodes: [leaf1, leaf2] と既に書いてあるのに、
+#   VLAN 側でも leaf1 行と leaf2 行の 2 行を書く必要がある。情報の二重表現。
+# - 「どちらのノードから見た trunk か」を書き分ける意味が薄い (MLAG は両ノード対称)。
+
+ndl_version: "1.0"
+
+meta:
+  name: c1-planA-mlag-server1
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf1, implementation: vm, role: leaf }
+    - { id: leaf2, implementation: vm, role: leaf }
+    - { id: server1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_role: access }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_role: access }
+
+  lag:
+    - id: lag-mlag-server1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-peer-link
+      peer_link_interface: peerlink.4094
+
+    - id: lag-peer-link
+      type: lacp
+      node: leaf1
+      members: []
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        # 案 A: MLAG を両ノード分 2 行で書く
+        - {node: leaf1, interface: lag-mlag-server1}
+        - {node: leaf2, interface: lag-mlag-server1}

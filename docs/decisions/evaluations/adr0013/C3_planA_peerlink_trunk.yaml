@@ -1,0 +1,46 @@
+# 案 A: MLAG peer-link bond を VLAN 100 の trunk に載せる (両ノード 2 エントリ)
+#
+# peer-link は leaf1 側 bond (lag-peer-link-leaf1) と leaf2 側 bond (lag-peer-link-leaf2) の
+# 2 本の LACP で構成される (Cumulus 流)。両方 trunk に載せる。
+# 書きにくさ: lag が 2 本あって、さらに node 必須なので同じ VLAN に 2 行書く。情報量が増える。
+
+ndl_version: "1.0"
+
+meta:
+  name: c3-planA-peerlink
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf1, implementation: vm, role: leaf }
+    - { id: leaf2, implementation: vm, role: leaf }
+
+  interfaces:
+    - { id: leaf1-swp49, node: leaf1, name: swp49 }
+    - { id: leaf1-swp50, node: leaf1, name: swp50 }
+    - { id: leaf2-swp49, node: leaf2, name: swp49 }
+    - { id: leaf2-swp50, node: leaf2, name: swp50 }
+
+  links:
+    - { id: link-peerlink-1, endpoints: [leaf1-swp49, leaf2-swp49], link_role: peer-link }
+    - { id: link-peerlink-2, endpoints: [leaf1-swp50, leaf2-swp50], link_role: peer-link }
+
+  lag:
+    - id: lag-peer-link-leaf1
+      type: lacp
+      node: leaf1
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active, min_links: 1}
+    - id: lag-peer-link-leaf2
+      type: lacp
+      node: leaf2
+      members: [leaf2-swp49, leaf2-swp50]
+      lacp: {mode: active, min_links: 1}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {node: leaf1, interface: lag-peer-link-leaf1}
+        - {node: leaf2, interface: lag-peer-link-leaf2}

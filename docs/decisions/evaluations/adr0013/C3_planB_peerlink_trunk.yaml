@@ -1,0 +1,46 @@
+# 案 B: MLAG peer-link bond を VLAN 100 の trunk に載せる (node 省略で 2 エントリ、片側 1 行ずつ)
+#
+# peer-link は原理的に 2 本の LACP (leaf1 側と leaf2 側) で分割されるため、
+# 1 行では済まない。node は省略できるが、LAG 自体が node ごとに分かれているため行数は同じ。
+# それでも案 A より視覚的ノイズが少なく、情報が LAG 側に集約される。
+
+ndl_version: "1.0"
+
+meta:
+  name: c3-planB-peerlink
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - { id: leaf1, implementation: vm, role: leaf }
+    - { id: leaf2, implementation: vm, role: leaf }
+
+  interfaces:
+    - { id: leaf1-swp49, node: leaf1, name: swp49 }
+    - { id: leaf1-swp50, node: leaf1, name: swp50 }
+    - { id: leaf2-swp49, node: leaf2, name: swp49 }
+    - { id: leaf2-swp50, node: leaf2, name: swp50 }
+
+  links:
+    - { id: link-peerlink-1, endpoints: [leaf1-swp49, leaf2-swp49], link_role: peer-link }
+    - { id: link-peerlink-2, endpoints: [leaf1-swp50, leaf2-swp50], link_role: peer-link }
+
+  lag:
+    - id: lag-peer-link-leaf1
+      type: lacp
+      node: leaf1
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active}
+    - id: lag-peer-link-leaf2
+      type: lacp
+      node: leaf2
+      members: [leaf2-swp49, leaf2-swp50]
+      lacp: {mode: active}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {interface: lag-peer-link-leaf1}
+        - {interface: lag-peer-link-leaf2}
