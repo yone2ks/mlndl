@@ -21,6 +21,9 @@
     - subinterfaces[].attaches_to.interface → L1 interfaces ∪ lag (ADR-0012)
     - 同一の親 (L1 IF / LAG) 上で subinterfaces[].vlan_id が重複していないか
 
+  ID の文法 (ADR-0002 D1):
+    - layer1 / layer2 / layer3 / protocols の全エンティティの id が正規表現に従い、63 文字以内か
+
   ID 空間 (ADR-0002 D5 / ADR-0012):
     - L1 interface / LAG / VLAN / サブ IF の ID は互いに重複しないこと
       ({interface: X} は X をこれらの空間で解決するため、重複すると解決先が曖昧になる)
@@ -89,6 +92,11 @@ _RT_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+:\d+$|^\d+:\d+$")
 
 # ADR-0002 D1
 _ID_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+_ID_MAX_LEN = 63    # DNS ラベルの上限を継承 (ADR-0002 D1)
+
+# ID を持つエンティティのリストを探すセクション。リストの列挙はスキーマから行うので、
+# エンティティを追加しても文法チェックの対象から漏れない
+_ID_SECTIONS = ("layer1", "layer2", "layer3", "protocols")
 
 # ADR-0002 D7 推奨プレフィックス（隣接関係は type ごとに異なる）
 _ADJ_PREFIX = {"bgp": "bgp-peer-", "ospf": "ospf-adj-", "isis": "isis-adj-"}
@@ -191,6 +199,9 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         vrf_ids = {v.id for v in l3.vrfs}
         l3interface_ids = {i.id for i in l3.interfaces}
         l3iface_node = {i.id: i.node for i in l3.interfaces}
+
+    # ── ID の文法 (ADR-0002 D1) ──────────────────────────────────────────
+    _check_id_grammar(topology, errors)
 
     # ── ID 空間の重複 (ADR-0002 D5 / ADR-0012) ─────────────────────────────
     _check_interface_id_spaces(
@@ -760,6 +771,56 @@ def _check_interface_id_spaces(spaces: dict[str, set[str]], errors: list[Validat
                     f"ID '{dup}' が {a} と {b} の両方で使われています。"
                     f"ID はグローバルに一意である必要があります (ADR-0002 D5)",
                 ))
+
+
+def _id_grammar_problems(entity_id: str) -> list[str]:
+    """ADR-0002 D1 に違反している理由を返す。違反がなければ空リスト"""
+    if _ID_PATTERN.match(entity_id):
+        return [] if len(entity_id) <= _ID_MAX_LEN else [
+            f"{_ID_MAX_LEN} 文字を超えています ({len(entity_id)} 文字)"
+        ]
+    problems = []
+    if not entity_id[:1].islower() or not entity_id[:1].isascii():
+        problems.append("先頭は英小文字にしてください")
+    if any(c.isupper() for c in entity_id):
+        problems.append("大文字は使えません")
+    if "_" in entity_id:
+        problems.append("アンダースコアは使えません。ハイフンで区切ってください")
+    if entity_id.endswith("-") or "--" in entity_id:
+        problems.append("末尾のハイフンと連続したハイフンは使えません")
+    others = sorted({c for c in entity_id if not (c.isascii() and (c.isalnum() or c in "-_"))})
+    if others:
+        problems.append("使えない文字を含みます: " + " ".join(repr(c) for c in others))
+    if len(entity_id) > _ID_MAX_LEN:
+        problems.append(f"{_ID_MAX_LEN} 文字を超えています ({len(entity_id)} 文字)")
+    return problems
+
+
+def _check_id_grammar(topology: MLNDLTopology, errors: list[ValidationError]) -> None:
+    """すべてのエンティティの id が ADR-0002 D1 の文法に従っているか (error)
+
+    ID は参照のキーであり、DNS ラベルとして下流ツールにそのまま渡りうる。
+    アダプターに暗黙の正規化を許さない (ADR-0002 D6 の 5) のと対になる検査。
+    """
+    for section_name in _ID_SECTIONS:
+        section = getattr(topology, section_name)
+        if section is None:
+            continue
+        for list_name in type(section).model_fields:
+            entities = getattr(section, list_name)
+            if not isinstance(entities, list):
+                continue
+            for i, entity in enumerate(entities):
+                entity_id = getattr(entity, "id", None)
+                if not isinstance(entity_id, str):
+                    continue
+                problems = _id_grammar_problems(entity_id)
+                if problems:
+                    errors.append(ValidationError(
+                        f"{section_name}.{list_name}[{i}].id",
+                        f"ID '{entity_id}' は ID の文法 ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ に"
+                        f"従っていません: {' / '.join(problems)} (ADR-0002 D1)",
+                    ))
 
 
 # ---------------------------------------------------------------------------

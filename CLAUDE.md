@@ -475,6 +475,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | ノード所属 | `trunk_ports` / `access_ports` / L3 IF の `attaches_to` が指す L1 IF が、同じ node のものか | error |
 | SVI 参照 | `attaches_to: {interface:}` は L3Interface に限り VLAN も指せる。短縮形 `interface: vlan-N` の VLAN が存在するか。短縮形と明示した `attaches_to` が食い違っていないか | error |
 | `{interface:}` の参照先 | `layer3.interfaces` は L1 IF / LAG / VLAN / サブ IF、`layer2.subinterfaces` は L1 IF / LAG、それ以外は L1 IF のみ（ADR-0012 D5）。L3 IF の node が参照先の node（群）に含まれるか | error |
+| ID の文法 | すべてのエンティティの `id` が `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` に従い、63 文字以内か（ADR-0002 D1）。違反理由をまとめて示す | error |
 | ID の一意性 | L1 IF / LAG / VLAN / サブ IF の ID が互いに重複していないか（ADR-0002 D5） | error |
 | サブ IF | `vlan_id` が 1..4094 か。同じ親の上でタグが重複していないか。`attaches_to` が `{interface:}` 形式か。タグと `layer2.vlans` の照合は**しない**（ADR-0012 D3） | error |
 | L3 IF 重複 | 同一 `(node, interface)` の L3Interface が重複していないか | error |
