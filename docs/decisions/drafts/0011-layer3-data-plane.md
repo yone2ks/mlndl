@@ -4,6 +4,7 @@
 - **Date**: 2026-09-20
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A r2 (初回策定 → 5 エージェントレビュー反映。差分は末尾「r1 からの変更」)
+- **Amended by**: drafts/0012 (`attaches_to` の参照先に LAG・サブ IF を追加し、node 照合を広げた)、drafts/0013 (VLAN のポートの `node` を任意にし、LAG を指せるようにした)。D9 の検出規則を [round4-evaluation](../evaluations/round4-evaluation.md) E1〜E4 で追加
 - **関連**: ADR-0001 (attaches_to), ADR-0002 (ID 命名), ADR-0005 (表現スコープ), ADR-0006 (endpoints), ADR-0009 (labels), drafts/0010 (制御プレーン・保留中)
 
 ### 位置づけ
@@ -296,8 +297,8 @@ F2 で実測した「黙って通る」ものを塞ぐ。
 | `interface` から解決した参照と、明示された `attaches_to` の食い違い (D3) | error |
 | 旧 `vlan:` キーが残っている場合、移動先を示すエラー (D10) | error |
 | `interface` が VLAN らしき名前なのに `attaches_to` が未指定 (D3) | warning |
-| `attaches_to` が **L1 IF に解決された場合に限り**、その L1 IF の `node` が `L3Interface.node` と一致するか (VLAN は node を持たないので対象外) | error |
-| `VLAN.trunk_ports[] / access_ports[]` の `interface` が、同じ `node` に属しているか | error |
+| `attaches_to` が **L1 IF に解決された場合に限り**、その L1 IF の `node` が `L3Interface.node` と一致するか (VLAN は node を持たないので対象外)。**ADR-0012 で LAG・サブ IF にも拡張** | error |
+| `VLAN.trunk_ports[] / access_ports[]` の `interface` が、同じ `node` に属しているか。**ADR-0013 で `node` は任意になり、書いた場合だけ照合する** | error |
 | 同一 `(node, interface)` の `L3Interface` が重複していないか | error |
 | `VRF.l3vni` と `L3VxLAN.vrf` の双方向一致 | error |
 | `L2VxLAN.vtep_source` が指す L3 IF の `node` が `members` に含まれているか | error |
@@ -308,6 +309,10 @@ F2 で実測した「黙って通る」ものを塞ぐ。
 | `TunnelInterface.destination_ip` と `destination_interface` が排他か (両方指定・両方未指定は不可) | error |
 | `TunnelInterface.source` / `destination_interface` / `vrf` / `transport_vrf` の参照解決 | error |
 | ID の推奨プレフィックス `tunnel-` (ADR-0002 D7) | warning |
+| **(2026-10-15 追加、round4 E1)** 同じ VLAN に載る `mode: anycast_gateway` の L3 IF 群で、`ip` / `ipv6` / `anycast_mac` が一致するか (未指定の値は比べない。MAC は表記を問わない) | error |
+| **(2026-10-15 追加、round4 E2)** `TunnelInterface.destination_interface` が、トンネルと別のノードの L3 IF か | error |
+| **(2026-10-15 追加、round4 E3)** トンネルの source と destination の外側のアドレスファミリーが一致するか (両側にアドレスがある場合のみ) | error |
+| **(2026-10-15 追加、round4 E4)** `interface: vlan-N` (短縮形) と、VLAN 以外 (L1 IF / LAG / サブ IF) を指す `attaches_to` の食い違い。上の「食い違い」の行は明示側が VLAN の場合しか検出していなかった | error |
 
 ### D10. 移行
 

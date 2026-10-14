@@ -367,3 +367,102 @@ class TestExport:
         t2 = parse(yaml_exporter.export(t1))
         assert t1.model_dump() == t2.model_dump()
         assert yaml.safe_load(yaml_exporter.export(t1)) == yaml.safe_load(yaml_exporter.export(t2))
+
+
+# ---------------------------------------------------------------------------
+# ラウンド4 Pass B で見つかった検出漏れ (evaluations/round4-evaluation.md E1〜E4)
+# ---------------------------------------------------------------------------
+
+def _anycast_pair(ip2: str = "192.168.100.1/24", mac2: str = "44:38:39:be:ef:aa",
+                  ipv6_2: str = "2001:db8:100::1/64", vlan2: str = "vlan-100") -> str:
+    return _l3(
+        "    - id: leaf1-vlan-100\n      node: leaf1\n      interface: vlan-100\n"
+        "      ip: 192.168.100.1/24\n      ipv6: 2001:db8:100::1/64\n"
+        "      gateway_redundancy: [{mode: anycast_gateway, anycast_mac: '44:38:39:be:ef:aa'}]\n"
+        f"    - id: leaf2-svi\n      node: leaf2\n      interface: Vlan100\n"
+        f"      attaches_to: {{interface: {vlan2}}}\n      ip: {ip2}\n      ipv6: {ipv6_2}\n"
+        f"      gateway_redundancy: [{{mode: anycast_gateway, anycast_mac: '{mac2}'}}]\n"
+    )
+
+
+class TestAnycastConsistency:
+    """E1: anycast gateway は全ノードが同じアドレスと MAC で応答する"""
+
+    def test_consistent_pair(self):
+        assert _errors(_anycast_pair()) == []
+
+    def test_mac_notation_does_not_matter(self):
+        assert _errors(_anycast_pair(mac2="4438.39be.efaa")) == []
+
+    @pytest.mark.parametrize("kw,field", [
+        ({"ip2": "192.168.100.9/24"}, "layer3.interfaces[1].ip"),
+        ({"ipv6_2": "2001:db8:100::9/64"}, "layer3.interfaces[1].ipv6"),
+        ({"mac2": "44:38:39:be:ef:bb"}, "layer3.interfaces[1].gateway_redundancy[0].anycast_mac"),
+    ])
+    def test_mismatch_is_error(self, kw, field):
+        errs = validate(_topo(_anycast_pair(**kw)))
+        assert [e.path for e in errs] == [field]
+
+    def test_different_vlans_are_not_compared(self):
+        assert _errors(_anycast_pair(ip2="192.168.200.1/24", ipv6_2="2001:db8:200::1/64", vlan2="vlan-200")) == []
+
+    def test_vrrp_svis_are_not_compared(self):
+        """VRRP では各ノードが別の実 IP を持つのが正しい"""
+        body = _l3(
+            "    - {id: s1, node: leaf1, interface: vlan-100, ip: 192.168.100.2/24,"
+            " gateway_redundancy: [{mode: vrrp, group_id: 10, vip: 192.168.100.1}]}\n"
+            "    - {id: s2, node: leaf2, interface: Vlan100, attaches_to: {interface: vlan-100},"
+            " ip: 192.168.100.3/24, gateway_redundancy: [{mode: vrrp, group_id: 10, vip: 192.168.100.1}]}\n"
+        )
+        assert _errors(body) == []
+
+
+class TestTunnelGaps:
+    def test_destination_on_same_node_is_error(self):
+        """E2: 対向に自分のノードの IF を指すと、エクスポーターは辺を黙って捨てていた"""
+        body = TUNNEL_BASE.replace(
+            "    - {id: leaf2-wan,",
+            "    - {id: leaf1-lo, node: leaf1, interface: lo, ip: 10.0.0.1/32}\n    - {id: leaf2-wan,",
+        ) + "  tunnel_interfaces:\n" + (
+            "    - {id: tunnel-x, node: leaf1, type: gre, source: leaf1-wan, destination_interface: leaf1-lo}\n"
+        )
+        errs = validate(_topo(body))
+        assert [e.path for e in errs] == ["layer3.tunnel_interfaces[0].destination_interface"]
+
+    def test_outer_af_mismatch_with_destination_ip(self):
+        """E3: IPv4 だけの source から IPv6 の宛先へはトンネルを組めない"""
+        errs = validate(_topo(_tun(
+            "    - {id: tunnel-x, node: leaf1, type: gre, source: leaf1-wan, destination_ip: '2001:db8::9'}\n"
+        )))
+        assert [e.path for e in errs] == ["layer3.tunnel_interfaces[0].source"]
+        assert "IPv4" in errs[0].message and "IPv6" in errs[0].message
+
+    def test_outer_af_mismatch_with_destination_interface(self):
+        body = TUNNEL_BASE.replace(
+            "    - {id: leaf2-wan, node: leaf2, interface: swp1, ip: 203.0.113.2/30}",
+            "    - {id: leaf2-wan, node: leaf2, interface: swp1, ipv6: '2001:db8:f::2/64'}",
+        ) + "  tunnel_interfaces:\n" + T1
+        assert [e.path for e in validate(_topo(body))] == ["layer3.tunnel_interfaces[0].source"]
+
+    def test_dual_stack_source_matches_either_af(self):
+        body = TUNNEL_BASE.replace(
+            "ip: 203.0.113.1/30}", "ip: 203.0.113.1/30, ipv6: '2001:db8:f::1/64'}",
+        ) + "  tunnel_interfaces:\n" + (
+            "    - {id: tunnel-x, node: leaf1, type: gre, source: leaf1-wan, destination_ip: '2001:db8::9'}\n"
+        )
+        assert _errors(body) == []
+
+
+class TestShorthandMismatchWithNonVlan:
+    def test_shorthand_with_l1_attaches_to_is_error(self):
+        """E4: interface: vlan-100 は VLAN の短縮形として読まれる。L1 IF を指す attaches_to と食い違う"""
+        errs = validate(_topo(_l3(
+            "    - {id: s1, node: leaf1, interface: vlan-100, attaches_to: {interface: leaf1-swp2}}\n"
+        )))
+        assert [e.path for e in errs] == ["layer3.interfaces[0].attaches_to"]
+        assert "leaf1-swp2" in errs[0].message
+
+    def test_shorthand_with_same_vlan_is_fine(self):
+        assert _errors(_l3(
+            "    - {id: s1, node: leaf1, interface: vlan-100, attaches_to: {interface: vlan-100}}\n"
+        )) == []

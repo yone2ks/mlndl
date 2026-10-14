@@ -475,15 +475,15 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | VTEP source | vtep_source が layer3.interfaces に存在し、その node が members に含まれるか | error |
 | ノード所属 | `trunk_ports` / `access_ports` に書いた `node` や L3 IF の `node` が、参照先の L1 IF / LAG の node と一致するか。MLAG を指すポートには `node` を書けない（ADR-0013 D2） | error |
 | VLAN のポート | `trunk_ports` / `access_ports` の `interface` は L1 IF または LAG。同じ VLAN に LAG とそのメンバーを併記していないか（error）。同じ VLAN に同じ端点を 2 回書いていないか（error）。LAG のメンバーだけを書いていたら LAG を指すよう促す（warning）（ADR-0013） | error / warning |
-| SVI 参照 | `attaches_to: {interface:}` は L3Interface に限り VLAN も指せる。短縮形 `interface: vlan-N` の VLAN が存在するか。短縮形と明示した `attaches_to` が食い違っていないか | error |
+| SVI 参照 | `attaches_to: {interface:}` は L3Interface に限り VLAN も指せる。短縮形 `interface: vlan-N` の VLAN が存在するか。短縮形と明示した `attaches_to` が食い違っていないか（明示側が L1 IF / LAG / サブ IF でも検出） | error |
 | `{interface:}` の参照先 | `layer3.interfaces` は L1 IF / LAG / VLAN / サブ IF、`layer2.subinterfaces` と VLAN のポートは L1 IF / LAG、それ以外は L1 IF のみ（ADR-0012 D5・ADR-0013）。L3 IF の node が参照先の node（群）に含まれるか | error |
 | ID の文法 | すべてのエンティティの `id` が `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` に従い、63 文字以内か（ADR-0002 D1）。違反理由をまとめて示す | error |
 | ID の一意性 | L1 IF / LAG / VLAN / サブ IF の ID が互いに重複していないか（ADR-0002 D5） | error |
 | サブ IF | `vlan_id` が 1..4094 か。同じ親の上でタグが重複していないか。`attaches_to` が `{interface:}` 形式か。タグと `layer2.vlans` の照合は**しない**（ADR-0012 D3） | error |
 | L3 IF 重複 | 同一 `(node, interface)` の L3Interface が重複していないか | error |
 | IP アドレス | `ip` は IPv4、`ipv6` は IPv6 の CIDR（型で検証。`ip` に IPv6 を書くと移動先を示すエラー） | error |
-| ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798） | error |
-| トンネル | `source` が同じ node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。VRF 参照 | error |
+| ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798）。同じ VLAN の anycast gateway 群で `ip` / `ipv6` / `anycast_mac` が一致するか | error |
+| トンネル | `source` が同じ node の L3 IF か。`destination_interface` が別 node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。外側のアドレスファミリーが source と destination で一致するか。VRF 参照 | error |
 | 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
 | MTU 整合性 | VxLAN 使用時に underlay MTU が 1550 以上か | error |
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |

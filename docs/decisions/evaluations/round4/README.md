@@ -21,4 +21,4 @@
 | M6 IPv4 VIP がサブネット外 | error |
 | M7 VLAN ポートの node の食い違い | error |
 | M8 サブ IF のタグと対向 VLAN の食い違い | 検出されない (ADR-0012 D3 の設計どおり) |
-| M9 anycast gateway の IP の食い違い | 検出されない |
+| M9 anycast gateway の IP の食い違い | 検出されない → **2026-10-15 に検出規則を追加** (round4 E1)。現在は error |

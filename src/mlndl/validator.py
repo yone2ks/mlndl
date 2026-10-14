@@ -44,8 +44,10 @@
     - attaches_to が L1 IF / LAG / サブ IF を指す場合、その node (群) に L3 IF の node が含まれるか
     - 同一 (node, interface) の重複
     - gateway_redundancy: IPv4 VIP のサブネット一致、同一 IF・同一 mode・同一 AF の group_id 重複
+    - anycast_gateway: 同じ VLAN に載る SVI 群で ip / ipv6 / anycast_mac が一致するか
     - tunnel_interfaces[]: node / source / destination_interface / vrf / transport_vrf 参照、
-      source が同じ node の L3 IF か
+      source が同じ node の L3 IF か、destination_interface が別ノードか、
+      source と destination の外側のアドレスファミリーが一致するか
     - routing_adjacencies[].from/to.node → L1 nodes
     - routing_adjacencies[].from/to.update_source → layer3.interfaces
     - routing_adjacencies[].attaches_to.link → L1 links
@@ -578,12 +580,15 @@ def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_node
                 extra_interface_ids=set(lag_nodes) | vlan_ids | subif_ids,
             )
             if VLAN_SHORTHAND.match(iface.interface):
+                # interface: vlan-N は VLAN の短縮形として読まれる。attaches_to が別のもの
+                # (別の VLAN、L1 IF、LAG、サブ IF) を指していれば食い違い
                 explicit = iface.attachment_ref()
-                if explicit is not None and explicit != iface.interface and explicit in vlan_ids:
+                if explicit is not None and explicit != iface.interface:
+                    what = "VLAN " if explicit in vlan_ids else ""
                     errors.append(ValidationError(
                         f"{path}.attaches_to",
-                        f"interface '{iface.interface}' と attaches_to の VLAN '{explicit}' が"
-                        f"食い違っています (ADR-0011 D3)",
+                        f"interface '{iface.interface}' は VLAN の短縮形ですが、attaches_to は"
+                        f" {what}'{explicit}' を指しており食い違っています (ADR-0011 D3)",
                     ))
         elif VLAN_SHORTHAND.match(iface.interface) and iface.interface not in vlan_ids:
             errors.append(ValidationError(
@@ -632,7 +637,10 @@ def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_node
                     f" (ADR-0011 D9)",
                 ))
 
+    _check_anycast_consistency(l3, vlan_ids, errors)
+
     # Tunnel Interfaces (ADR-0011 D6)
+    l3iface = {iface.id: iface for iface in l3.interfaces}
     for i, tun in enumerate(l3.tunnel_interfaces):
         path = f"layer3.tunnel_interfaces[{i}]"
         if tun.node not in node_ids:
@@ -653,6 +661,25 @@ def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_node
             errors.append(ValidationError(
                 f"{path}.destination_interface",
                 f"未定義の L3 インターフェース '{tun.destination_interface}' を参照しています",
+            ))
+        elif tun.destination_interface is not None and l3iface_node[tun.destination_interface] == tun.node:
+            errors.append(ValidationError(
+                f"{path}.destination_interface",
+                f"destination_interface '{tun.destination_interface}' はトンネルと同じノード"
+                f" '{tun.node}' のものです。対向ノードの L3 インターフェースを指してください (ADR-0011 D6)",
+            ))
+
+        # 外側のパケットは source と destination が同じ AF でないと組めない
+        src_afs = _l3_afs(l3iface.get(tun.source))
+        if tun.destination_ip is not None:
+            dst_afs = {tun.destination_ip.version}
+        else:
+            dst_afs = _l3_afs(l3iface.get(tun.destination_interface))
+        if src_afs and dst_afs and not (src_afs & dst_afs):
+            errors.append(ValidationError(
+                f"{path}.source",
+                f"source '{tun.source}' のアドレスは {_af_names(src_afs)}、destination は"
+                f" {_af_names(dst_afs)} で、外側のアドレスファミリーが一致しません (ADR-0011 D6)",
             ))
         for fld in ("vrf", "transport_vrf"):
             v = getattr(tun, fld)
@@ -879,6 +906,59 @@ def _check_id_grammar(topology: MLNDLTopology, errors: list[ValidationError]) ->
                         f"{section_name}.{list_name}[{i}].id",
                         f"ID '{entity_id}' は ID の文法 ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ に"
                         f"従っていません: {' / '.join(problems)} (ADR-0002 D1)",
+                    ))
+
+
+def _l3_afs(iface) -> set[int]:
+    """L3 IF が持つアドレスファミリー (4 / 6) の集合"""
+    if iface is None:
+        return set()
+    return {af for af, addr in ((4, iface.ip), (6, iface.ipv6)) if addr is not None}
+
+
+def _af_names(afs: set[int]) -> str:
+    return " / ".join(f"IPv{af}" for af in sorted(afs))
+
+
+def _normalize_mac(mac: str) -> str:
+    return "".join(c for c in mac.lower() if c in "0123456789abcdef")
+
+
+def _check_anycast_consistency(l3, vlan_ids, errors: list[ValidationError]) -> None:
+    """同じ VLAN に載る anycast gateway の SVI 群で、IP と MAC が揃っているか (ADR-0011 D4)
+
+    anycast gateway は全ノードが同じアドレスと MAC で応答する。1 台でも違えば、
+    そのノードに着いたホストのゲートウェイが変わってしまう。未指定の値は比べない。
+    """
+    groups: dict[str, list[tuple[int, object]]] = {}
+    for i, iface in enumerate(l3.interfaces):
+        ref = iface.attachment_ref()
+        if ref in vlan_ids and any(gw.mode == "anycast_gateway" for gw in iface.gateway_redundancy):
+            groups.setdefault(ref, []).append((i, iface))
+    for vlan, members in groups.items():
+        if len(members) < 2:
+            continue
+        first_i, first = members[0]
+        first_mac = next((gw.anycast_mac for gw in first.gateway_redundancy
+                          if gw.mode == "anycast_gateway" and gw.anycast_mac), None)
+        for i, iface in members[1:]:
+            path = f"layer3.interfaces[{i}]"
+            for fld in ("ip", "ipv6"):
+                a, b = getattr(first, fld), getattr(iface, fld)
+                if a is not None and b is not None and a != b:
+                    errors.append(ValidationError(
+                        f"{path}.{fld}",
+                        f"VLAN '{vlan}' の anycast gateway で {fld} が {b} ですが、"
+                        f"layer3.interfaces[{first_i}] ('{first.id}') は {a} です。"
+                        f"anycast gateway は全ノードで同じアドレスにします (ADR-0011 D4)",
+                    ))
+            for j, gw in enumerate(iface.gateway_redundancy):
+                if (gw.mode == "anycast_gateway" and gw.anycast_mac and first_mac
+                        and _normalize_mac(gw.anycast_mac) != _normalize_mac(first_mac)):
+                    errors.append(ValidationError(
+                        f"{path}.gateway_redundancy[{j}].anycast_mac",
+                        f"VLAN '{vlan}' の anycast gateway で anycast_mac が {gw.anycast_mac} ですが、"
+                        f"'{first.id}' は {first_mac} です (ADR-0011 D4)",
                     ))
 
 

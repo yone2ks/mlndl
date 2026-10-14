@@ -174,6 +174,8 @@ linguist は「論理 IF を指す統一キー」の直交性から現状維持�
 | E9 | IF に `ip` がないのに IPv4 VIP を書く | F2 | 設計どおり (ADR-0011 D9) | warning に格上げするか判断 |
 | E10 | L2VNI の `members` と、その VLAN が載るノード群の食い違い | F9 | 未確認 | warning 候補 (優先度 低) |
 
+> **対応状況 (2026-10-15)**: E1〜E4 は Pass C を待たずに validator に実装した (テストつき)。`c_common_mistakes.yaml` の M9 はこれで検出される。E5〜E10 は Pass C で判断する。
+
 ### F. 範囲内なのに書けないもの — 優先度 **中** (network-tech-reviewer 中心)
 
 | 項目 | 出典 | 判定 | 備考 |
@@ -194,7 +196,7 @@ linguist は「論理 IF を指す統一キー」の直交性から現状維持�
 
 | ID | 内容 | 出典 |
 |---|---|---|
-| G1 | ADR-0011 のヘッダに `Amended by: drafts/0012, drafts/0013` を足す。D9 の「L1 IF に解決された場合に限り」と「trunk_ports の node 照合」は改訂済みであることを注記 | S7, V1 |
+| G1 | **(対応済み 2026-10-15)** ADR-0011 のヘッダに `Amended by: drafts/0012, drafts/0013` を足す。D9 の「L1 IF に解決された場合に限り」と「trunk_ports の node 照合」は改訂済みであることを注記 | S7, V1 |
 | G2 | ADR-0005 は 2 本の Draft に部分改訂され、規範の最新形を知るには CLAUDE.md を読むのが早い状態 (ADR が二次情報化)。Pass C で ADR-0011〜0013 を Accepted にする際、ADR-0005 に統合するか、改訂関係の一覧を置く | S (横断矛盾) |
 | G3 | validator の規則の採否基準 (error / warning / 検査しない) を ADR-0002 D8 に 1 本化する。候補の 2 軸:「実機で壊れた状態になるか」「書き手が気づかない誤りか」 | S11 |
 | G4 | 廃止キーへの案内メッセージをいつまで残すか (ndl_version 1.x の間は残す等) | D3 |
