@@ -1,6 +1,6 @@
 # ADR-0013: VLAN の trunk_ports / access_ports から LAG を指す
 
-- **Status**: Draft — 実装済み (2026-10-11)。Pass B / C は未実施
+- **Status**: Draft — 実装済み (2026-10-11)。Pass B 実施済み ([round4-evaluation](../evaluations/round4-evaluation.md))、Pass C は未実施
 - **Date**: 2026-10-11
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A (設計ラウンドで 5 エージェントの評価を取り、割れた 1 点をユーザーが判断した上で策定)

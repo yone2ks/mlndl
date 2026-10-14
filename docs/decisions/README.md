@@ -95,6 +95,7 @@ layer3 までのデータプレーンの表現力を先に確定させるため 
 | [evaluations/adr0012](evaluations/adr0012/README.md) | ADR-0012 設計比較 YAML | — | — |
 | [drafts/0013](drafts/0013-vlan-ports-on-lag.md) | VLAN の trunk_ports / access_ports から LAG を指す (実装済み) | Draft | A |
 | [evaluations/adr0013](evaluations/adr0013/README.md) | ADR-0013 設計比較 YAML | — | — |
+| [evaluations/round4](evaluations/round4-evaluation.md) | ラウンド4 横断評価メモ (ADR-0011〜0013 の Pass B) | — | — |
 
 ADR-0010 を保留した上で、先に L1〜L3 のデータプレーンを確定させる作業。
 表現原理 (関係の成立に必要な情報は書き、個別経路は書かない)、スタティックルートのスコープ外化、

@@ -1,0 +1,164 @@
+# Pass B 試し書き (c): 書き手がやりがちな誤りを含む版
+#
+# シナリオ: 支社に MLAG コアペア + VRRP dual-stack SVI + wan ルーターの IPsec VTI を書くつもりが、
+# ADR-0011/0012/0013 を熟読せずに書いたときにありがちな誤りを混ぜている。
+# 各ミスには # MISTAKE Mx: ... でタグを付け、validator が検出するかの期待を記す。
+#
+# 期待一覧:
+#   M1 validator 検出 (error) : SVI の短縮形と明示 attaches_to の食い違い
+#   M2 validator 検出 (error) : VLAN に LAG とそのメンバーの両方を書いた
+#   M3 validator 検出 (warning): VLAN に LAG のメンバーだけ書いた (LAG を指すよう促す)
+#   M4 validator 検出 (error) : tunnel の destination_ip と destination_interface の両方を指定
+#   M5 validator 検出 (error) : gateway_redundancy の IPv6 VIP がリンクローカルでない
+#   M6 validator 検出 (error) : gateway_redundancy の IPv4 VIP が IF のサブネット外
+#   M7 validator 検出 (error) : VLAN trunk_ports の node が interface から導出されるノードと食い違い
+#   M8 検出されない見込み      : サブ IF の vlan_id を VLAN エンティティに合わせて書いたつもりが
+#                                 L2 側の trunk 設定と不一致 (ADR-0012 D3 により検証しない)
+#   M9 検出されない見込み      : anycast_gateway のペアで片方の IP が食い違う
+#                                 (anycast は全ノード同一 IP が前提だが制約がない)
+ndl_version: "1.0"
+
+meta:
+  name: common-mistakes
+  description: 書き手がやりがちな誤りを含む (c)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: core1,   role: core,   implementation: physical}
+    - {id: core2,   role: core,   implementation: physical}
+    - {id: wan,     role: border, implementation: physical}
+    - {id: host1,   role: server, implementation: physical}
+    - {id: cloud,   role: border, implementation: physical, description: トポロジー外対向}
+
+  interfaces:
+    - {id: core1-e1, node: core1, name: Et1/1}
+    - {id: core1-e2, node: core1, name: Et1/2}
+    - {id: core1-e3, node: core1, name: Et1/3}
+    - {id: core2-e1, node: core2, name: Et1/1}
+    - {id: core2-e2, node: core2, name: Et1/2}
+    - {id: core2-e3, node: core2, name: Et1/3}
+    - {id: wan-g0,   node: wan,   name: Gi0/0}
+    - {id: wan-g1,   node: wan,   name: Gi0/1}
+    - {id: host1-e0, node: host1, name: eno1}
+    - {id: host1-e1, node: host1, name: eno2}
+    - {id: cloud-g0, node: cloud, name: Gi0/0}
+
+  links:
+    - {id: link-peer,  endpoints: [core1-e1, core2-e1], link_speed: 10G, mtu: 9216, link_role: peer-link}
+    - {id: link-c1-h1, endpoints: [core1-e2, host1-e0], link_speed: 10G, link_role: access}
+    - {id: link-c2-h1, endpoints: [core2-e2, host1-e1], link_speed: 10G, link_role: access}
+    - {id: link-c1-wan, endpoints: [core1-e3, wan-g0], link_speed: 1G, link_role: uplink}
+    - {id: link-wan-cloud, endpoints: [wan-g1, cloud-g0], link_speed: 1G, link_role: uplink}
+
+  lag:
+    - {id: lag-core1-peer, type: lacp, node: core1, members: [core1-e1], lacp: {mode: active, min_links: 1}}
+    - id: lag-mlag-host1
+      type: mlag
+      nodes: [core1, core2]
+      members: [core1-e2, core2-e2]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-core1-peer
+      peer_link_interface: Port-channel999
+      domain_id: 1
+    - {id: lag-host1-bond, type: lacp, node: host1,
+       members: [host1-e0, host1-e1], lacp: {mode: active, min_links: 1}}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: users
+      trunk_ports:
+        # MISTAKE M2: LAG とそのメンバー (core1-e2) を併記 → error 期待
+        - {interface: lag-mlag-host1}
+        - {node: core1, interface: core1-e2}
+
+    - id: vlan-200
+      vlan_id: 200
+      name: voice
+      trunk_ports:
+        # MISTAKE M3: LAG を指さずメンバーだけ書いた → warning 期待
+        - {node: core1, interface: core1-e2}
+        - {node: core2, interface: core2-e2}
+
+    - id: vlan-300
+      vlan_id: 300
+      name: mgmt
+      trunk_ports:
+        # MISTAKE M7: node を書いたが、interface は別ノードのもの → error 期待
+        - {node: core1, interface: core2-e3}
+
+  subinterfaces:
+    # MISTAKE M8: vlan_id は「このリンク上のタグ番号」だが、
+    # L2 側の vlan-200 (タグ 200) と一致させたいつもりで 999 と書いた。
+    # ADR-0012 D3 により照合しないので validator は検出しない見込み (「気づかない」ミス)
+    - {id: subif-wan-g1-999, attaches_to: {interface: wan-g1}, vlan_id: 999, name: Gi0/1.999}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+    - {id: vrf-internet}
+
+  interfaces:
+    - {id: core1-lo, node: core1, interface: Loopback0, ip: 10.255.0.1/32, vrf: vrf-default}
+    - {id: core2-lo, node: core2, interface: Loopback0, ip: 10.255.0.2/32, vrf: vrf-default}
+    - {id: wan-lo,   node: wan,   interface: Loopback0, ip: 10.255.0.9/32, vrf: vrf-default}
+
+    # MISTAKE M1: 短縮形は vlan-100 を指すが、attaches_to は vlan-200 を指す → 食い違い error
+    - id: core1-vlan100
+      node: core1
+      interface: vlan-100
+      attaches_to: {interface: vlan-200}
+      ip: 172.16.100.2/24
+      vrf: vrf-default
+      gateway_redundancy:
+        # MISTAKE M5: IPv6 VIP がリンクローカルでない (2001:db8::1) → error 期待
+        - {mode: vrrp, group_id: 100, vip: 172.16.100.1, priority: 110}
+        - {mode: vrrp, group_id: 100, vip: "2001:db8:100::1", priority: 110}
+
+    - id: core2-vlan100
+      node: core2
+      interface: vlan-100
+      ip: 172.16.100.3/24
+      vrf: vrf-default
+      gateway_redundancy:
+        # MISTAKE M6: IPv4 VIP (172.16.200.1) が IF のサブネット (172.16.100.0/24) 外 → error 期待
+        - {mode: vrrp, group_id: 100, vip: 172.16.200.1, priority: 90}
+
+    # anycast gateway を 2 ノードで書くが片方の IP が食い違う
+    # MISTAKE M9: anycast は全ノード同一 IP が前提だが制約がないため検出されない見込み
+    - id: core1-vlan300
+      node: core1
+      interface: vlan-300
+      ip: 172.16.30.1/24
+      vrf: vrf-default
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:5e:00:01:30"}
+    - id: core2-vlan300
+      node: core2
+      interface: vlan-300
+      ip: 172.16.30.9/24   # ← 本当は .1 と同じにすべき
+      vrf: vrf-default
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:5e:00:01:30"}
+
+    - id: wan-outside
+      node: wan
+      interface: Gi0/1
+      attaches_to: {interface: wan-g1}
+      ip: 203.0.113.1/30
+      vrf: vrf-internet
+
+  tunnel_interfaces:
+    # MISTAKE M4: destination_ip と destination_interface の両方を指定 → error 期待
+    - id: tunnel-wan-cloud
+      node: wan
+      type: ipsec_vti
+      source: wan-outside
+      destination_ip: 198.51.100.10
+      destination_interface: wan-outside   # 両方書いた
+      ip: 169.254.0.1/30
+      vrf: vrf-default
+      transport_vrf: vrf-internet
+      mtu: 1400

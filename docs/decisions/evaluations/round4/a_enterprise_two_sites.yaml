@@ -1,0 +1,265 @@
+# Pass B 試し書き (a): 2 拠点の企業網
+#
+# 対象 ADR: 0011 (SVI 短縮形 / gateway_redundancy / dual stack / tunnel) +
+#           0012 (サブ IF: 支社の router-on-a-stick) + 0013 (本社 MLAG を指す VLAN ポート)
+#
+# 構成:
+#   HQ (本社):
+#     - core1 / core2 の MLAG ペア。VLAN 100 (users) と VLAN 200 (voice) を MLAG trunk に収容。
+#       dual-stack VRRP SVI でホスト側 (v4/v6) ゲートウェイを提供。
+#     - wan-rtr (ルーター)。eth0 を core1 のアクセスに接続して WAN へ抜ける。
+#   Branch (支社):
+#     - br-rtr 1 台で router-on-a-stick。eth0 のサブ IF .10 と .20 がユーザー / 音声の L3 終端。
+#     - sw1 (支社 L2 スイッチ)。
+#   拠点間 IPsec VTI (overlay = vrf-corp / transport = vrf-internet)。
+#
+ndl_version: "1.0"
+
+meta:
+  name: enterprise-two-sites
+  description: HQ MLAG + VRRP dual-stack SVI, Branch router-on-a-stick, inter-site IPsec VTI
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    # HQ
+    - {id: hq-core1,  role: core,   implementation: physical, device_type: cisco_nexus_9300}
+    - {id: hq-core2,  role: core,   implementation: physical, device_type: cisco_nexus_9300}
+    - {id: hq-wan,    role: border, implementation: physical, device_type: cisco_isr_4451}
+    - {id: hq-host1,  role: server, implementation: physical}
+    - {id: hq-host2,  role: server, implementation: physical}
+    # Branch
+    - {id: br-rtr,    role: border, implementation: physical, device_type: cisco_isr_1100}
+    - {id: br-sw1,    role: leaf,   implementation: physical, device_type: cisco_catalyst_9200}
+    - {id: br-host10, role: server, implementation: physical}
+    - {id: br-host20, role: server, implementation: physical}
+
+  interfaces:
+    # HQ core1 / core2: peer-link x2, downlink to hosts x2, uplink to WAN x1
+    - {id: hq-core1-e1-1, node: hq-core1, name: Ethernet1/1}   # peer-link
+    - {id: hq-core1-e1-2, node: hq-core1, name: Ethernet1/2}   # peer-link
+    - {id: hq-core1-e1-3, node: hq-core1, name: Ethernet1/3}   # MLAG -> host1
+    - {id: hq-core1-e1-4, node: hq-core1, name: Ethernet1/4}   # MLAG -> host2
+    - {id: hq-core1-e1-5, node: hq-core1, name: Ethernet1/5}   # access -> wan-rtr
+    - {id: hq-core2-e1-1, node: hq-core2, name: Ethernet1/1}
+    - {id: hq-core2-e1-2, node: hq-core2, name: Ethernet1/2}
+    - {id: hq-core2-e1-3, node: hq-core2, name: Ethernet1/3}
+    - {id: hq-core2-e1-4, node: hq-core2, name: Ethernet1/4}
+    # WAN rtr: eth0 inside / eth1 WAN (public)
+    - {id: hq-wan-eth0, node: hq-wan, name: GigabitEthernet0/0}
+    - {id: hq-wan-eth1, node: hq-wan, name: GigabitEthernet0/1}
+    # HQ hosts (bond members)
+    - {id: hq-host1-e0, node: hq-host1, name: eno1}
+    - {id: hq-host1-e1, node: hq-host1, name: eno2}
+    - {id: hq-host2-e0, node: hq-host2, name: eno1}
+    - {id: hq-host2-e1, node: hq-host2, name: eno2}
+    # Branch
+    - {id: br-rtr-g0,  node: br-rtr, name: GigabitEthernet0/0}   # trunk to sw1
+    - {id: br-rtr-g1,  node: br-rtr, name: GigabitEthernet0/1}   # WAN
+    - {id: br-sw1-g1,  node: br-sw1, name: Gi1/0/1}              # trunk from br-rtr
+    - {id: br-sw1-g10, node: br-sw1, name: Gi1/0/10}             # access vlan-10
+    - {id: br-sw1-g20, node: br-sw1, name: Gi1/0/20}             # access vlan-20
+    - {id: br-host10-e0, node: br-host10, name: eth0}
+    - {id: br-host20-e0, node: br-host20, name: eth0}
+
+  links:
+    # HQ MLAG peer-link
+    - {id: link-hq-peer-a, endpoints: [hq-core1-e1-1, hq-core2-e1-1], link_speed: 10G, mtu: 9216, link_role: peer-link}
+    - {id: link-hq-peer-b, endpoints: [hq-core1-e1-2, hq-core2-e1-2], link_speed: 10G, mtu: 9216, link_role: peer-link}
+    # HQ MLAG -> hosts
+    - {id: link-hq-core1-host1, endpoints: [hq-core1-e1-3, hq-host1-e0], link_speed: 10G, link_role: access}
+    - {id: link-hq-core2-host1, endpoints: [hq-core2-e1-3, hq-host1-e1], link_speed: 10G, link_role: access}
+    - {id: link-hq-core1-host2, endpoints: [hq-core1-e1-4, hq-host2-e0], link_speed: 10G, link_role: access}
+    - {id: link-hq-core2-host2, endpoints: [hq-core2-e1-4, hq-host2-e1], link_speed: 10G, link_role: access}
+    # HQ core1 -> wan-rtr (routed, single-attached)
+    - {id: link-hq-core1-wan, endpoints: [hq-core1-e1-5, hq-wan-eth0], link_speed: 1G, link_role: uplink}
+    # NOTE: hq-wan-eth1 / br-rtr-g1 の WAN 側 (インターネット) は endpoints に書く対向ノードがない。
+    #       mlndl の L1Link は endpoints 2 固定なので「片端が外」のリンクが書けない (feedback Y8)。
+    # Branch
+    - {id: link-br-trunk, endpoints: [br-rtr-g0, br-sw1-g1], link_speed: 1G, link_role: trunk}
+    - {id: link-br-sw1-host10, endpoints: [br-sw1-g10, br-host10-e0], link_speed: 1G, link_role: access}
+    - {id: link-br-sw1-host20, endpoints: [br-sw1-g20, br-host20-e0], link_speed: 1G, link_role: access}
+
+  lag:
+    # HQ MLAG peer-link (single-node LACP bond on each side would normally be defined once;
+    # mlndl ではピアごとに単一ノードの lacp を書く慣例に従う)
+    - {id: lag-hq-core1-peerlink, type: lacp, node: hq-core1,
+       members: [hq-core1-e1-1, hq-core1-e1-2], lacp: {mode: active, min_links: 1}}
+    # MLAG bonds (host-facing)
+    - id: lag-hq-mlag-host1
+      type: mlag
+      nodes: [hq-core1, hq-core2]
+      members: [hq-core1-e1-3, hq-core2-e1-3]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-hq-core1-peerlink
+      peer_link_interface: Port-channel999
+      domain_id: 1
+    - id: lag-hq-mlag-host2
+      type: mlag
+      nodes: [hq-core1, hq-core2]
+      members: [hq-core1-e1-4, hq-core2-e1-4]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-hq-core1-peerlink
+      peer_link_interface: Port-channel999
+      domain_id: 1
+    # Host-side LACP bonds (対向)
+    - {id: lag-hq-host1-bond0, type: lacp, node: hq-host1,
+       members: [hq-host1-e0, hq-host1-e1], lacp: {mode: active, min_links: 1}}
+    - {id: lag-hq-host2-bond0, type: lacp, node: hq-host2,
+       members: [hq-host2-e0, hq-host2-e1], lacp: {mode: active, min_links: 1}}
+
+layer2:
+  vlans:
+    # HQ users / voice: MLAG を 1 行で指す (ADR-0013)
+    - id: vlan-100
+      vlan_id: 100
+      name: hq-users
+      trunk_ports:
+        - {interface: lag-hq-mlag-host1}
+      access_ports: []    # host1 bond の L2 access は上の MLAG で表現
+    - id: vlan-200
+      vlan_id: 200
+      name: hq-voice
+      trunk_ports:
+        - {interface: lag-hq-mlag-host2}
+    # Branch: router-on-a-stick。br-rtr のサブ IF (vlan_id=10/20) と sw1 の trunk が
+    #         リンクでつながるが、mlndl ではリンクをたどって導出するため、ここでは sw1 側のみ書く
+    - id: vlan-10
+      vlan_id: 10
+      name: br-users
+      trunk_ports:
+        - {node: br-sw1, interface: br-sw1-g1}
+      access_ports:
+        - {node: br-sw1, interface: br-sw1-g10}
+    - id: vlan-20
+      vlan_id: 20
+      name: br-voice
+      trunk_ports:
+        - {node: br-sw1, interface: br-sw1-g1}
+      access_ports:
+        - {node: br-sw1, interface: br-sw1-g20}
+
+  subinterfaces:
+    # 支社ルーターの router-on-a-stick (ADR-0012)
+    - {id: subif-br-rtr-g0-10, attaches_to: {interface: br-rtr-g0}, vlan_id: 10, name: Gi0/0.10, description: br-users}
+    - {id: subif-br-rtr-g0-20, attaches_to: {interface: br-rtr-g0}, vlan_id: 20, name: Gi0/0.20, description: br-voice}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+    - {id: vrf-internet, description: WAN transport (public)}
+    - {id: vrf-corp,     description: 社内 overlay}
+
+  interfaces:
+    # HQ loopbacks (dual-stack)
+    - {id: hq-core1-lo, node: hq-core1, interface: Loopback0,
+       ip: 10.255.0.1/32, ipv6: 2001:db8:ffff::1/128, vrf: vrf-default}
+    - {id: hq-core2-lo, node: hq-core2, interface: Loopback0,
+       ip: 10.255.0.2/32, ipv6: 2001:db8:ffff::2/128, vrf: vrf-default}
+    - {id: hq-wan-lo,   node: hq-wan,   interface: Loopback0,
+       ip: 10.255.0.9/32, vrf: vrf-default}
+
+    # HQ VRRP dual-stack SVI for vlan-100 (ADR-0011 D4・D5)
+    # 短縮形: interface: vlan-100 が layer2.vlans[vlan-100] を指す
+    - id: hq-core1-vlan100
+      node: hq-core1
+      interface: vlan-100
+      ip: 172.16.100.2/24
+      ipv6: 2001:db8:100::2/64
+      vrf: vrf-corp
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 100, vip: 172.16.100.1, priority: 110}
+        - {mode: vrrp, group_id: 100, vip: "fe80::1", priority: 110}
+    # 正規形: 機器上の名前 (Vlan100) を保つケース
+    - id: hq-core2-vlan100
+      node: hq-core2
+      interface: Vlan100
+      attaches_to: {interface: vlan-100}
+      ip: 172.16.100.3/24
+      ipv6: 2001:db8:100::3/64
+      vrf: vrf-corp
+      gateway_redundancy:
+        - {mode: vrrp, group_id: 100, vip: 172.16.100.1, priority: 90}
+        - {mode: vrrp, group_id: 100, vip: "fe80::1", priority: 90}
+
+    # HQ VLAN 200 は anycast gateway (比較用に 2 ノードで同一 IP)
+    - id: hq-core1-vlan200
+      node: hq-core1
+      interface: vlan-200
+      ip: 172.16.200.1/24
+      vrf: vrf-corp
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:5e:00:01:01"}
+    - id: hq-core2-vlan200
+      node: hq-core2
+      interface: vlan-200
+      ip: 172.16.200.1/24
+      vrf: vrf-corp
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:5e:00:01:01"}
+
+    # HQ core1 <-> wan-rtr の P2P (routed access)
+    - id: hq-core1-to-wan
+      node: hq-core1
+      interface: Ethernet1/5
+      attaches_to: {interface: hq-core1-e1-5}
+      ip: 10.0.0.1/30
+      vrf: vrf-default
+    - id: hq-wan-inside
+      node: hq-wan
+      interface: GigabitEthernet0/0
+      attaches_to: {interface: hq-wan-eth0}
+      ip: 10.0.0.2/30
+      vrf: vrf-default
+
+    # HQ WAN (public, transport)
+    - id: hq-wan-outside
+      node: hq-wan
+      interface: GigabitEthernet0/1
+      attaches_to: {interface: hq-wan-eth1}
+      ip: 203.0.113.1/30
+      vrf: vrf-internet
+
+    # Branch router-on-a-stick: サブ IF に L3 を載せる (ADR-0012)
+    - id: br-rtr-g0-10
+      node: br-rtr
+      interface: Gi0/0.10
+      attaches_to: {interface: subif-br-rtr-g0-10}
+      ip: 192.168.10.1/24
+      ipv6: 2001:db8:b10::1/64
+      vrf: vrf-corp
+    - id: br-rtr-g0-20
+      node: br-rtr
+      interface: Gi0/0.20
+      attaches_to: {interface: subif-br-rtr-g0-20}
+      ip: 192.168.20.1/24
+      vrf: vrf-corp
+    # Branch WAN side (public)
+    - id: br-rtr-outside
+      node: br-rtr
+      interface: GigabitEthernet0/1
+      attaches_to: {interface: br-rtr-g1}
+      ip: 198.51.100.1/30
+      vrf: vrf-internet
+
+  tunnel_interfaces:
+    # 本社 ↔ 支社: 両端ともトポロジー内。IPsec VTI
+    - id: tunnel-hq-br
+      node: hq-wan
+      type: ipsec_vti
+      source: hq-wan-outside
+      destination_interface: br-rtr-outside
+      ip: 169.254.1.1/30
+      vrf: vrf-corp
+      transport_vrf: vrf-internet
+      mtu: 1400
+      description: HQ -> Branch (IKEv2/ESP)
+    - id: tunnel-br-hq
+      node: br-rtr
+      type: ipsec_vti
+      source: br-rtr-outside
+      destination_interface: hq-wan-outside
+      ip: 169.254.1.2/30
+      vrf: vrf-corp
+      transport_vrf: vrf-internet
+      mtu: 1400

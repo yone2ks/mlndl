@@ -1,0 +1,168 @@
+# Pass B 試し書き (b): EVPN DC + routed LAG + サブ IF で外部ピア
+#
+# 対象 ADR: 0011 (anycast gateway / L3VNI / dual stack) +
+#           0012 (border の routed subif で外部ピアに接続) + 0013 (vlan trunk が LAG を指す)
+#
+# 構成:
+#   - spine1 / spine2 の EVPN underlay
+#   - leaf1 / leaf2 の MLAG ペア、tenant VLAN 100 を MLAG trunk に収容、Symmetric IRB anycast GW
+#   - border1 が 2 本のアップリンクを routed LAG にまとめ、
+#     その LAG 上に外部 BGP ピア (タグ 3001) のサブ IF を 1 本切る
+#   - server1 は MLAG 対向の bond
+ndl_version: "1.0"
+
+meta:
+  name: evpn-dc-with-external-peer
+  description: EVPN Symmetric IRB + routed LAG uplink on border + subif external BGP peer
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1,  role: spine,  implementation: vm, device_type: cumulus_linux}
+    - {id: spine2,  role: spine,  implementation: vm, device_type: cumulus_linux}
+    - {id: leaf1,   role: leaf,   implementation: vm, device_type: cumulus_linux}
+    - {id: leaf2,   role: leaf,   implementation: vm, device_type: cumulus_linux}
+    - {id: border1, role: border, implementation: vm, device_type: cumulus_linux}
+    - {id: server1, role: server, implementation: physical}
+    # external は mlndl 範囲外の対向 ISP ルーター。L1 は書くが L3 は書かない
+    - {id: ext-rtr, role: border, implementation: physical, description: upstream ISP router}
+
+  interfaces:
+    - {id: spine1-swp1, node: spine1, name: swp1}
+    - {id: spine1-swp2, node: spine1, name: swp2}
+    - {id: spine1-swp3, node: spine1, name: swp3}
+    - {id: spine2-swp1, node: spine2, name: swp1}
+    - {id: spine2-swp2, node: spine2, name: swp2}
+    - {id: spine2-swp3, node: spine2, name: swp3}
+    - {id: leaf1-swp51, node: leaf1, name: swp51}
+    - {id: leaf1-swp52, node: leaf1, name: swp52}
+    - {id: leaf1-swp49, node: leaf1, name: swp49}   # peer-link
+    - {id: leaf1-swp1,  node: leaf1, name: swp1}    # MLAG -> server1
+    - {id: leaf2-swp51, node: leaf2, name: swp51}
+    - {id: leaf2-swp52, node: leaf2, name: swp52}
+    - {id: leaf2-swp49, node: leaf2, name: swp49}
+    - {id: leaf2-swp1,  node: leaf2, name: swp1}
+    - {id: border1-swp51, node: border1, name: swp51}   # underlay -> spine1
+    - {id: border1-swp52, node: border1, name: swp52}   # underlay -> spine2
+    - {id: border1-swp1,  node: border1, name: swp1}    # LAG member to ext-rtr
+    - {id: border1-swp2,  node: border1, name: swp2}    # LAG member to ext-rtr
+    - {id: server1-eth0, node: server1, name: eth0}
+    - {id: server1-eth1, node: server1, name: eth1}
+    - {id: ext-rtr-g0, node: ext-rtr, name: Gi0/0}
+    - {id: ext-rtr-g1, node: ext-rtr, name: Gi0/1}
+
+  links:
+    - {id: link-spine1-leaf1,   endpoints: [spine1-swp1, leaf1-swp51],  link_speed: 10G, mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf2,   endpoints: [spine1-swp2, leaf2-swp51],  link_speed: 10G, mtu: 9216, link_role: underlay}
+    - {id: link-spine1-border1, endpoints: [spine1-swp3, border1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf1,   endpoints: [spine2-swp1, leaf1-swp52],  link_speed: 10G, mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf2,   endpoints: [spine2-swp2, leaf2-swp52],  link_speed: 10G, mtu: 9216, link_role: underlay}
+    - {id: link-spine2-border1, endpoints: [spine2-swp3, border1-swp52], link_speed: 10G, mtu: 9216, link_role: underlay}
+    - {id: link-leaf-peer,      endpoints: [leaf1-swp49, leaf2-swp49],  link_speed: 10G, mtu: 9216, link_role: peer-link}
+    - {id: link-leaf1-server1,  endpoints: [leaf1-swp1,  server1-eth0], link_speed: 10G, link_role: access}
+    - {id: link-leaf2-server1,  endpoints: [leaf2-swp1,  server1-eth1], link_speed: 10G, link_role: access}
+    - {id: link-border1-ext-a,  endpoints: [border1-swp1, ext-rtr-g0],  link_speed: 10G, mtu: 9216, link_role: uplink}
+    - {id: link-border1-ext-b,  endpoints: [border1-swp2, ext-rtr-g1],  link_speed: 10G, mtu: 9216, link_role: uplink}
+
+  lag:
+    # leaf peer-link (leaf1 側 LACP bond — 片側だけ書く慣例)
+    - {id: lag-leaf1-peerlink, type: lacp, node: leaf1,
+       members: [leaf1-swp49], lacp: {mode: active, min_links: 1}}
+    # Server1 MLAG
+    - id: lag-mlag-server1
+      type: mlag
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-leaf1-peerlink
+      peer_link_interface: peerlink.4094
+      domain_id: 10
+    - {id: lag-server1-bond0, type: lacp, node: server1,
+       members: [server1-eth0, server1-eth1], lacp: {mode: active, min_links: 1}}
+    # Border routed LAG (ADR-0012 D4 — routed LAG に L3Interface を attach)
+    - {id: lag-border1-po1, type: lacp, node: border1,
+       members: [border1-swp1, border1-swp2], lacp: {mode: active, min_links: 1}}
+
+layer2:
+  vlans:
+    # tenant VLAN。MLAG を 1 行で指す (ADR-0013)
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a
+      trunk_ports:
+        - {interface: lag-mlag-server1}
+
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,
+       vtep_source: leaf1-lo, members: [leaf1, leaf2]}
+    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-tenant-a, irb_mode: symmetric}
+
+  subinterfaces:
+    # 外部ピア用の tagged subif on routed LAG (ADR-0012 D4)。vlan_id は L2 VLAN への参照ではない (D3)
+    - {id: subif-border1-po1-3001, attaches_to: {interface: lag-border1-po1},
+       vlan_id: 3001, name: Port-channel1.3001, description: external BGP peer}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+    - id: vrf-tenant-a
+      rd: "65000:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65000:100"], export: ["65000:100"]}
+
+  interfaces:
+    # Loopbacks
+    - {id: spine1-lo,  node: spine1,  interface: lo, ip: 10.0.0.1/32,  vrf: vrf-default}
+    - {id: spine2-lo,  node: spine2,  interface: lo, ip: 10.0.0.2/32,  vrf: vrf-default}
+    - {id: leaf1-lo,   node: leaf1,   interface: lo, ip: 10.0.0.11/32, vrf: vrf-default}
+    - {id: leaf2-lo,   node: leaf2,   interface: lo, ip: 10.0.0.12/32, vrf: vrf-default}
+    - {id: border1-lo, node: border1, interface: lo, ip: 10.0.0.21/32, vrf: vrf-default}
+
+    # underlay P2P (省略: leaf1-swp51 のみ代表で書く)
+    - {id: leaf1-swp51-l3, node: leaf1, interface: swp51,
+       ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51}}
+    - {id: border1-swp51-l3, node: border1, interface: swp51,
+       ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: border1-swp51}}
+
+    # tenant anycast gateway (全 leaf 同一 IP、プロトコル無し)
+    - id: leaf1-vlan100
+      node: leaf1
+      interface: vlan-100
+      ip: 192.168.100.1/24
+      ipv6: 2001:db8:100::1/64
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+    - id: leaf2-vlan100
+      node: leaf2
+      interface: vlan-100
+      ip: 192.168.100.1/24
+      ipv6: 2001:db8:100::1/64
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+
+    # Border の routed LAG (タグなしのトラフィック用。LAG を直接 attach)
+    - id: border1-po1
+      node: border1
+      interface: Port-channel1
+      attaches_to: {interface: lag-border1-po1}
+      ip: 10.100.0.1/30
+      vrf: vrf-default
+      description: untagged routed LAG to upstream
+
+    # Border の tagged subif (外部ピア、別 VRF)
+    - id: border1-po1-3001
+      node: border1
+      interface: Port-channel1.3001
+      attaches_to: {interface: subif-border1-po1-3001}
+      ip: 10.200.0.1/30
+      ipv6: 2001:db8:ext::1/126
+      vrf: vrf-tenant-a
+      description: external BGP peer (tenant-a transit)
+
+  routing_adjacencies:
+    - {id: bgp-peer-spine1-leaf1,   type: bgp, attaches_to: {link: link-spine1-leaf1},
+       from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo}}
+    - {id: bgp-peer-spine1-border1, type: bgp, attaches_to: {link: link-spine1-border1},
+       from: {node: spine1, update_source: spine1-lo}, to: {node: border1, update_source: border1-lo}}
