@@ -5,8 +5,9 @@
 - **Deciders**: mlndl-spec-architect (Pass C), mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, ecosystem-reviewer
 - **Pass**: C (再設計後の最終版)
 - **Supersedes**: drafts/0005-mlndl-expressive-scope.md
-- **Amended by**: [drafts/0011](drafts/0011-layer3-data-plane.md) (2026-10-04)、[drafts/0012](drafts/0012-subinterfaces.md) (2026-10-05) — 表現原理の追加、SVI 規範の改訂、スコープ表の実装同期。
-  改訂箇所には「ADR-0011 で改訂」の注記を入れ、元の記述は履歴として残す。一覧は末尾の「実装同期メモ」を参照
+- **Amended by**: [ADR-0011](0011-layer3-data-plane.md) (2026-10-04、Pass C で確定 2026-10-15)、[ADR-0012](0012-subinterfaces.md) (2026-10-05)、
+  [ADR-0013](0013-vlan-ports-on-lag.md)、ラウンド4 Pass C (2026-10-15) — 表現の指針 (D4 補則)、`node` の持ち方 (D6)、
+  SVI 規範の改訂、スコープ表の実装同期。改訂箇所には注記を入れ、元の記述は履歴として残す。一覧は末尾の「実装同期メモ」を参照
 
 ## Context
 
@@ -100,6 +101,10 @@ layer3:
 ```
 
 **ケース B: SVI (`interface vlan-100` に IP を付与)** — Pass C で新規追加 (P3)
+
+> **ラウンド4 Pass C で改訂 (2026-10-15)**: 以下の B-1 (短縮形 `interface: vlan-N`) は廃止し、B-2 に一本化した。
+> 書き方は `name: <機器上の名前>` + `attaches_to: {vlan: <VLAN id>}` である (ADR-0001 D8、ADR-0011 D3)。
+> 短縮形と旧キー `interface` は ndl_version 1.x の間だけ受け付け、warning を出す。以下は履歴として残す。
 
 SVI は VLAN を上位 supporting 対象として持つ L3 entity である。次の 2 種類の表現を許容する:
 
@@ -298,6 +303,7 @@ NetBox → mlndl アダプター実装時の参照表:
 | sFlow / NetFlow / SNMP 設定 | 運用監視層 |
 | L2 トンネル (EoGRE / L2TPv3 / OTV) | Phase 2 で再判断 |
 | 別パラダイムプロトコル (PIM / MPLS-LDP / Segment Routing) | Phase 2+ |
+| **ポリシールーティング (PBR) / VRF 間のスタティックリーク (route leak / import-map)** (ラウンド4 Pass C で追加) | 上位ツール。D4 補則の問い 2 (転送テーブルの個別エントリ) |
 | **スタティックルート / デフォルトルート / redistribute / network 文** (ADR-0011 D2 で追加) | 上位ツール (Ansible / NetBox config context)。ホストのデフォルトゲートウェイは、同一サブネットの SVI の `ip` または `gateway_redundancy.vip` から導出できる |
 
 > **ADR-0011 D4 / D8 で改訂 (2026-10-04)**: 上表の「MAC アドレス全般」のうち、`gateway_redundancy` の
@@ -330,27 +336,32 @@ D3 の振り分け判断、および将来の新概念のスコープ内/外判�
 - `description` / `comment`: 4 軸すべて No → 注釈側として全構成要素に optional 許可
 - `gateway_redundancy.protocol: anycast_gateway` (enum 値): 値の変更で動作意味が変わる → 注釈ではなく運用パラメータ
 
-#### D4 補則. 表現原理 (ADR-0011 D1 で追加, 2026-10-04)
+#### D4 補則. 表現の指針 (ADR-0011 D1 で追加 2026-10-04、ラウンド4 Pass C で改訂 2026-10-15)
 
-> **関係の成立に必要な情報は書き、関係を流れる個別経路は書かない。**
+> **関係の成立に必要な情報は書き、関係を流れる個別の経路や処理は書かない。**
 
-mlndl は「VRF が存在する」「この SVI がゲートウェイである」「このセッションが張れる」といった関係の成立条件を記述し、
-その関係を通じて運ばれる個別の経路情報 (route entries) は記述しない。
+mlndl は「VRF が存在する」「この SVI がゲートウェイである」「このトンネルが張れる」といった関係の成立条件を記述し、
+その関係を通じて運ばれる個別の経路情報 (route entries) や、個々のパケットへの処理は記述しない。
 
-この原理は上の 4 軸判定を置き換えない。**4 軸が「混在」を返したときの解決指針**として働く。
-4 軸すべて Yes の概念は引き続きスコープ内である。混在時は次の順に判定する。
+> **ラウンド4 Pass C で改訂**: 当初は「表現原理」と呼んだが、この一文だけでは判定しきれない項目があった
+> (IKE / PSK は関係の成立条件でもある。DHCP relay・NAT・VRF 間のリークは「関係」とも読める)。
+> そこで「原理」をやめて**判断の方向を示す指針**とし、次の 3 つの問いと、D3-2 の明示表を合わせて使う。
+> 個々の項目の最終判断は D3-2 の表 (と各 ADR) に書く ([round4-evaluation](evaluations/round4-evaluation.md) 論点 D、ユーザー判断)。
 
-1. それを削除すると、その関係自体が存在できなくなるか (Route Target は Yes、スタティックルートは No)
-2. 数が構造的に上限を持つか (Route Target は数個、経路は数万本)
-3. データプレーンの構造そのものが変わるか
+4 軸判定が「混在」を返したとき、次の順に問う。4 軸すべて Yes の概念は引き続きスコープ内である。
+
+1. **秘匿情報か** (鍵・パスワード・PSK・認証情報) → 書かない。上位ツールへ (D3-2)
+2. **転送テーブルの個別エントリ、または個々のパケットへの処理か** (経路、ACL、NAT 変換、QoS、ポリシールーティング) → 書かない
+3. **それを削除すると、その関係自体が存在できなくなるか** (Route Target、トンネルの MTU、VTEP) → 書く
 
 | 書く | 書かない |
 |---|---|
 | `layer3.interfaces` の IP (到達性の起点) | スタティックルートの宛先とネクストホップ |
 | `layer3.vrfs.route_targets` (VPN 境界の定義、RFC 4364) | per-VRF の redistribute ポリシー |
 | `gateway_redundancy` の VIP (ゲートウェイの所在) | ホストのルーティングテーブル |
+| トンネルの source / destination / MTU | IPsec の暗号化パラメータ (問い 1) |
 
-上の「適用例 — EVPN advertise フラグ群」をこの原理で再判定することは本補則の範囲外とし、ADR-0005 の再設計 (drafts/0005v2) で扱う。
+上の「適用例 — EVPN advertise フラグ群」をこの指針で再判定することは本補則の範囲外とし、ADR-0005 の再設計 (drafts/0005v2) で扱う。
 
 ### D5. 三側面と Phase の対応
 
@@ -361,6 +372,24 @@ mlndl は「VRF が存在する」「この SVI がゲートウェイである�
 | **Phase 3+** | broadcast_domain / blast_radius クエリ、ValidationPlugin 機構 | クエリ層 (側面は変わらず) |
 
 「スコープ内」と「Phase 1 実装」は別概念。Phase 2 以降のスコープ内概念を Phase 1 中に記述した場合、パーサーは `extra="forbid"` で未知フィールドとして `error` にする。
+
+### D6. `node` の持ち方 (ラウンド4 Pass C で追加, 2026-10-15)
+
+エンティティが `node` を持つかどうかは、次の基準で決める ([round4-evaluation](evaluations/round4-evaluation.md) 論点 B)。
+
+> **ノードごとに独立した設定値 (IP・MAC・状態) を持つエンティティは `node` が必須。
+> L2 の属性 (タグ番号・VLAN の所属) だけを持ち、参照先 (L1 IF / LAG) からノードが決まるエンティティは `node` を書かない。**
+
+| エンティティ | `node` | 理由 |
+|---|---|---|
+| `layer1.interfaces` | 必須 | 物理ポートの所属そのもの |
+| `layer3.interfaces` | 必須 | ノードごとに別の IP を持つ。MLAG 上の L3 IF もノードごとに 1 つずつ書く |
+| `layer3.tunnel_interfaces` | 必須 | source / destination をノードごとに持つ |
+| `layer2.subinterfaces` | 書かない | タグ番号だけを持つ。ノードは基盤 (L1 IF / LAG) から決まる。MLAG 上なら両ノード |
+| VLAN の `trunk_ports` / `access_ports` | 書かない | VLAN の所属だけを表す。ノードは `interface` / `lag` から決まる。MLAG なら両ノード |
+
+VLAN のポートの `node` は、ADR-0013 (Pass A) では「任意 (書けば照合)」だった。サブ IF と揃えて書かない形に改めた
+(ユーザー判断)。ndl_version 1.x の間は旧形式として受け付け、validator が warning を出して照合する。
 
 ## Consequences
 
@@ -461,6 +490,10 @@ mlndl は「VRF が存在する」「この SVI がゲートウェイである�
 | D2-2 ケース C / D2-3 / D3-1 | サブインターフェースを実装。`{interface:}` が指せる ID 空間をエンティティごとに固定 | ADR-0012 |
 | D3-2 | スタティックルート等をスコープ外に追加。`anycast_mac` / `system_mac` をスコープ内に確定 | ADR-0011 D2・D4・D8 |
 | D4 | 補則として表現原理を追加 | ADR-0011 D1 |
+| D4 補則 | 「原理」を「指針」に改め、3 つの問いと D3-2 の明示表で判断する形にした | ラウンド4 Pass C (論点 D) |
+| D6 (新設) | `node` を持つかどうかの基準 | ラウンド4 Pass C (論点 B) |
+| D2-2 ケース B / D2-3 | SVI は `attaches_to: {vlan:}`、機器上の名前は `name`。短縮形 `interface: vlan-N` は廃止 (1.x の間は warning で受け付ける)。`{interface:}` は L1 IF 専用 | ADR-0001 D8、ADR-0011 D3 (Pass C) |
+| D3-2 | ポリシールーティングと VRF 間のスタティックリークをスコープ外に追加 | ラウンド4 Pass C |
 
 **未反映**: `layer3.routing_adjacencies` / `protocols.*` の `control_plane` への移動 (drafts/0010、保留中)。
 

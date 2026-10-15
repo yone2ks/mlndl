@@ -1,6 +1,6 @@
 # ADR-0012: 802.1Q サブインターフェース
 
-- **Status**: Draft — 実装済み (2026-10-05)。Pass B 実施済み ([round4-evaluation](../evaluations/round4-evaluation.md))、Pass C は未実施
+- **Status**: Superseded by [0012](../0012-subinterfaces.md) (ラウンド4 Pass C, 2026-10-15)。以下は Pass A の記録として残す。 元の Status: Draft — 実装済み (2026-10-05)。Pass B 実施済み ([round4-evaluation](../evaluations/round4-evaluation.md))、Pass C は未実施
 - **Date**: 2026-10-05
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A (設計ラウンドで 5 エージェントの評価を取り、割れた 2 点をユーザーが判断した上で策定)

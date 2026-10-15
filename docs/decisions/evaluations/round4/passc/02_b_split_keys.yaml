@@ -1,0 +1,103 @@
+# 仮構文 — Pass C 比較用 (2): A案b (キー分割)
+#
+# 参照先の種類ごとにキーを分ける:
+#   {interface: X}     — L1 IF のみ
+#   {lag: X}           — LAG (lacp / mlag)
+#   {vlan: X}          — layer2.vlans
+#   {subinterface: X}  — layer2.subinterfaces
+#
+# VLAN の trunk_ports / access_ports も同じ discriminator を使う:
+#   - {lag: lag-mlag-server1}             # LAG を指す
+#   - {node: br-sw1, interface: br-sw1-g1}  # L1 IF を指す (node は任意、残す案)
+#
+# 現行スキーマでは parse error になる (AttachesToObj は interface|node|link のみ)。
+# この版は Pass C で型を Discriminated Union に拡張することを想定した仮構文である。
+#
+ndl_version: "1.0"
+meta:
+  name: passc-case2-split-keys
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ====================================================================
+# b_evpn_dc_external_peer.yaml 由来
+# ====================================================================
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {lag: lag-mlag-server1}          # これが LAG を指すことが YAML から読める
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,
+       vtep_source: leaf1-lo, members: [leaf1, leaf2]}
+    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-tenant-a, irb_mode: symmetric}
+  subinterfaces:
+    - id: subif-border1-po1-3001
+      attaches_to: {lag: lag-border1-po1}  # 親が LAG であることが見える
+      vlan_id: 3001
+      name: Port-channel1.3001
+
+layer3:
+  interfaces:
+    # SVI は短縮形を続けるなら interface: vlan-100 のまま。
+    # 正規形は attaches_to: {vlan: ...}
+    - id: leaf1-vlan100
+      node: leaf1
+      interface: vlan-100                 # 短縮形は残す (後述 C 案と組み合わせると廃止)
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+    - id: leaf2-vlan100
+      node: leaf2
+      interface: Vlan100
+      attaches_to: {vlan: vlan-100}        # 明確
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+
+    - id: border1-po1
+      node: border1
+      interface: Port-channel1
+      attaches_to: {lag: lag-border1-po1}       # LAG
+      ip: 10.100.0.1/30
+      vrf: vrf-default
+    - id: border1-po1-3001
+      node: border1
+      interface: Port-channel1.3001
+      attaches_to: {subinterface: subif-border1-po1-3001}  # subif
+      ip: 10.200.0.1/30
+      vrf: vrf-tenant-a
+    - id: leaf1-swp51-l3
+      node: leaf1
+      interface: swp51
+      attaches_to: {interface: leaf1-swp51}     # L1 IF (キーは「IF」の集合を狭める)
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+
+# ====================================================================
+# a_enterprise_two_sites.yaml 由来 (抜粋)
+# ====================================================================
+# layer2:
+#   vlans:
+#     - {id: vlan-100, vlan_id: 100,
+#        trunk_ports: [{lag: lag-hq-mlag-host1}]}
+#     - id: vlan-10
+#       vlan_id: 10
+#       trunk_ports:  [{node: br-sw1, interface: br-sw1-g1}]
+#       access_ports: [{node: br-sw1, interface: br-sw1-g10}]
+#   subinterfaces:
+#     - {id: subif-br-rtr-g0-10,
+#        attaches_to: {interface: br-rtr-g0}, vlan_id: 10}   # 親は L1 IF
+#
+# layer3:
+#   interfaces:
+#     - id: hq-core1-vlan100
+#       interface: vlan-100                       # 短縮形。C 案と組み合わせない場合
+#       ip: 172.16.100.2/24
+#       ipv6: 2001:db8:100::2/64
+#       gateway_redundancy:
+#         - {mode: vrrp, group_id: 100, vip: 172.16.100.1, priority: 110}
+#     - id: br-rtr-g0-10
+#       interface: Gi0/0.10
+#       attaches_to: {subinterface: subif-br-rtr-g0-10}      # subif キー
+#       ip: 192.168.10.1/24

@@ -85,18 +85,23 @@ RFC 8345 のデータプレーン層であること、BGP 隣接が `layer3.rout
 `routing_neighbors` への改名はユーザー決定済み。BGP エントリの単位 (D8) が未決のまま、
 layer3 までのデータプレーンの表現力を先に確定させるため 2026-09-20 に中断した。
 
-### ラウンド4: layer3 データプレーンの確定 (2026-09-20〜)
+### ラウンド4: layer3 データプレーンの確定 (2026-09-20〜2026-10-15)
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [drafts/0011](drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 (実装済み・ADR-0005 に反映済み) | Draft | A r2 |
+| [0011](0011-layer3-data-plane.md) | layer3 データプレーン | **Accepted** | C |
+| [0012](0012-subinterfaces.md) | 802.1Q サブインターフェース | **Accepted** | C |
+| [0013](0013-vlan-ports-on-lag.md) | VLAN のポート (trunk_ports / access_ports) | **Accepted** | C |
+| [drafts/0011](drafts/0011-layer3-data-plane.md) | layer3 データプレーンの確定 | Superseded by 0011 | A r2 |
 | [evaluations/adr0011](evaluations/adr0011/README.md) | ADR-0011 実測資料 (試し書き / 矛盾の実例 / 案比較) | — | — |
-| [drafts/0012](drafts/0012-subinterfaces.md) | 802.1Q サブインターフェース (実装済み) | Draft | A |
+| [drafts/0012](drafts/0012-subinterfaces.md) | 802.1Q サブインターフェース | Superseded by 0012 | A |
 | [evaluations/adr0012](evaluations/adr0012/README.md) | ADR-0012 設計比較 YAML | — | — |
-| [drafts/0013](drafts/0013-vlan-ports-on-lag.md) | VLAN の trunk_ports / access_ports から LAG を指す (実装済み) | Draft | A |
+| [drafts/0013](drafts/0013-vlan-ports-on-lag.md) | VLAN の trunk_ports / access_ports から LAG を指す | Superseded by 0013 | A |
 | [evaluations/adr0013](evaluations/adr0013/README.md) | ADR-0013 設計比較 YAML | — | — |
 | [evaluations/round4](evaluations/round4-evaluation.md) | ラウンド4 横断評価メモ (ADR-0011〜0013 の Pass B) | — | — |
+| evaluations/round4/passc/ | Pass C の案比較 YAML (参照キー・`name`・`node`) | — | — |
 
 ADR-0010 を保留した上で、先に L1〜L3 のデータプレーンを確定させる作業。
 表現原理 (関係の成立に必要な情報は書き、個別経路は書かない)、スタティックルートのスコープ外化、
 SVI 表現の一本化、`fhrp` → `gateway_redundancy`、デュアルスタック (`ip` / `ipv6`)、トンネルを扱う。
+Pass C (2026-10-15) で、参照先の種類を `attaches_to` のキーで示す形 (ADR-0001 D8)、`L3Interface.name`、VLAN のポートとサブ IF に `node` を書かない形 (ADR-0005 D6)、表現の「指針」(ADR-0005 D4 補則) を決めた。旧形式は ndl_version 1.x の間だけ warning 付きで受け付ける。

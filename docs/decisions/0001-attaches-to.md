@@ -5,6 +5,8 @@
 - **Deciders**: mlndl-spec-architect (Pass C)
 - **Pass**: C (再設計後の最終版)
 - **Supersedes**: drafts/0001-attaches-to.md
+- **Amended by**: ラウンド4 Pass C (2026-10-15) — D8 を追加。参照先の種類をキーで示し、`{interface:}` を L1 IF 専用に戻した
+  ([round4-evaluation](evaluations/round4-evaluation.md) 論点 A、ユーザー判断)
 
 ## Context
 
@@ -143,6 +145,41 @@ severity の定義は **ADR-0002 D8** を参照 (要約: `error` = 検証失敗�
 ### D7. RFC 8345 エクスポーターの責務
 
 `exporter/rfc8345.py` は `attaches_to` を **3 フィールドに分解して出力する**。`layer` フィールドを mlndl が持たなくても、参照先 ID がどのレイヤーのコレクションに登録されているかをエクスポート時に逆引き (グローバル一意 ID なので O(1)) することで層情報を復元できる。RFC 8345 への往復変換は成立する。
+
+### D8. 参照先の種類はキーで示す (ラウンド4 Pass C で追加, 2026-10-15)
+
+D2 のキーに `lag` / `vlan` / `subinterface` を加え、**`interface` は L1 インターフェース専用**とする。
+
+| キー | 参照先 |
+|---|---|
+| `node` | `layer1.nodes` |
+| `interface` | `layer1.interfaces` (L1 IF のみ) |
+| `lag` | `layer1.lag` |
+| `vlan` | `layer2.vlans` |
+| `subinterface` | `layer2.subinterfaces` |
+| `link` | `layer1.links` |
+
+どのキーを書けるかはエンティティごとに決め、**スキーマ (型) で制限する**。書けないキーはパース段階で error になる。
+
+| `attaches_to` を持つエンティティ | 書けるキー |
+|---|---|
+| `layer1.nodes` / `layer1.interfaces` / `layer3.routing_adjacencies` | 文字列 (ノード) / `node` / `interface` / `link` (D1〜D7 のまま) |
+| `layer2.subinterfaces` | `interface` / `lag` |
+| `layer3.interfaces` | `interface` / `lag` / `vlan` / `subinterface` |
+
+VLAN のポート (`layer2.vlans[].trunk_ports` / `access_ports`) も同じ考え方で `{interface:}` / `{lag:}` と書く (ADR-0013 D1)。
+
+**経緯**: ADR-0012 / 0013 (Pass A) は `{interface: X}` の X に L1 IF / LAG / VLAN / サブ IF のどれでも書けるようにし、
+どれを受け付けるかを参照元ごとの表で管理した。ラウンド4 Pass B で、(1) 同じキーが参照元によって違う ID 空間を引くのは
+D2「キー名が discriminator」に反する、(2) YAML を見ても何を指しているかが分からない (試し書きで実際に迷った)、
+(3) `layer2.bridges` などを足すたびに表が広がる、と指摘された。キーを分ければ受付の表がスキーマそのものになり、
+新しい種類 (例: `{bridge:}`) はキーを 1 つ足すだけで済む。
+
+**旧形式の扱い**: `{interface: X}` で X が LAG / VLAN / サブ IF を指す書き方は、ndl_version 1.x の間だけ受け付ける。
+validator が X の種類を引き、`{lag: X}` などに書き換えるよう **warning** を出す (`--strict` では error)。
+この読み替えは ID のグローバル一意性 (ADR-0002 D5) に頼るので、L1 IF / LAG / VLAN / サブ IF の ID 重複は引き続き error。
+
+キーと ID の種類が食い違う参照 (例: `{lag: vlan-100}`) は未定義の参照として error にし、正しいキーをメッセージで示す。
 
 ## Consequences
 

@@ -1,0 +1,105 @@
+# 仮構文 — Pass C 比較用 (3): 案 C
+#
+# 変更点 (2 つを同時に行う):
+#   (C-1) L3Interface.interface を name に改名する
+#         (「機器上の名前」と「ID 参照」が同じキー名を共有していた問題を解消)
+#   (C-2) SVI の短縮形 `interface: vlan-N` を廃止し、VLAN 参照は必ず attaches_to で書く
+#
+# A案b (キー分割) と組み合わせた版 (C+b) で書く。
+# これは最も破壊的だが、破壊的変更が 1 回で済む (D5 の指摘)。
+#
+# 現行スキーマでは parse error (L3Interface は interface フィールド必須, name は未定義)。
+#
+ndl_version: "1.0"
+meta:
+  name: passc-case3-no-shortform-rename
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ====================================================================
+# b_evpn_dc_external_peer.yaml 由来
+# ====================================================================
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {lag: lag-mlag-server1}
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,
+       vtep_source: leaf1-lo, members: [leaf1, leaf2]}
+    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-tenant-a, irb_mode: symmetric}
+  subinterfaces:
+    - id: subif-border1-po1-3001
+      attaches_to: {lag: lag-border1-po1}
+      vlan_id: 3001
+      name: Port-channel1.3001
+
+layer3:
+  interfaces:
+    # 短縮形廃止: VLAN への参照は attaches_to で明示する
+    # name は機器上の表示名のみ (参照には使わない)
+    - id: leaf1-vlan100
+      node: leaf1
+      name: Vlan100                           # (C-1) interface -> name
+      attaches_to: {vlan: vlan-100}           # (C-2) 短縮形廃止 — どちらのノードも同じ書き方
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+    - id: leaf2-vlan100
+      node: leaf2
+      name: Vlan100
+      attaches_to: {vlan: vlan-100}
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+
+    - id: border1-po1
+      node: border1
+      name: Port-channel1
+      attaches_to: {lag: lag-border1-po1}
+      ip: 10.100.0.1/30
+      vrf: vrf-default
+    - id: border1-po1-3001
+      node: border1
+      name: Port-channel1.3001
+      attaches_to: {subinterface: subif-border1-po1-3001}
+      ip: 10.200.0.1/30
+      vrf: vrf-tenant-a
+    - id: leaf1-swp51-l3
+      node: leaf1
+      name: swp51
+      attaches_to: {interface: leaf1-swp51}
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+
+# ====================================================================
+# a_enterprise_two_sites.yaml 由来 (抜粋)
+# ====================================================================
+# layer3:
+#   interfaces:
+#     # SVI は 2 ノードで同じ書き方 (短縮形がないので非対称が消える)
+#     - id: hq-core1-vlan100
+#       node: hq-core1
+#       name: Vlan100
+#       attaches_to: {vlan: vlan-100}
+#       ip: 172.16.100.2/24
+#       ipv6: 2001:db8:100::2/64
+#       gateway_redundancy:
+#         - {mode: vrrp, group_id: 100, vip: 172.16.100.1, priority: 110}
+#         - {mode: vrrp, group_id: 100, vip: "fe80::1",   priority: 110}
+#     - id: hq-core2-vlan100
+#       node: hq-core2
+#       name: Vlan100
+#       attaches_to: {vlan: vlan-100}
+#       ip: 172.16.100.3/24
+#       ipv6: 2001:db8:100::3/64
+#       gateway_redundancy:
+#         - {mode: vrrp, group_id: 100, vip: 172.16.100.1, priority: 90}
+#         - {mode: vrrp, group_id: 100, vip: "fe80::1",   priority: 90}
+#     - id: br-rtr-g0-10
+#       node: br-rtr
+#       name: Gi0/0.10
+#       attaches_to: {subinterface: subif-br-rtr-g0-10}
+#       ip: 192.168.10.1/24
+#
+# tunnel_interfaces は変化なし (source/destination_interface は L3 IF ID を取るだけ)

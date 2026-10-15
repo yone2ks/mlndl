@@ -1,0 +1,101 @@
+# Pass C 比較用 (1) — A案a: 現状維持
+#
+# 全参照を attaches_to: {interface: X} に統一する (ADR-0001 の 1 キー形式)。
+# L1 は b_evpn_dc_external_peer.yaml / a_enterprise_two_sites.yaml と同じ前提。
+# この版は現行スキーマで validate が通る。
+#
+# 参照は 2 本の試し書きの L2/L3 を並べてスキャンしやすくすることが目的。
+#
+ndl_version: "1.0"
+meta:
+  name: passc-case1-current
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ====================================================================
+# b_evpn_dc_external_peer.yaml 由来 (EVPN + routed LAG + subif)
+# ====================================================================
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {interface: lag-mlag-server1}       # LAG を指すが YAML からは L1 IF と区別できない
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,
+       vtep_source: leaf1-lo, members: [leaf1, leaf2]}
+    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-tenant-a, irb_mode: symmetric}
+  subinterfaces:
+    - {id: subif-border1-po1-3001, attaches_to: {interface: lag-border1-po1},
+       vlan_id: 3001, name: Port-channel1.3001}      # 親が LAG だが YAML だけ見ても判断不能
+
+layer3:
+  interfaces:
+    # 短縮形 SVI (interface: vlan-100 が layer2.vlans[vlan-100] を指す)
+    - id: leaf1-vlan100
+      node: leaf1
+      interface: vlan-100                            # 2 つの意味: 機器上の名前 かつ VLAN 参照
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+    # 正規形 SVI (機器名を残す場合)
+    - id: leaf2-vlan100
+      node: leaf2
+      interface: Vlan100                             # 機器名 (参照しない)
+      attaches_to: {interface: vlan-100}             # VLAN 参照
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+
+    # routed LAG に L3 を載せる
+    - id: border1-po1
+      node: border1
+      interface: Port-channel1
+      attaches_to: {interface: lag-border1-po1}      # LAG 参照 (キーは interface のまま)
+      ip: 10.100.0.1/30
+      vrf: vrf-default
+    # サブ IF に L3 を載せる
+    - id: border1-po1-3001
+      node: border1
+      interface: Port-channel1.3001
+      attaches_to: {interface: subif-border1-po1-3001}   # subif 参照 (キーは interface のまま)
+      ip: 10.200.0.1/30
+      vrf: vrf-tenant-a
+    # L1 IF (routed access)
+    - id: leaf1-swp51-l3
+      node: leaf1
+      interface: swp51
+      attaches_to: {interface: leaf1-swp51}          # L1 IF 参照
+      ip: 10.1.0.1/31
+      vrf: vrf-default
+
+# ====================================================================
+# a_enterprise_two_sites.yaml 由来 (MLAG + VRRP + router-on-a-stick + VTI)
+# ====================================================================
+# layer2 (VLAN は MLAG を 1 行で指す; サブ IF は L1 IF を指す)
+# ---------------------------------------------------------------------
+# vlans:
+#   - id: vlan-100
+#     vlan_id: 100
+#     trunk_ports: [{interface: lag-hq-mlag-host1}]     # LAG
+#   - id: vlan-10
+#     vlan_id: 10
+#     trunk_ports: [{node: br-sw1, interface: br-sw1-g1}]   # L1 IF (node 任意, 書けば照合)
+#     access_ports: [{node: br-sw1, interface: br-sw1-g10}]
+# subinterfaces:
+#   - {id: subif-br-rtr-g0-10, attaches_to: {interface: br-rtr-g0}, vlan_id: 10}  # L1 IF
+#
+# layer3:
+#   # 短縮形 SVI + VRRP dual stack
+#   - id: hq-core1-vlan100
+#     interface: vlan-100
+#     ip: 172.16.100.2/24
+#     ipv6: 2001:db8:100::2/64
+#     gateway_redundancy:
+#       - {mode: vrrp, group_id: 100, vip: 172.16.100.1, priority: 110}
+#       - {mode: vrrp, group_id: 100, vip: "fe80::1",   priority: 110}
+#   # サブ IF への L3
+#   - id: br-rtr-g0-10
+#     interface: Gi0/0.10
+#     attaches_to: {interface: subif-br-rtr-g0-10}
+#     ip: 192.168.10.1/24
+#   # tunnel は変化なし

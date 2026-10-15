@@ -22,3 +22,7 @@
 | M7 VLAN ポートの node の食い違い | error |
 | M8 サブ IF のタグと対向 VLAN の食い違い | 検出されない (ADR-0012 D3 の設計どおり) |
 | M9 anycast gateway の IP の食い違い | 検出されない → **2026-10-15 に検出規則を追加** (round4 E1)。現在は error |
+
+`a_` / `b_` / `c_` の 3 本は Pass C より前の形式 (`{interface: <LAG id>}`、L3 IF の `interface`、VLAN のポートの `node`) で書かれている。
+Pass C 後は旧形式として warning が出る (`--strict` では error)。評価時点の記録なので書き換えていない。
+`passc/` は Pass C の案比較で、仮構文を含む (採用した形は `03_c_no_shortform.yaml` に近い)。

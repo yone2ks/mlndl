@@ -1,6 +1,6 @@
 # ADR-0011: layer3 データプレーンの確定
 
-- **Status**: Draft — **D11 の完了条件をすべて満たした (2026-10-04)**。実装 (D3〜D7・D9・D10) は 2026-10-01、ADR-0005 への反映 (D8) は 2026-10-04。Pass B 実施済み ([round4-evaluation](../evaluations/round4-evaluation.md))、Pass C は未実施
+- **Status**: Superseded by [0011](../0011-layer3-data-plane.md) (ラウンド4 Pass C, 2026-10-15)。以下は Pass A の記録として残す。 元の Status: Draft — **D11 の完了条件をすべて満たした (2026-10-04)**。実装 (D3〜D7・D9・D10) は 2026-10-01、ADR-0005 への反映 (D8) は 2026-10-04。Pass B 実施済み ([round4-evaluation](../evaluations/round4-evaluation.md))、Pass C は未実施
 - **Date**: 2026-09-20
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A r2 (初回策定 → 5 エージェントレビュー反映。差分は末尾「r1 からの変更」)

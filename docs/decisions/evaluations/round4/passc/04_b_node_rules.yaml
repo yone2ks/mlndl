@@ -1,0 +1,82 @@
+# 仮構文 — Pass C 比較用 (4): node 規則の対称化
+#
+# 現状は非対称 (評価メモ B):
+#   subinterface: node を持たない (書くと error)   — 親の L1 IF/LAG から導出
+#   VLAN の trunk/access ports: node は任意 (書けば照合)、MLAG では禁止
+#
+# 選択肢:
+#   (4-a) subif にも node を任意で書けるようにする (VLAN のポートと揃える)
+#   (4-b) VLAN のポートからも node を禁止する (subif と揃える)
+#
+# 「ノードごとに 1 つの実体か」で分けると説明は可能だが、ADR に書かれていない。
+#
+# 現行スキーマでは (4-a) は Subinterface.node が extra で error。
+# (4-b) は VLAN のポートで node を書く既存 fixture が壊れる。
+#
+ndl_version: "1.0"
+meta:
+  name: passc-case4-node-symmetry
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ====================================================================
+# (4-a) subif に node を任意で書けるようにする版 (「書ける」側に揃える)
+# ====================================================================
+# a_enterprise_two_sites.yaml の抜粋。br-rtr のサブ IF に node を書いて照合させる。
+layer2:
+  subinterfaces:
+    # 現状: node を書くと error
+    # - {id: subif-br-rtr-g0-10, attaches_to: {interface: br-rtr-g0}, vlan_id: 10}
+    # 4-a 案: node は任意。書けば attaches_to の L1 IF の node と照合する
+    - id: subif-br-rtr-g0-10
+      node: br-rtr                          # 任意。書けば照合
+      attaches_to: {interface: br-rtr-g0}
+      vlan_id: 10
+      name: Gi0/0.10
+    - id: subif-br-rtr-g0-20
+      # node は省略可。省略すれば親から導出
+      attaches_to: {interface: br-rtr-g0}
+      vlan_id: 20
+      name: Gi0/0.20
+
+    # routed LAG 上のサブ IF (border1-po1 系)。
+    # 親が MLAG なら node を書けない (VLAN のポートと同じ規則)
+    - id: subif-border1-po1-3001
+      attaches_to: {interface: lag-border1-po1}
+      # node: border1   # 書いても OK (LACP なので単一ノードで導出可能)
+      vlan_id: 3001
+      name: Port-channel1.3001
+
+  # VLAN のポート側は現状と同じ (node 任意)
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {interface: lag-mlag-server1}     # MLAG — node は書けない
+    - id: vlan-10
+      vlan_id: 10
+      trunk_ports:
+        - {node: br-sw1, interface: br-sw1-g1}
+      access_ports:
+        - {node: br-sw1, interface: br-sw1-g10}
+
+# ====================================================================
+# (4-b) VLAN のポートからも node を禁止する版 (「持たない」側に揃える)
+# ====================================================================
+# layer2:
+#   vlans:
+#     - id: vlan-100
+#       vlan_id: 100
+#       trunk_ports:
+#         - {interface: lag-mlag-server1}
+#     - id: vlan-10
+#       vlan_id: 10
+#       trunk_ports:
+#         - {interface: br-sw1-g1}        # node を書くと error (親の L1 IF から導出)
+#       access_ports:
+#         - {interface: br-sw1-g10}
+#   subinterfaces:
+#     - {id: subif-br-rtr-g0-10, attaches_to: {interface: br-rtr-g0}, vlan_id: 10}
+#
+# 利点: 書き手は「どのエンティティでも node は書かない」で統一できる。
+# 欠点: 既存 fixture の多くが書き換え必要 (現 YAML は {node: X, interface: Y} 併記が主流)。
+#       書き手が「どのノードの trunk か」を YAML 1 行で読めなくなる (grep しにくい)。
