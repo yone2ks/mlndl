@@ -48,6 +48,6 @@ layer2:
     - id: vlan-100
       vlan_id: 100
       trunk_ports:
-        - {node: tor-sw1, interface: tor-sw1-eth1}
+        - {interface: tor-sw1-eth1}
       # access_ports は不要 (VM vNIC は bridge 配下、ToR trunk のみ書く)
       # bridge.tag_vlan = 100 が vlan-100 と暗黙にバインド (validator で参照解決)

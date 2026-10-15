@@ -38,8 +38,8 @@ layer1:
     - {id: leaf2-swp1, node: leaf2, name: swp1}
 layer2:
   vlans:
-    - {id: vlan-100, vlan_id: 100, trunk_ports: [{node: leaf1, interface: leaf1-swp1}]}
-    - {id: vlan-200, vlan_id: 200, trunk_ports: [{node: leaf1, interface: leaf1-swp1}]}
+    - {id: vlan-100, vlan_id: 100, trunk_ports: [{interface: leaf1-swp1}]}
+    - {id: vlan-200, vlan_id: 200, trunk_ports: [{interface: leaf1-swp1}]}
 """
 
 
@@ -53,87 +53,122 @@ def _l3(interfaces: str, extra: str = "") -> str:
 
 class TestAddressing:
     def test_dual_stack_parses(self):
-        t = _topo(_l3("    - {id: l1, node: leaf1, interface: lo, ip: 10.0.0.1/32, ipv6: 2001:db8::1/128}\n"))
+        t = _topo(_l3("    - {id: l1, node: leaf1, name: lo, ip: 10.0.0.1/32, ipv6: 2001:db8::1/128}\n"))
         iface = t.layer3.interfaces[0]
         assert str(iface.ip) == "10.0.0.1/32"
         assert str(iface.ipv6) == "2001:db8::1/128"
 
     def test_ipv6_only_is_valid(self):
-        assert _errors(_l3("    - {id: l1, node: leaf1, interface: lo, ipv6: 2001:db8::1/128}\n")) == []
+        assert _errors(_l3("    - {id: l1, node: leaf1, name: lo, ipv6: 2001:db8::1/128}\n")) == []
 
     def test_no_address_is_valid(self):
         """unnumbered や L2 専用の IF があるため、ip / ipv6 とも未指定を許す"""
-        assert _errors(_l3("    - {id: l1, node: leaf1, interface: swp9}\n")) == []
+        assert _errors(_l3("    - {id: l1, node: leaf1, name: swp9}\n")) == []
 
     def test_ipv6_in_ip_points_to_ipv6_field(self):
-        msg = _parse_error(_l3("    - {id: l1, node: leaf1, interface: lo, ip: '2001:db8::1/64'}\n"))
+        msg = _parse_error(_l3("    - {id: l1, node: leaf1, name: lo, ip: '2001:db8::1/64'}\n"))
         assert "ipv6 に書いてください" in msg
 
     @pytest.mark.parametrize("bad", ["not-an-ip-address", "10.0.0.1/33", "300.0.0.1/24"])
     def test_invalid_ipv4_is_rejected(self, bad):
         """F2 / F4: 旧実装では validate も export も通っていた"""
-        _parse_error(_l3(f"    - {{id: l1, node: leaf1, interface: lo, ip: '{bad}'}}\n"))
+        _parse_error(_l3(f"    - {{id: l1, node: leaf1, name: lo, ip: '{bad}'}}\n"))
 
     def test_ipv4_in_ipv6_is_rejected(self):
-        _parse_error(_l3("    - {id: l1, node: leaf1, interface: lo, ipv6: 10.0.0.1/32}\n"))
+        _parse_error(_l3("    - {id: l1, node: leaf1, name: lo, ipv6: 10.0.0.1/32}\n"))
 
 
 # ---------------------------------------------------------------------------
-# D3: SVI の参照は attaches_to に一本化
+# D3: 機器上の名前は name、参照は attaches_to (SVI は {vlan:})
 # ---------------------------------------------------------------------------
 
 class TestSviReference:
-    def test_shorthand_resolves_to_vlan(self):
-        assert _errors(_l3("    - {id: s1, node: leaf1, interface: vlan-100, ip: 192.168.100.1/24}\n")) == []
+    def test_svi_attaches_to_vlan(self):
+        r = validate_all(_topo(_l3(
+            "    - {id: s1, node: leaf1, name: Vlan100, attaches_to: {vlan: vlan-100}, ip: 192.168.100.1/24}\n"
+        )))
+        assert r.errors == [] and r.warnings == []
 
-    def test_shorthand_to_undefined_vlan_is_error(self):
-        """F3: 旧実装は interface: vlan-999 を参照解決していなかった"""
-        errs = _errors(_l3("    - {id: s1, node: leaf1, interface: vlan-999}\n"))
-        assert any("vlan-999" in e and "定義されていません" in e for e in errs)
+    def test_undefined_vlan_is_error(self):
+        errs = _errors(_l3("    - {id: s1, node: leaf1, name: Vlan999, attaches_to: {vlan: vlan-999}}\n"))
+        assert len(errs) == 1 and "vlan-999" in errs[0] and "未定義の VLAN" in errs[0]
 
-    def test_attaches_to_vlan_is_accepted(self):
-        """F3: ADR-0005 D2-2 の正規形。旧実装では「未定義のインターフェース」で error になっていた"""
-        assert _errors(_l3(
-            "    - {id: s1, node: leaf1, interface: Vlan100, attaches_to: {interface: vlan-100}}\n"
-        )) == []
+    def test_wrong_key_gets_a_hint(self):
+        """{lag: vlan-100} のようなキーの取り違えには、正しい種類を添える"""
+        errs = _errors(_l3("    - {id: s1, node: leaf1, name: x, attaches_to: {lag: vlan-100}}\n"))
+        assert len(errs) == 1 and "{vlan: vlan-100}" in errs[0]
 
     def test_l1_attaches_to_cannot_point_at_vlan(self):
-        """VLAN を参照先として許すのは L3Interface だけ"""
+        """VLAN を参照先として許すのは L3Interface だけ (ADR-0001 D8)"""
         body = BASE.replace(
             "    - {id: leaf2-swp1, node: leaf2, name: swp1}",
-            "    - {id: leaf2-swp1, node: leaf2, name: swp1, attaches_to: {interface: vlan-100}}",
+            "    - {id: leaf2-swp1, node: leaf2, name: swp1, attaches_to: {vlan: vlan-100}}",
         )
-        assert any("vlan-100" in e for e in _errors(body))
+        assert "ADR-0001 D8" in _parse_error(body)
 
-    def test_shorthand_and_attaches_to_mismatch_is_error(self):
-        errs = _errors(_l3(
-            "    - {id: s1, node: leaf1, interface: vlan-100, attaches_to: {interface: vlan-200}}\n"
-        ))
-        assert any("食い違って" in e for e in errs)
+    @pytest.mark.parametrize("key", ["node: leaf1", "link: link-x"])
+    def test_l3_attach_keys(self, key):
+        msg = _parse_error(_l3(f"    - {{id: s1, node: leaf1, name: x, attaches_to: {{{key}}}}}\n"))
+        assert "ADR-0001 D8" in msg
 
-    def test_device_style_name_without_attaches_to_warns(self):
-        r = validate_all(_topo(_l3("    - {id: s1, node: leaf1, interface: Vlan100}\n")))
+    def test_svi_like_name_without_attaches_to_warns(self):
+        r = validate_all(_topo(_l3("    - {id: s1, node: leaf1, name: Vlan100}\n")))
         assert r.errors == []
         assert [w.path for w in r.warnings] == ["layer3.interfaces[0].attaches_to"]
 
-    def test_normalization_is_not_written_back(self):
-        """短縮形を attaches_to に書き戻すと YAML の往復で入力にないキーが現れる"""
-        t = _topo(_l3("    - {id: s1, node: leaf1, interface: vlan-100}\n"))
-        assert t.layer3.interfaces[0].attaches_to is None
-        assert "attaches_to" not in yaml_exporter.export(t)
-
     @pytest.mark.parametrize("key,hint", [("vlan", "attaches_to"), ("fhrp", "gateway_redundancy")])
-    def test_legacy_keys_point_to_replacement(self, key, hint):
+    def test_removed_keys_point_to_replacement(self, key, hint):
         value = "vlan-100" if key == "vlan" else "[{protocol: vrrp, group_id: 1, vip: 192.168.100.254}]"
-        msg = _parse_error(_l3(f"    - {{id: s1, node: leaf1, interface: vlan-100, {key}: {value}}}\n"))
+        msg = _parse_error(_l3(f"    - {{id: s1, node: leaf1, name: Vlan100, {key}: {value}}}\n"))
         assert hint in msg and "ADR-0011" in msg
 
-    def test_legacy_protocol_key_points_to_mode(self):
+    def test_removed_protocol_key_points_to_mode(self):
         msg = _parse_error(_l3(
-            "    - id: s1\n      node: leaf1\n      interface: vlan-100\n"
+            "    - id: s1\n      node: leaf1\n      name: Vlan100\n"
             "      gateway_redundancy: [{protocol: vrrp, group_id: 1, vip: 192.168.100.254}]\n"
         ))
         assert "mode に改名" in msg
+
+
+class TestLegacyInterfaceKey:
+    """旧形式は ndl_version 1.x の間だけ受け付け、新形式に読み替えて warning を出す (ADR-0011 D10)"""
+
+    def test_interface_key_becomes_name(self):
+        t = _topo(_l3("    - {id: s1, node: leaf1, interface: swp2, attaches_to: {interface: leaf1-swp2}}\n"))
+        assert t.layer3.interfaces[0].name == "swp2"
+        r = validate_all(t)
+        assert r.errors == []
+        assert [w.path for w in r.warnings] == ["layer3.interfaces[0].name"]
+        assert "name に改名" in r.warnings[0].message
+
+    def test_shorthand_becomes_vlan_reference(self):
+        t = _topo(_l3("    - {id: s1, node: leaf1, interface: vlan-100}\n"))
+        iface = t.layer3.interfaces[0]
+        assert (iface.name, iface.attaches_to.kind, iface.attaches_to.target) == ("vlan-100", "vlan", "vlan-100")
+        r = validate_all(t)
+        assert r.errors == [] and len(r.warnings) == 1
+        assert "attaches_to: {vlan: vlan-100}" in r.warnings[0].message
+
+    def test_shorthand_to_undefined_vlan_is_error(self):
+        errs = _errors(_l3("    - {id: s1, node: leaf1, interface: vlan-999}\n"))
+        assert len(errs) == 1 and "未定義の VLAN 'vlan-999'" in errs[0]
+
+    def test_interface_key_for_vlan_is_warning(self):
+        r = validate_all(_topo(_l3("    - {id: s1, node: leaf1, name: Vlan100, attaches_to: {interface: vlan-100}}\n")))
+        assert r.errors == []
+        assert [w.path for w in r.warnings] == ["layer3.interfaces[0].attaches_to.interface"]
+
+    def test_both_interface_and_name_is_error(self):
+        msg = _parse_error(_l3("    - {id: s1, node: leaf1, interface: swp2, name: swp2}\n"))
+        assert "name だけ" in msg
+
+    def test_export_writes_new_form(self):
+        """エクスポーターは新形式で書き出すので、旧形式の移行にも使える"""
+        out = yaml_exporter.export(_topo(_l3("    - {id: s1, node: leaf1, interface: vlan-100}\n")))
+        assert "interface: vlan-100" not in out
+        assert "name: vlan-100" in out and "vlan: vlan-100" in out
+        r = validate_all(parse(out))
+        assert r.errors == [] and r.warnings == []
 
 
 # ---------------------------------------------------------------------------
@@ -143,22 +178,14 @@ class TestSviReference:
 class TestSilentContradictions:
     def test_l3_attaches_to_other_nodes_interface(self):
         errs = _errors(_l3(
-            "    - {id: r1, node: leaf1, interface: swp1, attaches_to: {interface: leaf2-swp1}}\n"
+            "    - {id: r1, node: leaf1, name: swp1, attaches_to: {interface: leaf2-swp1}}\n"
         ))
         assert any("leaf2" in e and "のものではありません" in e for e in errs)
 
-    def test_trunk_port_on_other_nodes_interface(self):
-        body = BASE.replace(
-            "{id: vlan-200, vlan_id: 200, trunk_ports: [{node: leaf1, interface: leaf1-swp1}]}",
-            "{id: vlan-200, vlan_id: 200, trunk_ports: [{node: leaf1, interface: leaf2-swp1}]}",
-        )
-        errs = _errors(body)
-        assert any("trunk_ports[0].interface" in e and "leaf2" in e for e in errs)
-
     def test_duplicate_node_interface(self):
         errs = _errors(_l3(
-            "    - {id: a, node: leaf1, interface: lo, ip: 10.0.0.1/32}\n"
-            "    - {id: b, node: leaf1, interface: lo, ip: 10.0.0.2/32}\n"
+            "    - {id: a, node: leaf1, name: lo, ip: 10.0.0.1/32}\n"
+            "    - {id: b, node: leaf1, name: lo, ip: 10.0.0.2/32}\n"
         ))
         assert any("重複して定義" in e for e in errs)
 
@@ -177,7 +204,7 @@ layer3:
         assert {"layer2.vxlan[0].vrf", "layer2.vxlan[1].vrf"} <= paths
 
     def test_vtep_source_node_not_in_members(self):
-        body = _l3("    - {id: leaf2-lo, node: leaf2, interface: lo, ip: 10.0.0.2/32}\n").replace(
+        body = _l3("    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}\n").replace(
             "layer3:",
             "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,"
             " vtep_source: leaf2-lo, members: [leaf1]}\nlayer3:",
@@ -192,7 +219,7 @@ layer3:
 def _svi(gw: str, ip: str = "ip: 192.168.100.2/24", ipv6: str = "") -> str:
     extra = f"\n      {ipv6}" if ipv6 else ""
     return _l3(
-        f"    - id: s1\n      node: leaf1\n      interface: vlan-100\n      {ip}{extra}\n"
+        f"    - id: s1\n      node: leaf1\n      name: Vlan100\n      attaches_to: {{vlan: vlan-100}}\n      {ip}{extra}\n"
         f"      gateway_redundancy:\n{gw}"
     )
 
@@ -248,8 +275,8 @@ class TestGatewayRedundancy:
 # ---------------------------------------------------------------------------
 
 TUNNEL_BASE = _l3(
-    "    - {id: leaf1-wan, node: leaf1, interface: swp2, ip: 203.0.113.1/30}\n"
-    "    - {id: leaf2-wan, node: leaf2, interface: swp1, ip: 203.0.113.2/30}\n"
+    "    - {id: leaf1-wan, node: leaf1, name: swp2, ip: 203.0.113.1/30}\n"
+    "    - {id: leaf2-wan, node: leaf2, name: swp1, ip: 203.0.113.2/30}\n"
 )
 
 
@@ -319,7 +346,7 @@ layer3:
   interfaces:
     - id: n1-lo
       node: n1
-      interface: lo
+      name: lo
       description: d
 """)
     assert validate(t) == []
@@ -333,9 +360,9 @@ class TestExport:
     def test_cytoscape_serializes_typed_addresses(self):
         """IPv4Interface はそのままでは json.dumps できない (TypeError)"""
         t = _topo(_l3(
-            "    - {id: l1, node: leaf1, interface: lo, ip: 10.0.0.1/32, ipv6: 2001:db8::1/128}\n"
-            "    - {id: s1, node: leaf1, interface: Vlan100, ip: 192.168.100.1/24,"
-            " ipv6: 2001:db8:100::1/64, attaches_to: {interface: vlan-100}}\n"
+            "    - {id: l1, node: leaf1, name: lo, ip: 10.0.0.1/32, ipv6: 2001:db8::1/128}\n"
+            "    - {id: s1, node: leaf1, name: Vlan100, ip: 192.168.100.1/24,"
+            " ipv6: 2001:db8:100::1/64, attaches_to: {vlan: vlan-100}}\n"
         ))
         out = json.loads(cytoscape.export_json(t))
         leaf1 = next(n["data"] for n in out["nodes"] if n["data"]["id"] == "leaf1")
@@ -357,7 +384,7 @@ class TestExport:
         """D11: 往復で model_dump() が一致すること"""
         t1 = _topo(_tun(T1, T2).replace(
             "    - {id: leaf1-wan,",
-            "    - id: s1\n      node: leaf1\n      interface: vlan-100\n"
+            "    - id: s1\n      node: leaf1\n      name: Vlan100\n      attaches_to: {vlan: vlan-100}\n"
             "      ip: 192.168.100.2/24\n      ipv6: 2001:db8:100::2/64\n"
             "      gateway_redundancy:\n"
             "        - {mode: vrrp, group_id: 10, vip: 192.168.100.1}\n"
@@ -376,11 +403,11 @@ class TestExport:
 def _anycast_pair(ip2: str = "192.168.100.1/24", mac2: str = "44:38:39:be:ef:aa",
                   ipv6_2: str = "2001:db8:100::1/64", vlan2: str = "vlan-100") -> str:
     return _l3(
-        "    - id: leaf1-vlan-100\n      node: leaf1\n      interface: vlan-100\n"
+        "    - id: leaf1-vlan-100\n      node: leaf1\n      name: Vlan100\n      attaches_to: {vlan: vlan-100}\n"
         "      ip: 192.168.100.1/24\n      ipv6: 2001:db8:100::1/64\n"
         "      gateway_redundancy: [{mode: anycast_gateway, anycast_mac: '44:38:39:be:ef:aa'}]\n"
-        f"    - id: leaf2-svi\n      node: leaf2\n      interface: Vlan100\n"
-        f"      attaches_to: {{interface: {vlan2}}}\n      ip: {ip2}\n      ipv6: {ipv6_2}\n"
+        f"    - id: leaf2-svi\n      node: leaf2\n      name: Vlan100\n"
+        f"      attaches_to: {{vlan: {vlan2}}}\n      ip: {ip2}\n      ipv6: {ipv6_2}\n"
         f"      gateway_redundancy: [{{mode: anycast_gateway, anycast_mac: '{mac2}'}}]\n"
     )
 
@@ -409,9 +436,9 @@ class TestAnycastConsistency:
     def test_vrrp_svis_are_not_compared(self):
         """VRRP では各ノードが別の実 IP を持つのが正しい"""
         body = _l3(
-            "    - {id: s1, node: leaf1, interface: vlan-100, ip: 192.168.100.2/24,"
+            "    - {id: s1, node: leaf1, name: vlan-100, ip: 192.168.100.2/24,"
             " gateway_redundancy: [{mode: vrrp, group_id: 10, vip: 192.168.100.1}]}\n"
-            "    - {id: s2, node: leaf2, interface: Vlan100, attaches_to: {interface: vlan-100},"
+            "    - {id: s2, node: leaf2, name: Vlan100, attaches_to: {vlan: vlan-100},"
             " ip: 192.168.100.3/24, gateway_redundancy: [{mode: vrrp, group_id: 10, vip: 192.168.100.1}]}\n"
         )
         assert _errors(body) == []
@@ -422,7 +449,7 @@ class TestTunnelGaps:
         """E2: 対向に自分のノードの IF を指すと、エクスポーターは辺を黙って捨てていた"""
         body = TUNNEL_BASE.replace(
             "    - {id: leaf2-wan,",
-            "    - {id: leaf1-lo, node: leaf1, interface: lo, ip: 10.0.0.1/32}\n    - {id: leaf2-wan,",
+            "    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}\n    - {id: leaf2-wan,",
         ) + "  tunnel_interfaces:\n" + (
             "    - {id: tunnel-x, node: leaf1, type: gre, source: leaf1-wan, destination_interface: leaf1-lo}\n"
         )
@@ -439,8 +466,8 @@ class TestTunnelGaps:
 
     def test_outer_af_mismatch_with_destination_interface(self):
         body = TUNNEL_BASE.replace(
-            "    - {id: leaf2-wan, node: leaf2, interface: swp1, ip: 203.0.113.2/30}",
-            "    - {id: leaf2-wan, node: leaf2, interface: swp1, ipv6: '2001:db8:f::2/64'}",
+            "    - {id: leaf2-wan, node: leaf2, name: swp1, ip: 203.0.113.2/30}",
+            "    - {id: leaf2-wan, node: leaf2, name: swp1, ipv6: '2001:db8:f::2/64'}",
         ) + "  tunnel_interfaces:\n" + T1
         assert [e.path for e in validate(_topo(body))] == ["layer3.tunnel_interfaces[0].source"]
 
@@ -453,16 +480,51 @@ class TestTunnelGaps:
         assert _errors(body) == []
 
 
-class TestShorthandMismatchWithNonVlan:
-    def test_shorthand_with_l1_attaches_to_is_error(self):
-        """E4: interface: vlan-100 は VLAN の短縮形として読まれる。L1 IF を指す attaches_to と食い違う"""
-        errs = validate(_topo(_l3(
-            "    - {id: s1, node: leaf1, interface: vlan-100, attaches_to: {interface: leaf1-swp2}}\n"
-        )))
-        assert [e.path for e in errs] == ["layer3.interfaces[0].attaches_to"]
-        assert "leaf1-swp2" in errs[0].message
+# ---------------------------------------------------------------------------
+# ラウンド4 Pass C で採用した検出 (E8 info / E9 warning / E10 warning)
+# ---------------------------------------------------------------------------
 
-    def test_shorthand_with_same_vlan_is_fine(self):
-        assert _errors(_l3(
-            "    - {id: s1, node: leaf1, interface: vlan-100, attaches_to: {interface: vlan-100}}\n"
-        )) == []
+class TestPassCChecks:
+    def test_one_sided_tunnel_is_info(self):
+        """E8: 対向がトポロジー内なら、逆向きのトンネルも書くのが正"""
+        r = validate_all(_topo(_tun(T1)))
+        assert r.errors == [] and r.warnings == []
+        assert [n.path for n in r.notes] == ["layer3.tunnel_interfaces[0]"]
+        assert "leaf2" in r.notes[0].message
+
+    def test_tunnel_pair_has_no_note(self):
+        assert validate_all(_topo(_tun(T1, T2))).notes == []
+
+    def test_vip_without_ip_is_warning(self):
+        """E9: IF に IPv4 がないと VIP のサブネットが決まらない"""
+        r = validate_all(_topo(_svi("        - {mode: vrrp, group_id: 10, vip: 192.168.100.1}\n", ip="ipv6: 2001:db8:100::2/64")))
+        assert r.errors == []
+        assert [w.path for w in r.warnings] == ["layer3.interfaces[0].gateway_redundancy[0].vip"]
+
+    def test_ipv6_vip_without_ip_is_fine(self):
+        r = validate_all(_topo(_svi("        - {mode: vrrp, group_id: 10, vip: 'fe80::1'}\n", ip="ipv6: 2001:db8:100::2/64")))
+        assert r.errors == [] and r.warnings == []
+
+    def _vni(self, members: str) -> str:
+        return _l3("    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}\n").replace(
+            "layer3:",
+            "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,"
+            f" vtep_source: leaf1-lo, members: [{members}]}}\nlayer3:",
+        )
+
+    def test_vni_member_without_vlan_port_is_warning(self):
+        """E10: leaf2 は VNI のメンバーだが vlan-100 のポートを持たない"""
+        r = validate_all(_topo(self._vni("leaf1, leaf2")))
+        assert r.errors == []
+        assert [w.path for w in r.warnings] == ["layer2.vxlan[0].members[1]"]
+
+    def test_vni_members_matching_vlan_ports(self):
+        r = validate_all(_topo(self._vni("leaf1")))
+        assert r.errors == [] and r.warnings == []
+
+    def test_vlan_without_ports_is_not_judged(self):
+        body = self._vni("leaf1, leaf2").replace(
+            "{id: vlan-100, vlan_id: 100, trunk_ports: [{interface: leaf1-swp1}]}",
+            "{id: vlan-100, vlan_id: 100}",
+        )
+        assert validate_all(_topo(body)).warnings == []

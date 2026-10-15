@@ -3,7 +3,7 @@
 # - ip は IPv4、ipv6 は IPv6 (いずれも単数)
 # - VRRP は 1 インスタンス = 単一 AF (RFC 5798)。デュアルスタックでは 2 エントリになる
 # - IPv6 の VIP はリンクローカル (RFC 5798 §5.2.9 / §6.1)
-# - SVI は短縮形 (interface: vlan-N) と正規形 (attaches_to) の両方を使っている
+# - SVI は attaches_to: {vlan: <VLAN id>} で VLAN を指し、name に機器上の名前を書く (ADR-0011 D3)
 ndl_version: "1.0"
 
 meta:
@@ -33,12 +33,12 @@ layer2:
       vlan_id: 10
       name: users
       trunk_ports:
-        - {node: dist1, interface: dist1-te1}
-        - {node: dist1, interface: dist1-te2}
-        - {node: dist2, interface: dist2-te1}
-        - {node: dist2, interface: dist2-te2}
-        - {node: acc1, interface: acc1-te1}
-        - {node: acc1, interface: acc1-te2}
+        - {interface: dist1-te1}
+        - {interface: dist1-te2}
+        - {interface: dist2-te1}
+        - {interface: dist2-te2}
+        - {interface: acc1-te1}
+        - {interface: acc1-te2}
 
 layer3:
   vrfs:
@@ -46,21 +46,21 @@ layer3:
   interfaces:
     - id: dist1-lo
       node: dist1
-      interface: lo
+      name: lo
       ip: 10.255.0.1/32
       ipv6: 2001:db8:ffff::1/128
       vrf: vrf-default
     - id: dist2-lo
       node: dist2
-      interface: lo
+      name: lo
       ip: 10.255.0.2/32
       ipv6: 2001:db8:ffff::2/128
       vrf: vrf-default
 
-    # 短縮形: interface: vlan-10 が layer2.vlans[vlan-10] を指す
     - id: dist1-vlan-10
       node: dist1
-      interface: vlan-10
+      name: Vlan10
+      attaches_to: {vlan: vlan-10}
       ip: 172.16.10.2/24
       ipv6: 2001:db8:10::2/64
       vrf: vrf-default
@@ -69,11 +69,10 @@ layer3:
         - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
         - {mode: vrrp, group_id: 10, vip: "fe80::1", priority: 110}
 
-    # 正規形: 機器上の名前 (Vlan10) を保ったまま、VLAN を attaches_to で指す
     - id: dist2-vlan-10
       node: dist2
-      interface: Vlan10
-      attaches_to: {interface: vlan-10}
+      name: Vlan10
+      attaches_to: {vlan: vlan-10}
       ip: 172.16.10.3/24
       ipv6: 2001:db8:10::3/64
       vrf: vrf-default

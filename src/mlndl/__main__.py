@@ -26,6 +26,9 @@ def _load(path):
             loc = "".join(f"[{x}]" if isinstance(x, int) else f".{x}" for x in err["loc"]).lstrip(".")
             msg = err["msg"].removeprefix("Value error, ")
             print(f"ERROR    {loc}: {msg}", file=sys.stderr)
+        # スキーマを通らないとモデルができず、参照の整合性などの検査まで進めない (round4 E7)
+        print("NOTE     上の誤りはスキーマの段階で見つかったものです。直すと参照の整合性などの検査が"
+              "続けて実行され、ほかの誤りが見つかることがあります", file=sys.stderr)
         sys.exit(1)
     except ValueError as exc:  # サイズ上限・バージョン不一致など
         print(f"ERROR    {exc}", file=sys.stderr)

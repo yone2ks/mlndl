@@ -1,7 +1,8 @@
 """Layer 3 スキーマ定義 (VRF / L3Interface / GatewayRedundancy / TunnelInterface / RoutingAdjacency)
 
 設計決定:
-- ADR-0011 D3: SVI の参照手段は attaches_to に一本化。`interface: vlan-N` は短縮形
+- ADR-0011 D3: 機器上の名前は name、参照は attaches_to だけ。SVI は attaches_to: {vlan: <VLAN id>}。
+  旧 `interface` キーと短縮形 `interface: vlan-N` は ndl_version 1.x の間だけ受け付ける (D10)
 - ADR-0011 D4: fhrp → gateway_redundancy。mode を discriminator とする Tagged Union
 - ADR-0011 D5: ip は IPv4、ipv6 は IPv6。いずれも単数
 - ADR-0011 D6: トンネルは自己完結した TunnelInterface で表現する
@@ -14,12 +15,15 @@ import re
 from ipaddress import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from .layer1 import AttachesTo, AttachesToObj
+from .layer1 import L1_ATTACH_KEYS, AttachesTo, AttachesToObj, restrict_attach_keys
 
-# ADR-0011 D3: `interface` がこの形のときだけ、attaches_to を省略した短縮形として扱う
+# 旧形式 (ADR-0011 D10): `interface` がこの形で attaches_to がないものは、VLAN を指す短縮形だった
 VLAN_SHORTHAND = re.compile(r"^vlan-\d+$")
+
+# L3Interface の attaches_to に書けるキー (ADR-0001 D8)
+L3_ATTACH_KEYS = frozenset({"interface", "lag", "vlan", "subinterface"})
 
 _MAC_PATTERN = re.compile(r"^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$|^[0-9a-fA-F]{4}(\.[0-9a-fA-F]{4}){2}$")
 
@@ -134,69 +138,116 @@ GatewayRedundancy = Annotated[
 # ---------------------------------------------------------------------------
 
 class L3Interface(BaseModel):
-    """Layer 3 インターフェース（ループバック / SVI / ルーテッドポート）
+    """Layer 3 インターフェース（ループバック / SVI / ルーテッドポート / サブ IF / routed LAG）
 
-    - interface: 機器上の名前 (swp51 / Vlan100 / lo)。参照解決には使わない
-    - attaches_to: 唯一の参照手段。{interface: <L1 IF id>} または {interface: <VLAN id>}
-    - `interface` が `vlan-N` 形式で attaches_to が未指定の場合は、validator が
-      {interface: vlan-N} を指しているものとして解決する (短縮形。モデルには書き戻さない)
+    - name: 機器上の名前 (swp51 / Vlan100 / lo)。参照ではない
+    - attaches_to: 参照の唯一の手段。参照先の種類をキーで示す (ADR-0001 D8)。
+      {interface: <L1 IF>} / {lag: <LAG>} / {vlan: <VLAN>} / {subinterface: <サブ IF>}。
+      ループバックのように基盤を持たない L3 IF では省略する
+    - 旧形式 (`interface` キー、短縮形 `interface: vlan-N`) は ndl_version 1.x の間だけ受け付け、
+      新形式に読み替える。読み替えた内容は deprecations に残し、validator が warning にする (ADR-0011 D10)
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    node: str                       # layer1.nodes[].id を参照
-    interface: str                  # 機器上の名前
+    node: str                       # layer1.nodes[].id を参照 (ノードごとの実体なので必須。ADR-0005 D6)
+    name: str                       # 機器上の名前
     ip: IPv4Interface | None = None     # IPv4 (CIDR)
     ipv6: IPv6Interface | None = None   # IPv6 (CIDR)
     vrf: str | None = None          # layer3.vrfs[].id を参照
-    attaches_to: AttachesTo | None = None
+    attaches_to: AttachesToObj | None = None
     gateway_redundancy: list[GatewayRedundancy] = []
     description: str | None = None
 
-    @model_validator(mode="before")
+    _deprecations: list[tuple[str, str]] = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="wrap")
     @classmethod
-    def reject_legacy_keys(cls, data: Any) -> Any:
-        """ADR-0011 で廃止したキーに、移動先を示すエラーを返す"""
-        if not isinstance(data, dict):
-            return data
-        problems = []
-        if "vlan" in data:
-            problems.append(
-                "vlan は廃止されました。SVI は attaches_to: {interface: <VLAN id>} で書くか、"
-                "interface: vlan-N の短縮形を使ってください (ADR-0011 D3)"
+    def migrate_legacy(cls, data: Any, handler: Any) -> "L3Interface":
+        """廃止キーにはエラーを返し、旧形式は新形式に読み替える (ADR-0011 D10)"""
+        notes: list[tuple[str, str]] = []
+        if isinstance(data, dict):
+            _reject_removed_keys(data)
+            data, notes = _migrate_interface_key(data)
+        obj = handler(data)
+        obj._deprecations = notes
+        return obj
+
+    @field_validator("attaches_to", mode="before")
+    @classmethod
+    def object_form_only(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            raise ValueError(
+                "L3 インターフェースの attaches_to はオブジェクト形式で書いてください"
+                " (文字列はノード ID の糖衣構文です。ADR-0001 D3・D8)"
             )
-        if "fhrp" in data:
-            problems.append(
-                "fhrp は gateway_redundancy に改名されました。protocol は mode に、"
-                "anycast は anycast_gateway になります (ADR-0011 D4)"
-            )
-        for gw in data.get("gateway_redundancy") or []:
-            if isinstance(gw, dict) and "protocol" in gw and "mode" not in gw:
-                problems.append(
-                    "gateway_redundancy の protocol は mode に改名されました (ADR-0011 D4)"
-                )
-                break
-        if problems:
-            raise ValueError(" / ".join(problems))
-        return data
+        return v
+
+    @field_validator("attaches_to")
+    @classmethod
+    def l3_attach_keys(cls, v: Any) -> Any:
+        return restrict_attach_keys(v, L3_ATTACH_KEYS, "layer3.interfaces")
 
     @field_validator("ip", mode="before")
     @classmethod
     def ip_is_ipv4(cls, v: Any) -> Any:
         return _reject_ipv6_in_ip(v)
 
-    def attachment_ref(self) -> str | None:
-        """attaches_to.interface、または短縮形 `interface: vlan-N` が指す ID を返す。
+    @property
+    def deprecations(self) -> list[tuple[str, str]]:
+        """旧形式から読み替えた箇所 (フィールド名, メッセージ)"""
+        return list(self._deprecations)
 
-        参照先が L1 インターフェースか VLAN かは呼び出し側が ID 空間で判定する。
-        """
-        at = self.attaches_to
-        if isinstance(at, AttachesToObj):
-            return at.interface
-        if at is None and VLAN_SHORTHAND.match(self.interface):
-            return self.interface
-        return None
+    def attachment_ref(self) -> str | None:
+        """attaches_to が指す ID (なければ None)"""
+        return self.attaches_to.target if self.attaches_to is not None else None
+
+
+def _reject_removed_keys(data: dict) -> None:
+    """ADR-0011 で廃止したキーに、移動先を示すエラーを返す"""
+    problems = []
+    if "vlan" in data:
+        problems.append(
+            "vlan は廃止されました。SVI は attaches_to: {vlan: <VLAN id>} で書いてください (ADR-0011 D3)"
+        )
+    if "fhrp" in data:
+        problems.append(
+            "fhrp は gateway_redundancy に改名されました。protocol は mode に、"
+            "anycast は anycast_gateway になります (ADR-0011 D4)"
+        )
+    for gw in data.get("gateway_redundancy") or []:
+        if isinstance(gw, dict) and "protocol" in gw and "mode" not in gw:
+            problems.append("gateway_redundancy の protocol は mode に改名されました (ADR-0011 D4)")
+            break
+    if problems:
+        raise ValueError(" / ".join(problems))
+
+
+def _migrate_interface_key(data: dict) -> tuple[dict, list[tuple[str, str]]]:
+    """旧 `interface` キーを name に読み替える。短縮形 interface: vlan-N は VLAN 参照も補う"""
+    if "interface" not in data:
+        return data, []
+    if "name" in data:
+        raise ValueError(
+            "interface と name の両方が書かれています。interface は name に改名されたので、"
+            "name だけを書いてください (ADR-0011 D3)"
+        )
+    data = dict(data)
+    legacy = data.pop("interface")
+    data["name"] = legacy
+    if data.get("attaches_to") is None and isinstance(legacy, str) and VLAN_SHORTHAND.match(legacy):
+        data["attaches_to"] = {"vlan": legacy}
+        return data, [(
+            "name",
+            f"短縮形 interface: {legacy} は廃止予定です。name: <機器上の名前> と"
+            f" attaches_to: {{vlan: {legacy}}} に書き換えてください (ADR-0011 D3・D10)",
+        )]
+    return data, [(
+        "name",
+        "interface は name に改名されました (機器上の名前)。interface: を name: に"
+        "書き換えてください (ADR-0011 D3・D10)",
+    )]
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +315,11 @@ class RoutingAdjacency(BaseModel):
     from_: RoutingAdjEndpoint = Field(alias="from")  # Python 予約語回避
     to: RoutingAdjEndpoint
     attaches_to: AttachesTo | None = None
+
+    @field_validator("attaches_to")
+    @classmethod
+    def l1_attach_keys(cls, v: Any) -> Any:
+        return restrict_attach_keys(v, L1_ATTACH_KEYS, "layer3.routing_adjacencies")
 
 
 class L3Layer(BaseModel):

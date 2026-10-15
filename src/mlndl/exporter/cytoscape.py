@@ -54,8 +54,8 @@ def _interface_nodes(topology: MLNDLTopology) -> dict[str, list[str]]:
 
 
 def _port_nodes(pr, interface_nodes: dict[str, list[str]]) -> list[str]:
-    """PortRef が載るノード群。node は省略できるので interface から導出する (ADR-0013)"""
-    return interface_nodes.get(pr.interface) or ([pr.node] if pr.node else [])
+    """PortRef が載るノード群。ノードは interface / lag から導出する (ADR-0013 D2)"""
+    return interface_nodes.get(pr.target) or ([pr.node] if pr.node else [])
 
 
 # ---------------------------------------------------------------------------
@@ -81,24 +81,25 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     parent_nodes = _interface_nodes(topology)
     subifs = {si.id: si for si in topology.layer2.subinterfaces} if topology.layer2 else {}
     for si in subifs.values():
-        entry = {"id": si.id, "parent": si.attaches_to.interface, "vlan_id": si.vlan_id}
+        entry = {"id": si.id, "parent": si.attaches_to.target, "vlan_id": si.vlan_id}
         if si.name: entry["name"] = si.name
-        for nid in parent_nodes.get(si.attaches_to.interface, []):
+        for nid in parent_nodes.get(si.attaches_to.target, []):
             node_subifs[nid].append(entry)
     lag_ids = {lag.id for lag in topology.layer1.lag}
     if topology.layer3:
         for iface in topology.layer3.interfaces:
-            if iface.interface == "lo":
+            if iface.name == "lo":
                 if iface.ip:   lo_ip[iface.node]   = str(iface.ip)
                 if iface.ipv6: lo_ipv6[iface.node] = str(iface.ipv6)
             if iface.ip or iface.ipv6:
                 ref = iface.attachment_ref()
                 vlan = ref if ref in vlan_ids else None
                 subif = subifs.get(ref)
-                kind = ("loopback" if iface.interface == "lo"
+                kind = ("loopback" if iface.name == "lo"
                         else "svi" if vlan
                         else "subinterface" if subif else "routed")
-                entry: dict = {"interface": iface.interface, "kind": kind}
+                # 出力のキーは ndl-viz との互換のため "interface" のまま (中身は L3Interface.name)
+                entry: dict = {"interface": iface.name, "kind": kind}
                 if iface.ip:   entry["ip"]   = str(iface.ip)
                 if iface.ipv6: entry["ipv6"] = str(iface.ipv6)
                 if iface.vrf:  entry["vrf"]  = iface.vrf
@@ -279,7 +280,7 @@ def _export_l2_overlay(topology, if_to_name, elements):
 
     # VLAN セグメント情報を layer3.interfaces (SVI) からサブネット・VRF を抽出
     # key: vlan.id (例: "vlan-100") → {subnet, vrf}
-    # SVI の VLAN は attaches_to (または短縮形 interface: vlan-N) で解決する (ADR-0011 D3)。
+    # SVI の VLAN は attaches_to: {vlan:} で解決する (ADR-0011 D3)。
     # ip は型で検証済みなので、旧実装の try/except ValueError による握りつぶしは不要になった
     vlan_segment: dict[str, dict] = {}
     if topology.layer3:
@@ -319,11 +320,11 @@ def _export_l2_overlay(topology, if_to_name, elements):
         tagged: dict[str, list[str]] = {}
         untagged: dict[str, list[str]] = {}
         for pr in vlan.trunk_ports:
-            name = if_to_name.get(pr.interface, pr.interface)
+            name = if_to_name.get(pr.target, pr.target)
             for nid in _port_nodes(pr, interface_nodes):
                 (untagged if pr.native else tagged).setdefault(nid, []).append(name)
         for pr in vlan.access_ports:
-            name = if_to_name.get(pr.interface, pr.interface)
+            name = if_to_name.get(pr.target, pr.target)
             for nid in _port_nodes(pr, interface_nodes):
                 untagged.setdefault(nid, []).append(name)
         for node_id in {*tagged, *untagged}:

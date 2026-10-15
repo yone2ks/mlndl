@@ -173,10 +173,10 @@ layer2:
   vlans:
     - id: vlan-100
       vlan_id: 100
-      trunk_ports: [{node: leaf1, interface: leaf1-swp1}]
+      trunk_ports: [{interface: leaf1-swp1}]
     - id: vlan-100-dup
       vlan_id: 100
-      access_ports: [{node: leaf1, interface: leaf1-swp2}]
+      access_ports: [{interface: leaf1-swp2}]
 """)
         errors = validate(topo)
         assert len(errors) == 1
@@ -190,10 +190,10 @@ layer2:
   vlans:
     - id: vlan-100
       vlan_id: 100
-      trunk_ports: [{node: leaf1, interface: leaf1-swp1}]
+      trunk_ports: [{interface: leaf1-swp1}]
     - id: vlan-100-site-b
       vlan_id: 100
-      trunk_ports: [{node: leaf2, interface: leaf2-swp1}]
+      trunk_ports: [{interface: leaf2-swp1}]
 """)
         assert validate(topo) == []
 
@@ -204,8 +204,8 @@ layer2:
     - id: vlan-100
       vlan_id: 100
       trunk_ports:
-        - {node: leaf1, interface: leaf1-swp1}
-        - {node: leaf1, interface: leaf1-swp2}
+        - {interface: leaf1-swp1}
+        - {interface: leaf1-swp2}
 """)
         assert validate(topo) == []
 
@@ -244,7 +244,7 @@ class TestCliSeverity:
         f.write_text(
             'ndl_version: "1.0"\n'
             "layer3:\n  interfaces:\n"
-            "    - {id: s1, node: n1, interface: vlan-10, fhrp: []}\n"
+            "    - {id: s1, node: n1, name: Vlan10, fhrp: []}\n"
         )
         r = subprocess.run(
             [sys.executable, "-m", "mlndl", "validate", str(f)],
@@ -254,3 +254,5 @@ class TestCliSeverity:
         assert "Traceback" not in r.stderr
         assert "ERROR    layer3.interfaces[0]:" in r.stderr
         assert "gateway_redundancy" in r.stderr
+        # スキーマの誤りがあると後段の検査が走らないことを案内する (round4 E7)
+        assert "NOTE" in r.stderr and "続けて実行" in r.stderr

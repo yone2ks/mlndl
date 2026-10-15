@@ -1,4 +1,4 @@
-"""ADR-0013 VLAN の trunk_ports / access_ports から LAG を指すテスト"""
+"""ADR-0013 VLAN の trunk_ports / access_ports (L1 IF は {interface:}、LAG は {lag:}) のテスト"""
 
 from __future__ import annotations
 
@@ -54,14 +54,16 @@ def _errors(*vlans: str) -> list[str]:
 # スキーマ
 # ---------------------------------------------------------------------------
 
-def test_node_is_optional():
-    pr = _topo(_vlan(trunk="{interface: r1-eth1}")).layer2.vlans[0].trunk_ports[0]
-    assert (pr.interface, pr.node) == ("r1-eth1", None)
+def test_interface_or_lag():
+    pr = _topo(_vlan(trunk="{interface: r1-eth1}, {lag: lag-r3-po1}")).layer2.vlans[0].trunk_ports
+    assert [(p.interface, p.lag, p.target) for p in pr] == [
+        ("r1-eth1", None, "r1-eth1"), (None, "lag-r3-po1", "lag-r3-po1")]
 
 
-def test_interface_is_required():
+@pytest.mark.parametrize("port", ["{node: r1}", "{interface: r1-eth1, lag: lag-r3-po1}"])
+def test_exactly_one_of_interface_or_lag(port):
     with pytest.raises(pydantic.ValidationError):
-        _topo(_vlan(trunk="{node: r1}"))
+        _topo(_vlan(trunk=port))
 
 
 # ---------------------------------------------------------------------------
@@ -69,77 +71,56 @@ def test_interface_is_required():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("trunk", [
-    "{interface: lag-r3-po1}",                 # LACP, node なし
-    "{node: r3, interface: lag-r3-po1}",       # LACP, node あり (照合される)
-    "{interface: lag-mlag-a}",                 # MLAG は 1 エントリで両ノード
-    "{interface: lag-peer}",                   # peer-link も書ける
-    "{interface: r1-eth1}",                    # L1 IF も node を省略できる
-    "{node: r1, interface: r1-eth1}",          # 従来の書き方
+    "{lag: lag-r3-po1}",                       # LACP
+    "{lag: lag-mlag-a}",                       # MLAG は 1 エントリで両ノード
+    "{lag: lag-peer}",                         # peer-link も書ける
+    "{interface: r1-eth1}",                    # L1 IF
 ])
 def test_valid_trunk(trunk):
-    assert _errors(_vlan(trunk=trunk)) == []
+    r = validate_all(_topo(_vlan(trunk=trunk)))
+    assert r.errors == [] and r.warnings == []
 
 
 def test_lag_in_access_ports():
-    assert _errors(_vlan(access="{interface: lag-mlag-a}")) == []
-
-
-def test_no_warning_for_lag_reference():
-    r = validate_all(_topo(_vlan(trunk="{interface: lag-mlag-a}")))
-    assert r.errors == [] and r.warnings == []
+    assert _errors(_vlan(access="{lag: lag-mlag-a}")) == []
 
 
 # ---------------------------------------------------------------------------
 # error / warning
 # ---------------------------------------------------------------------------
 
-def test_mlag_with_node_is_error():
-    """MLAG は両ノードに効く。node を書くと片方だけに見えるので書かせない"""
-    errs = _errors(_vlan(trunk="{node: r1, interface: lag-mlag-a}"))
-    assert len(errs) == 1 and "MLAG" in errs[0] and "node" in errs[0]
-
-
-def test_lacp_on_other_node():
-    errs = _errors(_vlan(trunk="{node: r1, interface: lag-r3-po1}"))
-    assert len(errs) == 1 and "lag-r3-po1" in errs[0] and "r3" in errs[0]
-
-
-def test_l1_interface_on_other_node():
-    errs = _errors(_vlan(trunk="{node: r2, interface: r1-eth1}"))
-    assert len(errs) == 1 and "ADR-0011 D9" in errs[0]
-
-
-def test_undefined_node():
-    errs = _errors(_vlan(trunk="{node: nope, interface: r1-eth1}"))
-    assert any("nope" in e for e in errs)
-
-
-@pytest.mark.parametrize("ref", ["nope", "vlan-100"])
-def test_undefined_interface(ref):
-    """VLAN やサブ IF は VLAN のポートにならない。指せるのは L1 IF と LAG だけ"""
-    errs = _errors(_vlan(trunk=f"{{interface: {ref}}}"))
-    assert any("L1 インターフェースまたは LAG" in e and ref in e for e in errs)
+@pytest.mark.parametrize("port,hint", [
+    ("{interface: nope}", None),
+    ("{lag: nope}", None),
+    ("{interface: vlan-100}", "VLAN"),      # VLAN は VLAN のポートにならない
+    ("{lag: r1-eth1}", "{interface: r1-eth1}"),   # キーの取り違え
+])
+def test_undefined_reference(port, hint):
+    errs = _errors(_vlan(trunk=port))
+    assert len(errs) == 1 and "未定義" in errs[0]
+    if hint:
+        assert hint in errs[0]
 
 
 def test_lag_and_member_in_same_vlan_is_error():
-    errs = _errors(_vlan(trunk="{interface: lag-r3-po1}, {interface: r3-eth0}"))
+    errs = _errors(_vlan(trunk="{lag: lag-r3-po1}, {interface: r3-eth0}"))
     assert len(errs) == 1 and "r3-eth0" in errs[0] and "lag-r3-po1" in errs[0]
 
 
 def test_lag_in_trunk_and_member_in_access_is_error():
-    errs = _errors(_vlan(trunk="{interface: lag-r3-po1}", access="{interface: r3-eth1}"))
+    errs = _errors(_vlan(trunk="{lag: lag-r3-po1}", access="{interface: r3-eth1}"))
     assert len(errs) == 1 and "r3-eth1" in errs[0]
 
 
 def test_member_only_is_warning():
-    """既存の書き方 (メンバーを並べる) は壊さず warning にとどめる"""
-    r = validate_all(_topo(_vlan(trunk="{node: r1, interface: r1-eth0}, {node: r2, interface: r2-eth0}")))
+    """メンバーを並べる書き方は warning にとどめ、LAG を指すよう促す"""
+    r = validate_all(_topo(_vlan(trunk="{interface: r1-eth0}, {interface: r2-eth0}")))
     assert r.errors == []
     assert [w.path for w in r.warnings] == [
         "layer2.vlans[0].trunk_ports[0].interface",
         "layer2.vlans[0].trunk_ports[1].interface",
     ]
-    assert "interface: lag-mlag-a" in r.warnings[0].message
+    assert "lag: lag-mlag-a" in r.warnings[0].message
 
 
 def test_member_only_is_error_in_strict():
@@ -148,27 +129,56 @@ def test_member_only_is_error_in_strict():
 
 
 @pytest.mark.parametrize("trunk,access", [
-    ("{interface: lag-mlag-a}, {interface: lag-mlag-a}", ""),
-    ("{interface: lag-mlag-a}", "{interface: lag-mlag-a}"),
-    ("{node: r1, interface: r1-eth1}", "{interface: r1-eth1}"),
+    ("{lag: lag-mlag-a}, {lag: lag-mlag-a}", ""),
+    ("{lag: lag-mlag-a}", "{lag: lag-mlag-a}"),
+    ("{interface: r1-eth1}", "{interface: r1-eth1}"),
 ])
-def test_same_interface_twice_in_vlan(trunk, access):
+def test_same_port_twice_in_vlan(trunk, access):
     errs = _errors(_vlan(trunk=trunk, access=access))
     assert len(errs) == 1 and "にも書かれています" in errs[0]
 
 
 def test_same_lag_in_different_vlans():
-    assert _errors(_vlan(trunk="{interface: lag-mlag-a}", vid=100),
-                   _vlan(trunk="{interface: lag-mlag-a}", vid=200)) == []
+    assert _errors(_vlan(trunk="{lag: lag-mlag-a}", vid=100),
+                   _vlan(trunk="{lag: lag-mlag-a}", vid=200)) == []
 
 
 def test_vlan_id_clash_expands_mlag_to_both_nodes():
     """MLAG に載せた VLAN は r2 にも存在する。r2 の別エントリと vlan_id が重なれば検出する"""
     errs = _errors(
-        _vlan(trunk="{interface: lag-mlag-a}", vlan_id="vlan-a"),
+        _vlan(trunk="{lag: lag-mlag-a}", vlan_id="vlan-a"),
         _vlan(trunk="{interface: r2-eth1}", vlan_id="vlan-b"),
     )
     assert len(errs) == 1 and "r2" in errs[0] and "100" in errs[0]
+
+
+# ---------------------------------------------------------------------------
+# 旧形式 (ndl_version 1.x の間だけ受け付ける。ADR-0013 D2、ADR-0001 D8)
+# ---------------------------------------------------------------------------
+
+def test_legacy_node_is_warning():
+    r = validate_all(_topo(_vlan(trunk="{node: r1, interface: r1-eth1}")))
+    assert r.errors == []
+    assert [w.path for w in r.warnings] == ["layer2.vlans[0].trunk_ports[0].node"]
+    assert "node を消してください" in r.warnings[0].message
+
+
+def test_legacy_interface_key_for_lag_is_warning():
+    r = validate_all(_topo(_vlan(trunk="{interface: lag-mlag-a}")))
+    assert r.errors == []
+    assert [w.path for w in r.warnings] == ["layer2.vlans[0].trunk_ports[0].interface"]
+    assert "{lag: lag-mlag-a}" in r.warnings[0].message
+
+
+@pytest.mark.parametrize("port,needle", [
+    ("{node: r1, lag: lag-mlag-a}", "MLAG"),                  # MLAG は両ノードに効く
+    ("{node: r1, lag: lag-r3-po1}", "lag-r3-po1"),            # 別ノードの LAG
+    ("{node: r2, interface: r1-eth1}", "r1-eth1"),            # 別ノードの IF
+    ("{node: nope, interface: r1-eth1}", "nope"),
+])
+def test_legacy_node_is_still_checked(port, needle):
+    errs = _errors(_vlan(trunk=port))
+    assert len(errs) == 1 and needle in errs[0]
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +190,7 @@ def _data(out, kind, eid):
 
 
 def test_cytoscape_mlag_vlan_on_both_nodes():
-    out = cytoscape.export(_topo(_vlan(trunk="{interface: lag-mlag-a}")))
+    out = cytoscape.export(_topo(_vlan(trunk="{lag: lag-mlag-a}")))
     for nid in ("r1", "r2"):
         assert _data(out, "nodes", nid)["vlans"] == ["vlan-100"]
         assert _data(out, "edges", f"vlan-vlan-100-{nid}")["tagged_on"] == ["lag-mlag-a"]
@@ -188,11 +198,11 @@ def test_cytoscape_mlag_vlan_on_both_nodes():
 
 
 def test_cytoscape_access_lag_is_untagged():
-    out = cytoscape.export(_topo(_vlan(access="{interface: lag-r3-po1}")))
+    out = cytoscape.export(_topo(_vlan(access="{lag: lag-r3-po1}")))
     assert _data(out, "edges", "vlan-vlan-100-r3")["untagged_on"] == ["lag-r3-po1"]
 
 
-def test_yaml_round_trip_without_node():
-    t1 = _topo(_vlan(trunk="{interface: lag-mlag-a}", access="{interface: r3-eth0}"))
+def test_yaml_round_trip():
+    t1 = _topo(_vlan(trunk="{lag: lag-mlag-a}", access="{interface: r3-eth0}"))
     t2 = parse(yaml_exporter.export(t1))
     assert t1.model_dump() == t2.model_dump()

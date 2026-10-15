@@ -85,10 +85,10 @@ layer2:
     - id: vlan-100
       vlan_id: 100
       trunk_ports:
-        - {node: tor-sw1, interface: tor-sw1-eth1}   # IF の ID を参照する (name の Ethernet1 ではない)
-        - {node: tor-sw1, interface: tor-sw1-eth2}
+        - {interface: tor-sw1-eth1}   # IF の ID を参照する (name の Ethernet1 ではない)
+        - {interface: tor-sw1-eth2}
       access_ports:
         # VM の vNIC は VLAN 100 にタグなしで属する。
         # 実体は「vNIC → pg-web (dvSwitch) → vmnic → ToR」の経路だが、dvSwitch のホップは書けない
-        - {node: web-vm1, interface: web-vm1-eth0}
-        - {node: web-vm2, interface: web-vm2-eth0}
+        - {interface: web-vm1-eth0}
+        - {interface: web-vm2-eth0}

@@ -208,7 +208,7 @@ layer2:
       vlan_id: 100
       name: tenant-a
       trunk_ports:
-        - {interface: lag-mlag-server1}   # MLAG は 1 エントリで leaf1 / leaf2 の両方 (ADR-0013)
+        - {lag: lag-mlag-server1}   # MLAG は 1 エントリで leaf1 / leaf2 の両方 (ADR-0013 D2)
 
   vxlan:
     - id: vni-10100
@@ -237,22 +237,22 @@ layer3:
 
   interfaces:
     # Loopbacks
-    - { id: spine1-lo, node: spine1, interface: lo, ip: 10.0.0.1/32 }
-    - { id: spine2-lo, node: spine2, interface: lo, ip: 10.0.0.2/32 }
-    - { id: leaf1-lo,  node: leaf1,  interface: lo, ip: 10.0.0.11/32 }
-    - { id: leaf2-lo,  node: leaf2,  interface: lo, ip: 10.0.0.12/32 }
+    - { id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.1/32 }
+    - { id: spine2-lo, node: spine2, name: lo, ip: 10.0.0.2/32 }
+    - { id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.12/32 }
 
     # Spine1 ↔ Leaf P2P
     - id: leaf1-swp51-l3
       node: leaf1
-      interface: swp51
+      name: swp51
       ip: 10.1.0.1/31
       vrf: vrf-default
       attaches_to: {interface: leaf1-swp51}
 
     - id: leaf2-swp51-l3
       node: leaf2
-      interface: swp51
+      name: swp51
       ip: 10.1.0.3/31
       vrf: vrf-default
       attaches_to: {interface: leaf2-swp51}
@@ -260,14 +260,14 @@ layer3:
     # Spine2 ↔ Leaf P2P
     - id: leaf1-swp52-l3
       node: leaf1
-      interface: swp52
+      name: swp52
       ip: 10.1.0.5/31
       vrf: vrf-default
       attaches_to: {interface: leaf1-swp52}
 
     - id: leaf2-swp52-l3
       node: leaf2
-      interface: swp52
+      name: swp52
       ip: 10.1.0.7/31
       vrf: vrf-default
       attaches_to: {interface: leaf2-swp52}
@@ -275,7 +275,8 @@ layer3:
     # SVI
     - id: leaf1-vlan100
       node: leaf1
-      interface: vlan-100
+      name: vlan-100
+      attaches_to: {vlan: vlan-100}
       ip: 192.168.100.1/24
       vrf: vrf-tenant-a
 

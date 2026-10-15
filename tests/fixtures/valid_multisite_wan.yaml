@@ -223,8 +223,8 @@ layer2:
       vlan_id: 100
       name: dc-tenant-a
       trunk_ports:
-        - {interface: lag-dc-mlag-server1}   # MLAG は両 leaf に効く (ADR-0013)
-        - {interface: lag-dc-mlag-server2}
+        - {lag: lag-dc-mlag-server1}   # MLAG は両 leaf に効く (ADR-0013 D2)
+        - {lag: lag-dc-mlag-server2}
 
     # ── Campus VLAN (tag x3, Core-Agg トランク全通し, Dist-Host access) ─
     # NOTE: トランクポートは Core/Agg 間/Agg-Dist 間で全通し。
@@ -234,56 +234,56 @@ layer2:
       vlan_id: 10
       name: cm-users
       trunk_ports:
-        - {node: cm-core1, interface: cm-core1-ge1-1}
-        - {node: cm-core1, interface: cm-core1-ge1-2}
-        - {node: cm-core2, interface: cm-core2-ge1-1}
-        - {node: cm-core2, interface: cm-core2-ge1-2}
-        - {node: cm-agg1,  interface: cm-agg1-ge1-1}
-        - {node: cm-agg1,  interface: cm-agg1-ge1-2}
-        - {node: cm-agg1,  interface: cm-agg1-ge2-1}
-        - {node: cm-agg2,  interface: cm-agg2-ge1-1}
-        - {node: cm-agg2,  interface: cm-agg2-ge1-2}
-        - {node: cm-agg2,  interface: cm-agg2-ge2-1}
-        - {node: cm-dist1, interface: cm-dist1-ge0-1}
-        - {node: cm-dist2, interface: cm-dist2-ge0-1}
+        - {interface: cm-core1-ge1-1}
+        - {interface: cm-core1-ge1-2}
+        - {interface: cm-core2-ge1-1}
+        - {interface: cm-core2-ge1-2}
+        - {interface: cm-agg1-ge1-1}
+        - {interface: cm-agg1-ge1-2}
+        - {interface: cm-agg1-ge2-1}
+        - {interface: cm-agg2-ge1-1}
+        - {interface: cm-agg2-ge1-2}
+        - {interface: cm-agg2-ge2-1}
+        - {interface: cm-dist1-ge0-1}
+        - {interface: cm-dist2-ge0-1}
       access_ports:
-        - {node: cm-host1, interface: cm-host1-eth0}
+        - {interface: cm-host1-eth0}
 
     - id: vlan-20
       vlan_id: 20
       name: cm-voip
       trunk_ports:
-        - {node: cm-core1, interface: cm-core1-ge1-1}
-        - {node: cm-core1, interface: cm-core1-ge1-2}
-        - {node: cm-core2, interface: cm-core2-ge1-1}
-        - {node: cm-core2, interface: cm-core2-ge1-2}
-        - {node: cm-agg1,  interface: cm-agg1-ge1-1}
-        - {node: cm-agg1,  interface: cm-agg1-ge1-2}
-        - {node: cm-agg1,  interface: cm-agg1-ge2-1}
-        - {node: cm-agg2,  interface: cm-agg2-ge1-1}
-        - {node: cm-agg2,  interface: cm-agg2-ge1-2}
-        - {node: cm-agg2,  interface: cm-agg2-ge2-1}
-        - {node: cm-dist1, interface: cm-dist1-ge0-1}
-        - {node: cm-dist2, interface: cm-dist2-ge0-1}
+        - {interface: cm-core1-ge1-1}
+        - {interface: cm-core1-ge1-2}
+        - {interface: cm-core2-ge1-1}
+        - {interface: cm-core2-ge1-2}
+        - {interface: cm-agg1-ge1-1}
+        - {interface: cm-agg1-ge1-2}
+        - {interface: cm-agg1-ge2-1}
+        - {interface: cm-agg2-ge1-1}
+        - {interface: cm-agg2-ge1-2}
+        - {interface: cm-agg2-ge2-1}
+        - {interface: cm-dist1-ge0-1}
+        - {interface: cm-dist2-ge0-1}
       access_ports:
-        - {node: cm-host2, interface: cm-host2-eth0}
+        - {interface: cm-host2-eth0}
 
     - id: vlan-30
       vlan_id: 30
       name: cm-mgmt
       trunk_ports:
-        - {node: cm-core1, interface: cm-core1-ge1-1}
-        - {node: cm-core1, interface: cm-core1-ge1-2}
-        - {node: cm-core2, interface: cm-core2-ge1-1}
-        - {node: cm-core2, interface: cm-core2-ge1-2}
-        - {node: cm-agg1,  interface: cm-agg1-ge1-1}
-        - {node: cm-agg1,  interface: cm-agg1-ge1-2}
-        - {node: cm-agg1,  interface: cm-agg1-ge2-1}
-        - {node: cm-agg2,  interface: cm-agg2-ge1-1}
-        - {node: cm-agg2,  interface: cm-agg2-ge1-2}
-        - {node: cm-agg2,  interface: cm-agg2-ge2-1}
-        - {node: cm-dist1, interface: cm-dist1-ge0-1}
-        - {node: cm-dist2, interface: cm-dist2-ge0-1}
+        - {interface: cm-core1-ge1-1}
+        - {interface: cm-core1-ge1-2}
+        - {interface: cm-core2-ge1-1}
+        - {interface: cm-core2-ge1-2}
+        - {interface: cm-agg1-ge1-1}
+        - {interface: cm-agg1-ge1-2}
+        - {interface: cm-agg1-ge2-1}
+        - {interface: cm-agg2-ge1-1}
+        - {interface: cm-agg2-ge1-2}
+        - {interface: cm-agg2-ge2-1}
+        - {interface: cm-dist1-ge0-1}
+        - {interface: cm-dist2-ge0-1}
 
   vxlan:
     - id: vni-10100
@@ -311,68 +311,76 @@ layer3:
 
   interfaces:
     # ── DC Loopbacks ───────────────────────────────────────────────────
-    - { id: dc-spine1-lo,  node: dc-spine1,  interface: lo, ip: 10.0.0.1/32 }
-    - { id: dc-spine2-lo,  node: dc-spine2,  interface: lo, ip: 10.0.0.2/32 }
-    - { id: dc-leaf1-lo,   node: dc-leaf1,   interface: lo, ip: 10.0.0.11/32 }
-    - { id: dc-leaf2-lo,   node: dc-leaf2,   interface: lo, ip: 10.0.0.12/32 }
-    - { id: dc-border1-lo, node: dc-border1, interface: lo, ip: 10.0.0.21/32 }
-    - { id: dc-border2-lo, node: dc-border2, interface: lo, ip: 10.0.0.22/32 }
+    - { id: dc-spine1-lo,  node: dc-spine1,  name: lo, ip: 10.0.0.1/32 }
+    - { id: dc-spine2-lo,  node: dc-spine2,  name: lo, ip: 10.0.0.2/32 }
+    - { id: dc-leaf1-lo,   node: dc-leaf1,   name: lo, ip: 10.0.0.11/32 }
+    - { id: dc-leaf2-lo,   node: dc-leaf2,   name: lo, ip: 10.0.0.12/32 }
+    - { id: dc-border1-lo, node: dc-border1, name: lo, ip: 10.0.0.21/32 }
+    - { id: dc-border2-lo, node: dc-border2, name: lo, ip: 10.0.0.22/32 }
 
     # ── Campus Loopbacks ──────────────────────────────────────────────
-    - { id: cm-core1-lo, node: cm-core1, interface: lo, ip: 10.0.1.1/32 }
-    - { id: cm-core2-lo, node: cm-core2, interface: lo, ip: 10.0.1.2/32 }
+    - { id: cm-core1-lo, node: cm-core1, name: lo, ip: 10.0.1.1/32 }
+    - { id: cm-core2-lo, node: cm-core2, name: lo, ip: 10.0.1.2/32 }
 
     # ── DC SVI (anycast GW for VLAN100) ────────────────────────────────
     - id: dc-leaf1-vlan100
       node: dc-leaf1
-      interface: vlan-100
+      name: vlan-100
+      attaches_to: {vlan: vlan-100}
       ip: 192.168.100.1/24
       vrf: vrf-tenant-a
     - id: dc-leaf2-vlan100
       node: dc-leaf2
-      interface: vlan-100
+      name: vlan-100
+      attaches_to: {vlan: vlan-100}
       ip: 192.168.100.2/24
       vrf: vrf-tenant-a
 
     # ── Campus SVI on Core (VLAN10/20/30 を Core で終端、VRRP) ─────────
     - id: cm-core1-vlan10
       node: cm-core1
-      interface: vlan-10
+      name: vlan-10
+      attaches_to: {vlan: vlan-10}
       ip: 172.16.10.2/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
     - id: cm-core2-vlan10
       node: cm-core2
-      interface: vlan-10
+      name: vlan-10
+      attaches_to: {vlan: vlan-10}
       ip: 172.16.10.3/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 90}
     - id: cm-core1-vlan20
       node: cm-core1
-      interface: vlan-20
+      name: vlan-20
+      attaches_to: {vlan: vlan-20}
       ip: 172.16.20.2/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 110}
     - id: cm-core2-vlan20
       node: cm-core2
-      interface: vlan-20
+      name: vlan-20
+      attaches_to: {vlan: vlan-20}
       ip: 172.16.20.3/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 90}
     - id: cm-core1-vlan30
       node: cm-core1
-      interface: vlan-30
+      name: vlan-30
+      attaches_to: {vlan: vlan-30}
       ip: 172.16.30.2/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 30, vip: 172.16.30.1, priority: 110}
     - id: cm-core2-vlan30
       node: cm-core2
-      interface: vlan-30
+      name: vlan-30
+      attaches_to: {vlan: vlan-30}
       ip: 172.16.30.3/24
       vrf: vrf-default
       gateway_redundancy:
@@ -381,25 +389,25 @@ layer3:
     # ── WAN P2P L3 (DC Border <-> Campus Core) ─────────────────────────
     - id: dc-border1-swp1-l3
       node: dc-border1
-      interface: swp1
+      name: swp1
       ip: 10.255.0.1/31
       vrf: vrf-default
       attaches_to: {interface: dc-border1-swp1}
     - id: cm-core1-te1-1-l3
       node: cm-core1
-      interface: Te1/1
+      name: Te1/1
       ip: 10.255.0.0/31
       vrf: vrf-default
       attaches_to: {interface: cm-core1-te1-1}
     - id: dc-border2-swp1-l3
       node: dc-border2
-      interface: swp1
+      name: swp1
       ip: 10.255.0.3/31
       vrf: vrf-default
       attaches_to: {interface: dc-border2-swp1}
     - id: cm-core2-te1-1-l3
       node: cm-core2
-      interface: Te1/1
+      name: Te1/1
       ip: 10.255.0.2/31
       vrf: vrf-default
       attaches_to: {interface: cm-core2-te1-1}

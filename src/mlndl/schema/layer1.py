@@ -1,7 +1,8 @@
 """Layer 1 (物理トポロジー) スキーマ定義
 
 設計決定:
-- attaches_to: ADR-0001 — str | {node:} | {interface:} | {link:}
+- attaches_to: ADR-0001 — str | {node:} | {interface:} | {lag:} | {vlan:} | {subinterface:} | {link:}
+  参照先の種類はキーで示す (ADR-0001 D8)。どのキーを書けるかはエンティティごとに決まる
 - role: ADR-0003 C2 — 自由文字列、コアは値域チェックなし
 - implementation: ADR-0004 — vm | physical | container
 - lag: §6 設計決定 — type: lacp | mlag の Discriminated Union
@@ -14,36 +15,67 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
 # attaches_to (ADR-0001)
 # ---------------------------------------------------------------------------
 
+ATTACH_KEYS = ("node", "interface", "lag", "vlan", "subinterface", "link")
+
+
 class AttachesToObj(BaseModel):
-    """attaches_to のオブジェクト形式。node / interface / link のいずれか 1 キーのみ有効。"""
+    """attaches_to のオブジェクト形式。ATTACH_KEYS のいずれか 1 キーだけを書く。
+
+    キー名が参照先の種類を示す (ADR-0001 D2・D8):
+      node → layer1.nodes / interface → layer1.interfaces (L1 IF のみ) / lag → layer1.lag /
+      vlan → layer2.vlans / subinterface → layer2.subinterfaces / link → layer1.links
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     node: str | None = None
     interface: str | None = None
+    lag: str | None = None
+    vlan: str | None = None
+    subinterface: str | None = None
     link: str | None = None
 
     @model_validator(mode="after")
     def exactly_one_key(self) -> "AttachesToObj":
-        set_keys = sum(
-            1 for v in [self.node, self.interface, self.link] if v is not None
-        )
-        if set_keys != 1:
+        if sum(1 for k in ATTACH_KEYS if getattr(self, k) is not None) != 1:
             raise ValueError(
-                "attaches_to オブジェクトは node / interface / link のいずれか 1 キーのみ指定してください"
+                "attaches_to オブジェクトは " + " / ".join(ATTACH_KEYS) + " のいずれか 1 キーだけを指定してください"
             )
         return self
+
+    @property
+    def kind(self) -> str:
+        """書かれたキー名 (参照先の種類)"""
+        return next(k for k in ATTACH_KEYS if getattr(self, k) is not None)
+
+    @property
+    def target(self) -> str:
+        """参照先の ID"""
+        return getattr(self, self.kind)
 
 
 # 文字列形式（ノードID 糖衣構文）とオブジェクト形式の Union
 AttachesTo = str | AttachesToObj
+
+# ADR-0001 D1〜D7 で定めた従来のキー。L1 と routing_adjacencies はこれだけを書ける
+L1_ATTACH_KEYS = frozenset({"node", "interface", "link"})
+
+
+def restrict_attach_keys(value: Any, allowed: frozenset[str], owner: str) -> Any:
+    """エンティティごとに書ける attaches_to のキーを制限する (ADR-0001 D8)"""
+    if isinstance(value, AttachesToObj) and value.kind not in allowed:
+        keys = " / ".join(f"{{{k}:}}" for k in ATTACH_KEYS if k in allowed)
+        raise ValueError(
+            f"{owner} の attaches_to に {{{value.kind}:}} は書けません。書けるのは {keys} です (ADR-0001 D8)"
+        )
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +98,11 @@ class L1Node(BaseModel):
     labels: dict[str, str] | None = None
     overrides: dict[str, Any] | None = None  # 上位ツール向け任意上書き
     description: str | None = None
+
+    @field_validator("attaches_to")
+    @classmethod
+    def l1_attach_keys(cls, v: Any) -> Any:
+        return restrict_attach_keys(v, L1_ATTACH_KEYS, "layer1.nodes")
 
     @model_validator(mode="after")
     def reject_container_hypervisor(self) -> "L1Node":
@@ -92,6 +129,11 @@ class L1Interface(BaseModel):
     name: str | None = None
     attaches_to: AttachesTo | None = None
     description: str | None = None
+
+    @field_validator("attaches_to")
+    @classmethod
+    def l1_attach_keys(cls, v: Any) -> Any:
+        return restrict_attach_keys(v, L1_ATTACH_KEYS, "layer1.interfaces")
 
 
 # ---------------------------------------------------------------------------

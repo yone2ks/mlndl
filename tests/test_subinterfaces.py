@@ -62,7 +62,7 @@ S10 = "    - {id: subif-r1-eth0-10, attaches_to: {interface: r1-eth0}, vlan_id: 
 class TestSchema:
     def test_minimal(self):
         si = _topo(_subifs(S10)).layer2.subinterfaces[0]
-        assert (si.attaches_to.interface, si.vlan_id, si.name) == ("r1-eth0", 10, "eth0.10")
+        assert (si.attaches_to.kind, si.attaches_to.target, si.vlan_id, si.name) == ("interface", "r1-eth0", 10, "eth0.10")
 
     @pytest.mark.parametrize("vid", [0, 4095, 4096])
     def test_vlan_id_range(self, vid):
@@ -74,9 +74,11 @@ class TestSchema:
         msg = _parse_error(_subifs("    - {id: subif-x, attaches_to: r1, vlan_id: 10}\n"))
         assert "{interface:" in msg
 
-    @pytest.mark.parametrize("key", ["node: r1", "link: link-x"])
-    def test_non_interface_key_is_rejected(self, key):
-        _parse_error(_subifs(f"    - {{id: subif-x, attaches_to: {{{key}}}, vlan_id: 10}}\n"))
+    @pytest.mark.parametrize("key", ["node: r1", "link: link-x", "vlan: vlan-10", "subinterface: subif-y"])
+    def test_only_interface_or_lag_key(self, key):
+        """サブ IF の基盤は L1 IF か LAG だけ (ADR-0001 D8 / ADR-0012 D4)"""
+        msg = _parse_error(_subifs(f"    - {{id: subif-x, attaches_to: {{{key}}}, vlan_id: 10}}\n"))
+        assert "ADR-0001 D8" in msg
 
     def test_node_field_does_not_exist(self):
         """node は親から導出する。持たせると二重表現になる (ADR-0012)"""
@@ -97,18 +99,19 @@ class TestValidation:
 
     def test_parent_lag(self):
         assert _errors(_subifs(
-            "    - {id: subif-r1-bond0-10, attaches_to: {interface: lag-r1-bond0}, vlan_id: 10}\n"
+            "    - {id: subif-r1-bond0-10, attaches_to: {lag: lag-r1-bond0}, vlan_id: 10}\n"
         )) == []
 
     def test_undefined_parent(self):
         errs = _errors(_subifs("    - {id: subif-x, attaches_to: {interface: nope}, vlan_id: 10}\n"))
         assert any("nope" in e for e in errs)
 
-    def test_parent_cannot_be_vlan(self):
-        """VLAN を親にできるのは L3Interface (SVI) だけ"""
+    def test_interface_key_pointing_at_vlan(self):
+        """{interface:} は L1 IF 専用。VLAN の ID を書くと、種類を示して未定義にする"""
         body = _subifs("    - {id: subif-x, attaches_to: {interface: vlan-10}, vlan_id: 10}\n").replace(
             "layer2:\n", "layer2:\n  vlans: [{id: vlan-10, vlan_id: 10}]\n")
-        assert any("vlan-10" in e for e in _errors(body))
+        errs = _errors(body)
+        assert len(errs) == 1 and "vlan-10" in errs[0] and "VLAN" in errs[0]
 
     def test_duplicate_tag_on_same_parent(self):
         errs = _errors(_subifs(
@@ -130,12 +133,12 @@ class TestValidation:
     def test_l1_interface_cannot_attach_to_subif(self):
         body = _subifs(S10).replace(
             "    - {id: r3-eth0, node: r3}",
-            "    - {id: r3-eth0, node: r3, attaches_to: {interface: subif-r1-eth0-10}}",
+            "    - {id: r3-eth0, node: r3, attaches_to: {subinterface: subif-r1-eth0-10}}",
         )
-        assert any("subif-r1-eth0-10" in e for e in _errors(body))
+        assert "ADR-0001 D8" in _parse_error(body)
 
     def test_id_space_collision(self):
-        """{interface: X} は複数の ID 空間で X を引くので、ID が重複すると解決先が曖昧になる"""
+        """ID はグローバルに一意。旧形式 {interface: X} の読み替えも、X の空間が一意に決まることに頼る"""
         body = _subifs("    - {id: r1-eth1, attaches_to: {interface: r1-eth0}, vlan_id: 10}\n")
         assert any("ADR-0002 D5" in e and "r1-eth1" in e for e in _errors(body))
 
@@ -147,33 +150,33 @@ class TestValidation:
 class TestL3OnSubinterface:
     def test_l3_on_subif(self):
         assert _errors(_subifs(S10, l3=(
-            "    - {id: r1-eth0-10, node: r1, interface: eth0.10,"
-            " attaches_to: {interface: subif-r1-eth0-10}, ip: 192.168.10.1/24}\n"
+            "    - {id: r1-eth0-10, node: r1, name: eth0.10,"
+            " attaches_to: {subinterface: subif-r1-eth0-10}, ip: 192.168.10.1/24}\n"
         ))) == []
 
     def test_l3_on_other_nodes_subif(self):
         errs = _errors(_subifs(S10, l3=(
-            "    - {id: r2-x, node: r2, interface: eth0.10, attaches_to: {interface: subif-r1-eth0-10}}\n"
+            "    - {id: r2-x, node: r2, name: eth0.10, attaches_to: {subinterface: subif-r1-eth0-10}}\n"
         )))
         assert any("サブインターフェース" in e and "r2" in e for e in errs)
 
     def test_routed_lag(self):
         assert _errors(_subifs(S10, l3=(
-            "    - {id: r1-bond0, node: r1, interface: bond0, attaches_to: {interface: lag-r1-bond0},"
+            "    - {id: r1-bond0, node: r1, name: bond0, attaches_to: {lag: lag-r1-bond0},"
             " ip: 10.0.0.1/30}\n"
         ))) == []
 
     def test_routed_lag_on_other_node(self):
         errs = _errors(_subifs(S10, l3=(
-            "    - {id: r2-bond0, node: r2, interface: bond0, attaches_to: {interface: lag-r1-bond0}}\n"
+            "    - {id: r2-bond0, node: r2, name: bond0, attaches_to: {lag: lag-r1-bond0}}\n"
         )))
         assert any("LAG" in e and "r2" in e for e in errs)
 
     @pytest.mark.parametrize("node,ok", [("r1", True), ("r2", True), ("r3", False)])
     def test_subif_on_mlag_belongs_to_both_nodes(self, node, ok):
         errs = _errors(_subifs(
-            "    - {id: subif-mlag-a-10, attaches_to: {interface: lag-mlag-a}, vlan_id: 10}\n",
-            l3=f"    - {{id: {node}-x, node: {node}, interface: po1.10, attaches_to: {{interface: subif-mlag-a-10}}}}\n",
+            "    - {id: subif-mlag-a-10, attaches_to: {lag: lag-mlag-a}, vlan_id: 10}\n",
+            l3=f"    - {{id: {node}-x, node: {node}, name: po1.10, attaches_to: {{subinterface: subif-mlag-a-10}}}}\n",
         ))
         assert (errs == []) is ok
 
@@ -188,9 +191,9 @@ class TestExport:
 
     def test_cytoscape_embeds_subifs_and_kinds(self):
         out = cytoscape.export(_topo(_subifs(S10, l3=(
-            "    - {id: r1-eth0-10, node: r1, interface: eth0.10,"
-            " attaches_to: {interface: subif-r1-eth0-10}, ip: 192.168.10.1/24}\n"
-            "    - {id: r1-bond0, node: r1, interface: bond0, attaches_to: {interface: lag-r1-bond0},"
+            "    - {id: r1-eth0-10, node: r1, name: eth0.10,"
+            " attaches_to: {subinterface: subif-r1-eth0-10}, ip: 192.168.10.1/24}\n"
+            "    - {id: r1-bond0, node: r1, name: bond0, attaches_to: {lag: lag-r1-bond0},"
             " ip: 10.0.0.1/30}\n"
         ))))
         r1 = self._node(out, "r1")
@@ -203,7 +206,7 @@ class TestExport:
 
     def test_cytoscape_mlag_subif_on_both_nodes(self):
         out = cytoscape.export(_topo(_subifs(
-            "    - {id: subif-mlag-a-10, attaches_to: {interface: lag-mlag-a}, vlan_id: 10}\n"
+            "    - {id: subif-mlag-a-10, attaches_to: {lag: lag-mlag-a}, vlan_id: 10}\n"
         )))
         assert "subinterfaces" in self._node(out, "r1")
         assert "subinterfaces" in self._node(out, "r2")
@@ -211,8 +214,37 @@ class TestExport:
 
     def test_yaml_round_trip(self):
         t1 = _topo(_subifs(S10, l3=(
-            "    - {id: r1-eth0-10, node: r1, interface: eth0.10,"
-            " attaches_to: {interface: subif-r1-eth0-10}, ip: 192.168.10.1/24}\n"
+            "    - {id: r1-eth0-10, node: r1, name: eth0.10,"
+            " attaches_to: {subinterface: subif-r1-eth0-10}, ip: 192.168.10.1/24}\n"
         )))
         t2 = parse(yaml_exporter.export(t1))
         assert t1.model_dump() == t2.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# 旧形式 (ndl_version 1.x の間だけ受け付ける。ADR-0001 D8)
+# ---------------------------------------------------------------------------
+
+class TestLegacyInterfaceKey:
+    def test_subif_on_lag_via_interface_key(self):
+        r = validate_all(_topo(_subifs(
+            "    - {id: subif-r1-bond0-10, attaches_to: {interface: lag-r1-bond0}, vlan_id: 10}\n"
+        )))
+        assert r.errors == []
+        assert [w.path for w in r.warnings] == ["layer2.subinterfaces[0].attaches_to.interface"]
+        assert "{lag: lag-r1-bond0}" in r.warnings[0].message
+
+    @pytest.mark.parametrize("ref,key", [("subif-r1-eth0-10", "subinterface"), ("lag-r1-bond0", "lag")])
+    def test_l3_via_interface_key(self, ref, key):
+        r = validate_all(_topo(_subifs(S10, l3=(
+            f"    - {{id: r1-x, node: r1, name: x, attaches_to: {{interface: {ref}}}}}\n"
+        ))))
+        assert r.errors == []
+        assert [w.path for w in r.warnings] == ["layer3.interfaces[0].attaches_to.interface"]
+        assert f"{{{key}: {ref}}}" in r.warnings[0].message
+
+    def test_legacy_reference_still_checks_node(self):
+        errs = _errors(_subifs(S10, l3=(
+            "    - {id: r2-x, node: r2, name: x, attaches_to: {interface: subif-r1-eth0-10}}\n"
+        )))
+        assert any("サブインターフェース" in e and "r2" in e for e in errs)

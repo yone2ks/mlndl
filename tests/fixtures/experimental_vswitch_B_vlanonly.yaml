@@ -31,13 +31,13 @@ layer2:
     - id: vlan-100
       vlan_id: 100
       trunk_ports:
-        - {node: tor-sw1, interface: tor-sw1-eth1}
+        - {interface: tor-sw1-eth1}
         # esxi-01 vmnic0 も実体は trunk port。書ける:
-        - {node: esxi-01, interface: esxi-01-vmnic0}
+        - {interface: esxi-01-vmnic0}
       access_ports:
         # VM vNIC を access として登録。VST 相当 (タグはどこかで剥がれている) と暗黙合意。
-        - {node: web-vm1, interface: web-vm1-eth0}
-        - {node: web-vm2, interface: web-vm2-eth0}
+        - {interface: web-vm1-eth0}
+        - {interface: web-vm2-eth0}
       # MISSING: vmnic0 と VM vNIC が「同じ dvSwitch を介して接続されている」事実は書けない。
       #          → 同じ VLAN に居る、という事実のみで等価とみなす運用。
       # MISSING: タグ付与主体 (VST=dvSwitch / VGT=Guest / EST=ESXi) の区別ができない。

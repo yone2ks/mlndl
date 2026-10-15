@@ -25,7 +25,7 @@ layer3:
   interfaces:
     - id: leaf1-lo
       node: leaf1
-      interface: lo
+      name: lo
 
 layer2:
   vlans:

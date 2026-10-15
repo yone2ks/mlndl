@@ -24,13 +24,13 @@ layer3:
   interfaces:
     - id: hq-rtr-wan
       node: hq-rtr
-      interface: Gi0/0
+      name: Gi0/0
       attaches_to: {interface: hq-rtr-g0}
       ip: 203.0.113.1/30
       vrf: vrf-internet
     - id: br1-rtr-wan
       node: br1-rtr
-      interface: Gi0/0
+      name: Gi0/0
       attaches_to: {interface: br1-rtr-g0}
       ip: 203.0.113.2/30
       vrf: vrf-internet

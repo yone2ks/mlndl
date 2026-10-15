@@ -6,25 +6,40 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .layer1 import AttachesToObj
+from .layer1 import AttachesToObj, restrict_attach_keys
 
 
 class PortRef(BaseModel):
     """VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）
 
-    interface: L1 IF の id または LAG の id。LAG のときはメンバーではなく LAG を指す
+    interface / lag: どちらか一方。参照先の種類をキーで示す (ADR-0001 D8)
+               lag のときはメンバーではなく LAG を指す
                (VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する)
-    node:      省略可。interface から導出できる。書いた場合は validator が照合する。
-               MLAG は両ノードに効くので node を書けない
+    node:      廃止予定。ノードは interface / lag から導出する (ADR-0013 D2)。
+               ndl_version 1.x の間は受け付け、validator が warning を出して照合する
     native:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。
                access_ports では常に untagged のため通常は未指定。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    interface: str
+    interface: str | None = None
+    lag: str | None = None
     node: str | None = None
     native: bool = False
+
+    @model_validator(mode="after")
+    def exactly_one_target(self) -> "PortRef":
+        if (self.interface is None) == (self.lag is None):
+            raise ValueError(
+                "VLAN のポートは interface (L1 IF) か lag (LAG) のどちらか一方で指してください (ADR-0013 D1)"
+            )
+        return self
+
+    @property
+    def target(self) -> str:
+        """参照先の ID"""
+        return self.interface if self.interface is not None else self.lag
 
 
 class VLAN(BaseModel):
@@ -75,9 +90,9 @@ class Subinterface(BaseModel):
     """802.1Q サブインターフェース (ADR-0012)
 
     物理 IF または LAG を 802.1Q タグで分割した論理 IF。L3 は
-    layer3.interfaces[].attaches_to: {interface: <サブ IF の id>} で載る。
+    layer3.interfaces[].attaches_to: {subinterface: <サブ IF の id>} で載る。
 
-    - node は持たない。親 (L1 IF / LAG) から導出できるため (二重表現を作らない)
+    - node は持たない。基盤 (L1 IF / LAG) から導出できるため (ADR-0005 D6、ADR-0012 D2)
     - vlan_id はこのリンク上の 802.1Q タグ番号であり、layer2.vlans への参照ではない。
       タグの書き換えや拠点ごとの番号再利用でタグと VLAN エンティティは一致しないことがある
     - Q-in-Q (stag_vlan_id / ctag_vlan_id)、ネイティブ (タグなし) サブ IF、
@@ -87,7 +102,7 @@ class Subinterface(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str                                 # 推奨プレフィックス subif- (ADR-0002 D7)
-    attaches_to: AttachesToObj              # {interface: <L1 IF の id または LAG の id>}
+    attaches_to: AttachesToObj              # {interface: <L1 IF の id>} または {lag: <LAG の id>}
     vlan_id: int = Field(ge=1, le=4094)     # IEEE 802.1Q VID。0 と 4095 は予約
     name: str | None = None                 # 機器上の名前 (eth0.10 / Gi0/0.10 / bond0.10)
     description: str | None = None
@@ -97,19 +112,15 @@ class Subinterface(BaseModel):
     def object_form_only(cls, v: Any) -> Any:
         if isinstance(v, str):
             raise ValueError(
-                "サブインターフェースの attaches_to は {interface: <L1 IF または LAG の id>} で"
-                "書いてください。文字列はノード ID の糖衣構文です (ADR-0001, ADR-0012)"
+                "サブインターフェースの attaches_to は {interface: <L1 IF の id>} か {lag: <LAG の id>} で"
+                "書いてください。文字列はノード ID の糖衣構文です (ADR-0001, ADR-0012 D4)"
             )
         return v
 
-    @model_validator(mode="after")
-    def parent_is_interface(self) -> "Subinterface":
-        if self.attaches_to.interface is None:
-            raise ValueError(
-                "サブインターフェースの attaches_to は interface キーで親 (L1 IF または LAG) を"
-                "指してください (ADR-0012)"
-            )
-        return self
+    @field_validator("attaches_to")
+    @classmethod
+    def parent_keys(cls, v: AttachesToObj) -> AttachesToObj:
+        return restrict_attach_keys(v, frozenset({"interface", "lag"}), "layer2.subinterfaces")
 
 
 class L2Layer(BaseModel):

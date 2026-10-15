@@ -92,8 +92,8 @@ layer2:
 layer3:
   vrfs: [{id: Vrf-a}]
   interfaces:
-    - {id: R1-lo, node: R1, interface: lo, ip: 10.0.0.1/32}
-    - {id: r2-lo, node: r2, interface: lo, ip: 10.0.0.2/32}
+    - {id: R1-lo, node: R1, name: lo, ip: 10.0.0.1/32}
+    - {id: r2-lo, node: r2, name: lo, ip: 10.0.0.2/32}
   tunnel_interfaces:
     - {id: Tunnel-r1, node: R1, type: gre, source: R1-lo, destination_interface: r2-lo}
   routing_adjacencies:

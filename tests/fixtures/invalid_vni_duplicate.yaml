@@ -9,7 +9,7 @@ layer3:
   interfaces:
     - id: lo1
       node: leaf1
-      interface: lo
+      name: lo
 
 layer1:
   nodes:

@@ -89,7 +89,6 @@ from typing import Literal
 
 from .schema.layer1 import AttachesToObj, LacpLag, MlagLag
 from .schema.layer2 import L2VxLAN, L3VxLAN
-from .schema.layer3 import VLAN_SHORTHAND
 from .schema.topology import MLNDLTopology
 
 _RT_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+:\d+$|^\d+:\d+$")
@@ -194,7 +193,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         l3vni_ids = {v.id for v in l2.vxlan if v.type == "l3vni"}
         subif_ids = {si.id for si in l2.subinterfaces}
         for si in l2.subinterfaces:
-            parent = si.attaches_to.interface
+            parent = si.attaches_to.target
             if parent in iface_node:
                 subif_nodes[si.id] = {iface_node[parent]}
             elif parent in lag_nodes:
@@ -209,7 +208,13 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # ── ID の文法 (ADR-0002 D1) ──────────────────────────────────────────
     _check_id_grammar(topology, errors)
 
-    # ── ID 空間の重複 (ADR-0002 D5 / ADR-0012) ─────────────────────────────
+    # attaches_to / VLAN のポートのキーが指す ID 空間 (ADR-0001 D8)
+    spaces = {
+        "node": node_ids, "interface": interface_ids, "lag": lag_ids,
+        "vlan": vlan_ids, "subinterface": subif_ids, "link": link_ids,
+    }
+
+    # ── ID 空間の重複 (ADR-0002 D5) ─────────────────────────────────────
     _check_interface_id_spaces(
         {"L1 インターフェース": interface_ids, "LAG": lag_ids,
          "VLAN": vlan_ids, "サブインターフェース": subif_ids},
@@ -218,13 +223,13 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
 
     # ── Layer 1 ──────────────────────────────────────────────────────────
     if topology.layer1:
-        _validate_l1(topology.layer1, node_ids, interface_ids, lag_ids, link_ids, errors)
+        _validate_l1(topology.layer1, node_ids, interface_ids, lag_ids, spaces, errors)
 
     # ── Layer 2 ──────────────────────────────────────────────────────────
     if topology.layer2:
         _validate_l2(
             topology.layer2,
-            node_ids, interface_ids, iface_node, lag_ids, lag_nodes, member_lag,
+            node_ids, iface_node, lag_nodes, member_lag, spaces,
             vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node,
             errors,
         )
@@ -233,8 +238,8 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     if topology.layer3:
         _validate_l3(
             topology.layer3, topology.layer2,
-            node_ids, interface_ids, iface_node, link_ids, lag_nodes, subif_nodes,
-            l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids, subif_ids,
+            node_ids, iface_node, lag_nodes, subif_nodes, spaces,
+            l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids,
             errors,
         )
 
@@ -255,7 +260,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
 # Layer 1
 # ---------------------------------------------------------------------------
 
-def _validate_l1(l1, node_ids, interface_ids, lag_ids, link_ids, errors):
+def _validate_l1(l1, node_ids, interface_ids, lag_ids, spaces, errors):
     # interfaces: node 参照
     for i, iface in enumerate(l1.interfaces):
         if iface.node not in node_ids:
@@ -325,102 +330,102 @@ def _validate_l1(l1, node_ids, interface_ids, lag_ids, link_ids, errors):
     # attaches_to
     for i, node in enumerate(l1.nodes):
         if node.attaches_to is not None:
-            _check_attaches_to(
-                node.attaches_to, f"layer1.nodes[{i}].attaches_to",
-                node_ids, interface_ids, link_ids, errors,
-            )
+            _check_attaches_to(node.attaches_to, f"layer1.nodes[{i}].attaches_to", spaces, errors)
     for i, iface in enumerate(l1.interfaces):
         if iface.attaches_to is not None:
-            _check_attaches_to(
-                iface.attaches_to, f"layer1.interfaces[{i}].attaches_to",
-                node_ids, interface_ids, link_ids, errors,
-            )
+            _check_attaches_to(iface.attaches_to, f"layer1.interfaces[{i}].attaches_to", spaces, errors)
 
 
 # ---------------------------------------------------------------------------
 # Layer 2
 # ---------------------------------------------------------------------------
 
-def _port_nodes(pr, path, interface_ids, iface_node, lag_nodes, node_ids, errors) -> set[str]:
-    """PortRef が載るノード群を返す。node を書いた場合は、interface から導いたものと照合する
+def _port_nodes(pr, kind, path, iface_node, lag_nodes, node_ids, errors) -> set[str]:
+    """VLAN のポートが載るノード群を返す (ADR-0013 D2)
 
-    MLAG は両ノードに効くので、node を書くと片方のノードだけに見えてしまう。書かせない (ADR-0013)
+    node は書かない (interface / lag から導出する)。ndl_version 1.x の間は旧形式として受け付けて
+    warning を出し、導出したノードと照合する。MLAG は両ノードに効くので node を書くと error
     """
-    if pr.interface in interface_ids:
-        owner = iface_node[pr.interface]
-        if pr.node in node_ids and pr.node != owner:
-            errors.append(ValidationError(
-                f"{path}.interface",
-                f"インターフェース '{pr.interface}' はノード '{owner}' に属しており、"
-                f"'{pr.node}' のものではありません (ADR-0011 D9)",
-            ))
-        return {owner}
-    if pr.interface in lag_nodes:
-        owners = lag_nodes[pr.interface]
-        if pr.node is not None and len(owners) > 1:
-            errors.append(ValidationError(
-                f"{path}.node",
-                f"MLAG '{pr.interface}' は {' / '.join(sorted(owners))} の両方に効くため、node は書けません"
-                f"。node を消してください (ADR-0013)",
-            ))
-        elif pr.node in node_ids and pr.node not in owners:
-            errors.append(ValidationError(
-                f"{path}.interface",
-                f"LAG '{pr.interface}' はノード '{next(iter(owners))}' のものであり、"
-                f"'{pr.node}' のものではありません (ADR-0013)",
-            ))
-        return set(owners)
+    if kind == "interface":
+        owners = {iface_node[pr.target]}
+    elif kind == "lag":
+        owners = set(lag_nodes[pr.target])
+    else:
+        return set()
+    if pr.node is None:
+        return owners
     errors.append(ValidationError(
-        f"{path}.interface",
-        f"未定義の L1 インターフェースまたは LAG '{pr.interface}' を参照しています (ADR-0013)",
+        f"{path}.node",
+        f"VLAN のポートには node を書きません。ノードは '{pr.target}' から導出します。"
+        f"node を消してください (ADR-0013 D2)",
+        "warning",
     ))
-    return {pr.node} if pr.node is not None else set()
+    if pr.node not in node_ids:
+        errors.append(ValidationError(f"{path}.node", f"未定義のノード '{pr.node}' を参照しています"))
+    elif kind == "lag" and len(owners) > 1:
+        errors.append(ValidationError(
+            f"{path}.node",
+            f"MLAG '{pr.target}' は {' / '.join(sorted(owners))} の両方に効くため、node は書けません (ADR-0013 D2)",
+        ))
+    elif pr.node not in owners:
+        what = "インターフェース" if kind == "interface" else "LAG"
+        errors.append(ValidationError(
+            f"{path}.{pr_key(pr)}",
+            f"{what} '{pr.target}' はノード '{next(iter(owners))}' に属しており、"
+            f"'{pr.node}' のものではありません (ADR-0013 D2)",
+        ))
+    return owners
 
 
-def _validate_l2(l2, node_ids, interface_ids, iface_node, lag_ids, lag_nodes, member_lag,
+def pr_key(pr) -> str:
+    """PortRef に書かれた参照キー (interface / lag)"""
+    return "interface" if pr.interface is not None else "lag"
+
+
+def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
                  vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, errors):
     # VLAN trunk_ports / access_ports (ADR-0013)
-    # interface は L1 IF または LAG。node は省略でき、interface から導出する
+    # interface (L1 IF) か lag (LAG) で指す。node は書かず、参照先から導出する
     vlans_on_node: dict[tuple[str, int], list[str]] = {}
+    vlan_nodes: dict[str, set[str]] = {}
     for i, vlan in enumerate(l2.vlans):
         ports = [(f"trunk_ports[{j}]", pr) for j, pr in enumerate(vlan.trunk_ports)]
         ports += [(f"access_ports[{j}]", pr) for j, pr in enumerate(vlan.access_ports)]
-        listed = {pr.interface for _, pr in ports}
+        listed = {pr.target for _, pr in ports}
         seen: dict[str, str] = {}
         for where, pr in ports:
             path = f"layer2.vlans[{i}].{where}"
-            if pr.interface in seen:
+            if pr.target in seen:
                 errors.append(ValidationError(
-                    f"{path}.interface",
-                    f"'{pr.interface}' はこの VLAN の {seen[pr.interface]} にも書かれています (ADR-0013)",
+                    f"{path}.{pr_key(pr)}",
+                    f"'{pr.target}' はこの VLAN の {seen[pr.target]} にも書かれています (ADR-0013 D4)",
                 ))
             else:
-                seen[pr.interface] = where
-            if pr.node is not None and pr.node not in node_ids:
-                errors.append(ValidationError(
-                    f"{path}.node", f"未定義のノード '{pr.node}' を参照しています",
-                ))
-            nodes = _port_nodes(pr, path, interface_ids, iface_node, lag_nodes, node_ids, errors)
+                seen[pr.target] = where
+            kind = _resolve_ref(pr_key(pr), pr.target, spaces, f"{path}.{pr_key(pr)}", errors,
+                                legacy_kinds=("lag",))
+            nodes = _port_nodes(pr, kind, path, iface_node, lag_nodes, node_ids, errors)
+            vlan_nodes.setdefault(vlan.id, set()).update(nodes)
             for node in nodes:
                 owners = vlans_on_node.setdefault((node, vlan.vlan_id), [])
                 if vlan.id not in owners:
                     owners.append(vlan.id)
 
             # LAG のメンバーに VLAN は設定しない。設定は LAG 側にあり、メンバーはそれを継承する
-            lag = member_lag.get(pr.interface)
+            lag = member_lag.get(pr.target) if kind == "interface" else None
             if lag is None:
                 continue
             if lag in listed:
                 errors.append(ValidationError(
                     f"{path}.interface",
-                    f"'{pr.interface}' は LAG '{lag}' のメンバーです。LAG とそのメンバーを同じ VLAN に"
-                    f"書くことはできません。LAG だけを書いてください (ADR-0013)",
+                    f"'{pr.target}' は LAG '{lag}' のメンバーです。LAG とそのメンバーを同じ VLAN に"
+                    f"書くことはできません。LAG だけを書いてください (ADR-0013 D3)",
                 ))
             else:
                 errors.append(ValidationError(
                     f"{path}.interface",
-                    f"'{pr.interface}' は LAG '{lag}' のメンバーです。VLAN は LAG を指して書いてください"
-                    f" (interface: {lag}) (ADR-0013)",
+                    f"'{pr.target}' は LAG '{lag}' のメンバーです。VLAN は LAG を指して書いてください"
+                    f" (lag: {lag}) (ADR-0013 D3)",
                     "warning",
                 ))
 
@@ -436,18 +441,15 @@ def _validate_l2(l2, node_ids, interface_ids, iface_node, lag_ids, lag_nodes, me
     # Subinterfaces (ADR-0012)
     seen_tag: dict[tuple[str, int], int] = {}
     for i, si in enumerate(l2.subinterfaces):
-        parent = si.attaches_to.interface
-        if parent not in interface_ids and parent not in lag_ids:
-            errors.append(ValidationError(
-                f"layer2.subinterfaces[{i}].attaches_to.interface",
-                f"未定義の L1 インターフェースまたは LAG '{parent}' を参照しています (ADR-0012)",
-            ))
-        key = (parent, si.vlan_id)
+        at = si.attaches_to
+        _resolve_ref(at.kind, at.target, spaces, f"layer2.subinterfaces[{i}].attaches_to.{at.kind}",
+                     errors, legacy_kinds=("lag",))
+        key = (at.target, si.vlan_id)
         if key in seen_tag:
             errors.append(ValidationError(
                 f"layer2.subinterfaces[{i}].vlan_id",
-                f"親 '{parent}' 上で VLAN タグ {si.vlan_id} が subinterfaces[{seen_tag[key]}] と"
-                f"重複しています (ADR-0012)",
+                f"'{at.target}' 上で VLAN タグ {si.vlan_id} が subinterfaces[{seen_tag[key]}] と"
+                f"重複しています (ADR-0012 D5)",
             ))
         else:
             seen_tag[key] = i
@@ -487,6 +489,18 @@ def _validate_l2(l2, node_ids, interface_ids, iface_node, lag_ids, lag_nodes, me
                     f"vtep_source '{vx.vtep_source}' のノード '{vtep_node}' が members に含まれていません"
                     f" (ADR-0011 D9)",
                 ))
+            # VNI のメンバーなのに、その VLAN のポートが 1 つもないノード (round4 E10)。
+            # VLAN にポートが書かれていない場合は判断できないので見ない
+            carried = vlan_nodes.get(vx.vlan)
+            if carried:
+                for j, m in enumerate(vx.members):
+                    if m in node_ids and m not in carried:
+                        errors.append(ValidationError(
+                            f"layer2.vxlan[{i}].members[{j}]",
+                            f"VNI のメンバー '{m}' には VLAN '{vx.vlan}' のポートがありません。"
+                            f"VLAN を載せ忘れていないか確認してください (ADR-0011 D9)",
+                            "warning",
+                        ))
         elif isinstance(vx, L3VxLAN):
             if vx.vrf not in vrf_ids:
                 errors.append(ValidationError(
@@ -499,8 +513,8 @@ def _validate_l2(l2, node_ids, interface_ids, iface_node, lag_ids, lag_nodes, me
 # Layer 3
 # ---------------------------------------------------------------------------
 
-def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_nodes, subif_nodes,
-                 l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids, subif_ids, errors):
+def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
+                 l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids, errors):
     l3vni_vrf = {vx.id: vx.vrf for vx in (l2.vxlan if l2 else []) if isinstance(vx, L3VxLAN)}
     vxlan_index = {vx.id: k for k, vx in enumerate(l2.vxlan if l2 else [])}
     vrf_l3vni = {v.id: v.l3vni for v in l3.vrfs}
@@ -561,58 +575,39 @@ def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_node
                 f"{path}.vrf", f"未定義の VRF '{iface.vrf}' を参照しています",
             ))
 
-        key = (iface.node, iface.interface)
+        key = (iface.node, iface.name)
         if key in seen_if:
             errors.append(ValidationError(
-                f"{path}.interface",
-                f"ノード '{iface.node}' のインターフェース '{iface.interface}' が"
+                f"{path}.name",
+                f"ノード '{iface.node}' のインターフェース '{iface.name}' が"
                 f" '{seen_if[key]}' と重複して定義されています (ADR-0011 D9)",
             ))
         else:
             seen_if[key] = iface.id
 
-        # 参照解決: L3Interface に限り LAG / VLAN / サブ IF も attaches_to の参照先になる
-        # (ADR-0011 D3 / ADR-0012)
-        if iface.attaches_to is not None:
-            _check_attaches_to(
-                iface.attaches_to, f"{path}.attaches_to",
-                node_ids, interface_ids, link_ids, errors,
-                extra_interface_ids=set(lag_nodes) | vlan_ids | subif_ids,
-            )
-            if VLAN_SHORTHAND.match(iface.interface):
-                # interface: vlan-N は VLAN の短縮形として読まれる。attaches_to が別のもの
-                # (別の VLAN、L1 IF、LAG、サブ IF) を指していれば食い違い
-                explicit = iface.attachment_ref()
-                if explicit is not None and explicit != iface.interface:
-                    what = "VLAN " if explicit in vlan_ids else ""
-                    errors.append(ValidationError(
-                        f"{path}.attaches_to",
-                        f"interface '{iface.interface}' は VLAN の短縮形ですが、attaches_to は"
-                        f" {what}'{explicit}' を指しており食い違っています (ADR-0011 D3)",
-                    ))
-        elif VLAN_SHORTHAND.match(iface.interface) and iface.interface not in vlan_ids:
-            errors.append(ValidationError(
-                f"{path}.interface",
-                f"短縮形 interface: {iface.interface} が指す VLAN '{iface.interface}' が"
-                f"layer2.vlans に定義されていません (ADR-0011 D3)",
-            ))
+        # 旧形式 (interface キー、短縮形 interface: vlan-N) を読み替えた箇所 (ADR-0011 D10)
+        for fld, message in iface.deprecations:
+            errors.append(ValidationError(f"{path}.{fld}", message, "warning"))
 
-        # 参照先の node (群) に L3 IF の node が含まれるか (ADR-0011 D9 / ADR-0012)
-        ref = iface.attachment_ref()
-        if ref in iface_node:
-            owners, what = {iface_node[ref]}, "L1 インターフェース"
-        elif ref in lag_nodes:
-            owners, what = lag_nodes[ref], "LAG"
-        elif ref in subif_nodes:
-            owners, what = subif_nodes[ref], "サブインターフェース"
-        else:
-            owners = None
-        if owners is not None and iface.node in node_ids and iface.node not in owners:
-            errors.append(ValidationError(
-                f"{path}.attaches_to.interface",
-                f"{what} '{ref}' はノード {'/'.join(sorted(owners))} のものであり、"
-                f"'{iface.node}' のものではありません (ADR-0011 D9 / ADR-0012)",
-            ))
+        # 参照解決と、参照先の node (群) に L3 IF の node が含まれるか (ADR-0001 D8 / ADR-0011 D9)
+        at = iface.attaches_to
+        if at is not None:
+            kind = _resolve_ref(at.kind, at.target, spaces, f"{path}.attaches_to.{at.kind}", errors,
+                                legacy_kinds=("lag", "vlan", "subinterface"))
+            if kind == "interface":
+                owners = {iface_node[at.target]}
+            elif kind == "lag":
+                owners = lag_nodes[at.target]
+            elif kind == "subinterface":
+                owners = subif_nodes.get(at.target)     # 基盤が未定義なら None
+            else:
+                owners = None                           # VLAN は node を持たない
+            if owners and iface.node in node_ids and iface.node not in owners:
+                errors.append(ValidationError(
+                    f"{path}.attaches_to.{at.kind}",
+                    f"{_KIND_LABEL[kind]} '{at.target}' はノード {'/'.join(sorted(owners))} のものであり、"
+                    f"'{iface.node}' のものではありません (ADR-0011 D9)",
+                ))
 
         # gateway_redundancy
         seen_group: dict[tuple[str, int, int], int] = {}
@@ -635,6 +630,14 @@ def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_node
                     f"{gpath}.vip",
                     f"VIP {gw.vip} がインターフェースのサブネット {iface.ip.network} に含まれていません"
                     f" (ADR-0011 D9)",
+                ))
+            elif af == 4 and iface.ip is None:
+                # VIP だけがあって IF 自身の IPv4 がない。サブネットが決まらず VRRP / HSRP は組めない (round4 E9)
+                errors.append(ValidationError(
+                    f"{gpath}.vip",
+                    f"IPv4 の VIP {gw.vip} がありますが、インターフェースに ip がありません。"
+                    f"ip を書いてください (ADR-0011 D9)",
+                    "warning",
                 ))
 
     _check_anycast_consistency(l3, vlan_ids, errors)
@@ -688,6 +691,20 @@ def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_node
                     f"{path}.{fld}", f"未定義の VRF '{v}' を参照しています",
                 ))
 
+    # 対向がトポロジー内なのに、逆向きのトンネルが書かれていない (round4 E8)
+    back = {(t.source, t.destination_interface) for t in l3.tunnel_interfaces}
+    for i, tun in enumerate(l3.tunnel_interfaces):
+        if (tun.destination_interface in l3iface_node
+                and l3iface_node[tun.destination_interface] != tun.node
+                and (tun.destination_interface, tun.source) not in back):
+            errors.append(ValidationError(
+                f"layer3.tunnel_interfaces[{i}]",
+                f"対向 '{tun.destination_interface}' のノード '{l3iface_node[tun.destination_interface]}' に、"
+                f"逆向きのトンネル (source: {tun.destination_interface}, destination_interface: {tun.source}) が"
+                f"ありません (ADR-0011 D6)",
+                "info",
+            ))
+
     # Routing Adjacencies
     for i, adj in enumerate(l3.routing_adjacencies):
         if adj.from_.node not in node_ids:
@@ -707,10 +724,7 @@ def _validate_l3(l3, l2, node_ids, interface_ids, iface_node, link_ids, lag_node
                     f"未定義の L3 インターフェース '{ep.update_source}' を参照しています",
                 ))
         if adj.attaches_to is not None:
-            _check_attaches_to(
-                adj.attaches_to, f"layer3.routing_adjacencies[{i}].attaches_to",
-                node_ids, interface_ids, link_ids, errors,
-            )
+            _check_attaches_to(adj.attaches_to, f"layer3.routing_adjacencies[{i}].attaches_to", spaces, errors)
 
 
 # ---------------------------------------------------------------------------
@@ -815,39 +829,59 @@ def _validate_mtu(topology: MLNDLTopology, errors: list[ValidationError]) -> Non
 # attaches_to 参照チェック（共通）
 # ---------------------------------------------------------------------------
 
-def _check_attaches_to(attaches_to, path, node_ids, interface_ids, link_ids, errors,
-                       *, extra_interface_ids: set[str] = frozenset()):
-    """attaches_to の参照先を検証する。
+def _ja(label: str) -> str:
+    """日本語の地の文に埋め込むとき、英字で始まる語の前後に空白を入れる"""
+    return f" {label} " if label[:1].isascii() else label
 
-    extra_interface_ids: {interface:} の参照先として追加で許す ID 空間。
-    L3Interface だけが layer2.vlans を渡す (ADR-0011 D3)。L1 の attaches_to が
-    VLAN を指せてしまわないよう、既定では L1 インターフェースのみを許す。
+
+_KIND_LABEL = {
+    "node": "ノード", "interface": "L1 インターフェース", "lag": "LAG", "vlan": "VLAN",
+    "subinterface": "サブインターフェース", "link": "リンク",
+}
+
+
+def _resolve_ref(kind, target, spaces, path, errors, *, legacy_kinds=()) -> str | None:
+    """キー kind で書かれた参照 target を、そのキーの ID 空間で解決する (ADR-0001 D8)
+
+    解決できた種類を返す。未定義なら error を出して None を返す。
+    legacy_kinds: {interface: X} で X が L1 IF 以外を指す旧形式 (ndl_version 1.x の間だけ受け付ける)。
+    X がこれらの空間にあれば warning を出してその種類として扱う
     """
+    if target in spaces[kind]:
+        return kind
+    if kind == "interface":
+        for k in legacy_kinds:
+            if target in spaces[k]:
+                errors.append(ValidationError(
+                    path,
+                    f"{{interface: {target}}} は{_ja(_KIND_LABEL[k])}を指しています。{{{k}: {target}}} と"
+                    f"書いてください。{{interface:}} は L1 インターフェース専用です (ADR-0001 D8)",
+                    "warning",
+                ))
+                return k
+    actual = next((k for k, ids in spaces.items() if target in ids), None)
+    hint = f"。'{target}' は{_ja(_KIND_LABEL[actual])}です。{{{actual}: {target}}} の誤りではありませんか" if actual else ""
+    errors.append(ValidationError(path, f"未定義の{_ja(_KIND_LABEL[kind]).rstrip()} '{target}' を参照しています{hint}"))
+    return None
+
+
+def _check_attaches_to(attaches_to, path, spaces, errors):
+    """L1 と routing_adjacencies の attaches_to を検証する (書けるキーはスキーマで制限済み)"""
     if isinstance(attaches_to, str):
-        if attaches_to not in node_ids:
+        if attaches_to not in spaces["node"]:
             errors.append(ValidationError(
                 path, f"未定義のノード '{attaches_to}' を参照しています",
             ))
     elif isinstance(attaches_to, AttachesToObj):
-        if attaches_to.node is not None and attaches_to.node not in node_ids:
-            errors.append(ValidationError(
-                f"{path}.node", f"未定義のノード '{attaches_to.node}' を参照しています",
-            ))
-        if attaches_to.interface is not None and attaches_to.interface not in (
-            interface_ids | extra_interface_ids
-        ):
-            errors.append(ValidationError(
-                f"{path}.interface",
-                f"未定義のインターフェース '{attaches_to.interface}' を参照しています",
-            ))
-        if attaches_to.link is not None and attaches_to.link not in link_ids:
-            errors.append(ValidationError(
-                f"{path}.link", f"未定義のリンク '{attaches_to.link}' を参照しています",
-            ))
+        _resolve_ref(attaches_to.kind, attaches_to.target, spaces, f"{path}.{attaches_to.kind}", errors)
 
 
 def _check_interface_id_spaces(spaces: dict[str, set[str]], errors: list[ValidationError]) -> None:
-    """{interface: X} が引く ID 空間どうしが重複していないか (ADR-0002 D5 / ADR-0012)"""
+    """参照先になる ID 空間どうしが重複していないか (ADR-0002 D5)
+
+    キーで種類を示すようになっても (ADR-0001 D8)、旧形式の {interface: X} を読み替えるには
+    X がどの空間にあるかが一意に決まる必要がある。ID のグローバル一意性の一部でもある
+    """
     names = list(spaces)
     for a_i, a in enumerate(names):
         for b in names[a_i + 1:]:
@@ -1006,12 +1040,11 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
             _warn_prefix(errors, f"layer3.tunnel_interfaces[{i}].id", tun.id, "tunnel-", "トンネル")
         for i, iface in enumerate(topology.layer3.interfaces):
             # SVI のつもりで VLAN に紐づけ忘れた書き方を拾う (ADR-0011 D3)
-            if (iface.attaches_to is None and "vlan" in iface.interface.lower()
-                    and not VLAN_SHORTHAND.match(iface.interface)):
+            if iface.attaches_to is None and "vlan" in iface.name.lower():
                 errors.append(ValidationError(
                     f"layer3.interfaces[{i}].attaches_to",
-                    f"interface '{iface.interface}' は SVI に見えますが VLAN に紐づいていません。"
-                    f"attaches_to: {{interface: <VLAN id>}} を指定してください (ADR-0011 D3)",
+                    f"name '{iface.name}' は SVI に見えますが VLAN に紐づいていません。"
+                    f"attaches_to: {{vlan: <VLAN id>}} を指定してください (ADR-0011 D3)",
                     "warning",
                 ))
         for i, adj in enumerate(topology.layer3.routing_adjacencies):

@@ -44,13 +44,13 @@ layer2:
     - id: vlan-10
       vlan_id: 10
       name: users
-      trunk_ports: [{node: sw1, interface: sw1-g1}]
-      access_ports: [{node: sw1, interface: sw1-g10}]
+      trunk_ports: [{interface: sw1-g1}]
+      access_ports: [{interface: sw1-g10}]
     - id: vlan-20
       vlan_id: 20
       name: voice
-      trunk_ports: [{node: sw1, interface: sw1-g1}]
-      access_ports: [{node: sw1, interface: sw1-g20}]
+      trunk_ports: [{interface: sw1-g1}]
+      access_ports: [{interface: sw1-g20}]
   subinterfaces:
     - id: subif-br1-eth0-10
       attaches_to: {interface: br1-eth0}
@@ -61,7 +61,7 @@ layer2:
       vlan_id: 20
       name: eth0.20
     - id: subif-br1-bond0-100
-      attaches_to: {interface: lag-br1-bond0}   # LAG も {interface:} で指す (ADR-0012)
+      attaches_to: {lag: lag-br1-bond0}   # LAG は {lag:} で指す (ADR-0001 D8)
       vlan_id: 100
       name: bond0.100
       description: 管理用
@@ -73,36 +73,36 @@ layer3:
   interfaces:
     - id: br1-eth0-10
       node: br1
-      interface: eth0.10
-      attaches_to: {interface: subif-br1-eth0-10}
+      name: eth0.10
+      attaches_to: {subinterface: subif-br1-eth0-10}
       ip: 192.168.10.1/24
       ipv6: 2001:db8:10::1/64
       vrf: vrf-default
     - id: br1-eth0-20
       node: br1
-      interface: eth0.20
-      attaches_to: {interface: subif-br1-eth0-20}
+      name: eth0.20
+      attaches_to: {subinterface: subif-br1-eth0-20}
       ip: 192.168.20.1/24
       vrf: vrf-default
     - id: br1-bond0-100
       node: br1
-      interface: bond0.100
-      attaches_to: {interface: subif-br1-bond0-100}
+      name: bond0.100
+      attaches_to: {subinterface: subif-br1-bond0-100}
       ip: 10.0.100.1/30
       vrf: vrf-mgmt
     - id: br1-bond0
       node: br1
-      interface: bond0
-      attaches_to: {interface: lag-br1-bond0}   # routed LAG
+      name: bond0
+      attaches_to: {lag: lag-br1-bond0}   # routed LAG
       ip: 10.0.0.1/30
       vrf: vrf-default
     - id: pc10-eth0-l3
       node: pc10
-      interface: eth0
+      name: eth0
       attaches_to: {interface: pc10-eth0}
       ip: 192.168.10.10/24
     - id: pc20-eth0-l3
       node: pc20
-      interface: eth0
+      name: eth0
       attaches_to: {interface: pc20-eth0}
       ip: 192.168.20.10/24
