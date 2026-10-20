@@ -112,6 +112,9 @@ Pass C (2026-10-15) で、参照先の種類を `attaches_to` のキーで示す
 |-----|---------|--------|------|
 | [drafts/0014](drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) (実装済み) | Draft | A |
 | [evaluations/adr0014](evaluations/adr0014/README.md) | ADR-0014 設計比較 YAML (1 回目の 4 案と、方式中立モデルの 7 構成) | — | — |
+| [drafts/0015](drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する (Ref) (実装済み) | Draft | A |
+| [evaluations/declarative-refs](evaluations/declarative-refs/comparison.md) | ADR-0015 試し書き (構文を足す作業の比較) | — | — |
 
 ADR-0011 の「書けないまま残るもの」を優先順に扱う。ADR-0014 で、構文は関係の形で決め、方式名は構文に入れない
 という原則を ADR-0005 D4 補則に加えた。
+ADR-0015 では、参照先をスキーマに `Ref` で宣言し、参照の存在の検査を汎用化した (ライブラリの実装方針)。

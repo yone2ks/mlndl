@@ -463,7 +463,9 @@ mlndl/
 │       │   ├── layer2.py       # VLAN, VxLAN (l2vni/l3vni), Subinterface
 │       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface, RoutingAdjacency
 │       │   ├── protocols.py    # BFD, OSPF, BGP
-│       │   └── topology.py     # MLNDLTopology（ルートモデル）
+│       │   ├── refs.py         # Ref（参照先の宣言。ADR-0015）
+│       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
+│       ├── index.py            # IdIndex（id → エンティティの索引）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
 │       ├── validator.py        # 整合性チェック
 │       └── exporter/
@@ -482,13 +484,17 @@ mlndl/
 
 ## バリデーション項目（validator.py）
 
+**構文を足すとき**（ADR-0015）: 別のエンティティの id を指すフィールドには `Annotated[..., Ref("<コレクションのパス>")]` を付ける。
+参照の存在の検査はこれだけで付き、validator を直す必要はない。参照ではない文字列フィールドは `tests/test_refs.py` の
+`NOT_REFERENCES` に足す（どちらもしないとテストが落ちる）。ネットワークとしての意味の検査が要るかは ADR で判断し、validator に手で書く。
+
 Severity は ADR-0002 D8 に従う。`validate()` は **error のみ**を返す（後方互換）。
 warning / info も含めて受け取るには `validate_all(topology, strict=False)` → `ValidationResult(errors, warnings, notes)`。
 `strict=True`（CLI は `python -m mlndl validate --strict`）で warning を error に昇格する。
 
 | カテゴリ | チェック内容 | Severity |
 |---------|------------|---------|
-| 参照整合性 | 全レイヤーで未定義 node/interface への参照がないか | error |
+| 参照整合性 | スキーマで `Ref` を宣言したフィールドが、参照先に実在する id を指しているか（汎用の検査。ADR-0015）。別の種類の id を指したら何であるかを添える | error |
 | AS 番号 | eBGP ペアで同一 AS / iBGP ペアで異なる AS の矛盾 | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
@@ -553,6 +559,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0012](docs/decisions/0012-subinterfaces.md) | 802.1Q サブインターフェース | **C** | `layer2.subinterfaces`。`node` を持たない。`vlan_id` はリンク上のタグ番号（VLAN への参照ではなく照合もしない）。基盤は `{interface:}` か `{lag:}` |
 | [ADR-0013](docs/decisions/0013-vlan-ports-on-lag.md) | VLAN のポート | **C** | `trunk_ports` / `access_ports` は `{interface:}` か `{lag:}`。`node` は書かない。MLAG は 1 エントリで両ノード。LAG とメンバーの併記は error、メンバーだけは warning |
 | [ADR-0014](docs/decisions/drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) | A (Draft) | `layer2.vteps`（`sources` = 終端するノードの L3 IF、`address` / `address_v6`）。VNI は `vteps` で参照。方式中立（anycast / vPC / BGW を構文に出さない）。アドレス省略は `sources` が 1 つのときだけ。旧 `vtep_source` / `members` は 1.x の間 warning（**実装済み**） |
+| [ADR-0015](docs/decisions/drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する | A (Draft) | 参照先が 1 つに決まる参照は `Annotated[str, Ref("layer2.vlans")]` と型に書き、汎用の検査が全参照を検査する。キーで選ぶ参照（attaches_to 等）と意味の検査は別。`topology.resolve(id)` で id から実体を引く（**実装済み**） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---
