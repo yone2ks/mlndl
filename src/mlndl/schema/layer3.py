@@ -18,6 +18,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from .layer1 import L1_ATTACH_KEYS, AttachesTo, AttachesToObj, restrict_attach_keys
+from .refs import Ref
 
 # 旧形式 (ADR-0011 D10): `interface` がこの形で attaches_to がないものは、VLAN を指す短縮形だった
 VLAN_SHORTHAND = re.compile(r"^vlan-\d+$")
@@ -53,7 +54,7 @@ class VRF(BaseModel):
 
     id: str
     rd: str | None = None           # Route Distinguisher — ASN:NN または IP:NN
-    l3vni: str | None = None        # layer2.vxlan[l3vni].id を参照
+    l3vni: Annotated[str | None, Ref("layer2.vxlan", where=("type", "l3vni"))] = None
     route_targets: RouteTargets | None = None
     description: str | None = None
 
@@ -151,11 +152,11 @@ class L3Interface(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    node: str                       # layer1.nodes[].id を参照 (ノードごとの実体なので必須。ADR-0005 D6)
+    node: Annotated[str, Ref("layer1.nodes")]   # ノードごとの実体なので必須 (ADR-0005 D6)
     name: str                       # 機器上の名前
     ip: IPv4Interface | None = None     # IPv4 (CIDR)
     ipv6: IPv6Interface | None = None   # IPv6 (CIDR)
-    vrf: str | None = None          # layer3.vrfs[].id を参照
+    vrf: Annotated[str | None, Ref("layer3.vrfs")] = None
     attaches_to: AttachesToObj | None = None
     gateway_redundancy: list[GatewayRedundancy] = []
     description: str | None = None
@@ -264,15 +265,15 @@ class TunnelInterface(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str                                         # 推奨プレフィックス tunnel- (ADR-0002 D7)
-    node: str
+    node: Annotated[str, Ref("layer1.nodes")]
     type: Literal["gre", "ipip", "ipsec_vti", "wireguard"]
-    source: str                                     # layer3.interfaces[].id (トンネルの起点)
+    source: Annotated[str, Ref("layer3.interfaces")]   # トンネルの起点
     destination_ip: IPv4Address | IPv6Address | None = None   # トポロジー外の対向
-    destination_interface: str | None = None                   # layer3.interfaces[].id
+    destination_interface: Annotated[str | None, Ref("layer3.interfaces")] = None
     ip: IPv4Interface | None = None                 # トンネル IF 自体のアドレス
     ipv6: IPv6Interface | None = None
-    vrf: str | None = None                          # トンネル IF が属する VRF (overlay 側)
-    transport_vrf: str | None = None                # 外側パケットが流れる VRF
+    vrf: Annotated[str | None, Ref("layer3.vrfs")] = None             # トンネル IF が属する VRF (overlay 側)
+    transport_vrf: Annotated[str | None, Ref("layer3.vrfs")] = None   # 外側パケットが流れる VRF
     mtu: int | None = Field(default=None, ge=68)    # IPv4 最小 MTU (RFC 791)
     description: str | None = None
 
@@ -301,8 +302,8 @@ class RoutingAdjEndpoint(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    node: str                       # layer1.nodes[].id を参照
-    update_source: str | None = None  # layer3.interfaces[].id を参照
+    node: Annotated[str, Ref("layer1.nodes")]
+    update_source: Annotated[str | None, Ref("layer3.interfaces")] = None
 
 
 class RoutingAdjacency(BaseModel):

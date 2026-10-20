@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .layer1 import AttachesToObj, restrict_attach_keys
+from .refs import Ref
 
 
 class PortRef(BaseModel):
@@ -26,7 +27,7 @@ class PortRef(BaseModel):
 
     interface: str | None = None
     lag: str | None = None
-    node: str | None = None
+    node: Annotated[str | None, Ref("layer1.nodes")] = None   # 旧形式
     native: bool = False
 
     @model_validator(mode="after")
@@ -70,7 +71,7 @@ class Vtep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str                                         # 推奨プレフィックス vtep- (ADR-0002 D7)
-    sources: list[str] = Field(min_length=1)        # layer3.interfaces[].id
+    sources: Annotated[list[str], Ref("layer3.interfaces")] = Field(min_length=1)
     address: IPv4Interface | None = None
     address_v6: IPv6Interface | None = None
     description: str | None = None
@@ -104,10 +105,10 @@ class L2VxLAN(BaseModel):
     id: str
     type: Literal["l2vni"]
     vni: int
-    vlan: str                       # layer2.vlans[].id を参照
-    vteps: list[str] = []           # layer2.vteps[].id を参照
-    vtep_source: str | None = None  # 旧形式 (layer3.interfaces[].id)
-    members: list[str] | None = None  # 旧形式 (layer1.nodes[].id)。書き出しに出ないよう既定は None
+    vlan: Annotated[str, Ref("layer2.vlans")]
+    vteps: Annotated[list[str], Ref("layer2.vteps")] = []
+    vtep_source: Annotated[str | None, Ref("layer3.interfaces")] = None   # 旧形式
+    members: Annotated[list[str] | None, Ref("layer1.nodes")] = None     # 旧形式。書き出しに出ないよう既定は None
     description: str | None = None
 
     @model_validator(mode="after")
@@ -130,7 +131,7 @@ class L3VxLAN(BaseModel):
     id: str
     type: Literal["l3vni"]
     vni: int
-    vrf: str                                           # layer3.vrfs[].id を参照
+    vrf: Annotated[str, Ref("layer3.vrfs")]
     irb_mode: Literal["symmetric", "asymmetric"] | None = None
     description: str | None = None
 

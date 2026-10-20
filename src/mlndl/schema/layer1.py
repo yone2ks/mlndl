@@ -17,6 +17,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .refs import Ref
+
 
 # ---------------------------------------------------------------------------
 # attaches_to (ADR-0001)
@@ -125,7 +127,7 @@ class L1Interface(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    node: str  # 所属ノード ID
+    node: Annotated[str, Ref("layer1.nodes")]  # 所属ノード ID
     name: str | None = None
     attaches_to: AttachesTo | None = None
     description: str | None = None
@@ -149,7 +151,7 @@ class L1Link(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    endpoints: list[str] = Field(min_length=2, max_length=2)
+    endpoints: Annotated[list[str], Ref("layer1.interfaces")] = Field(min_length=2, max_length=2)
     link_speed: str | None = None   # 例: "10G", "100G"
     mtu: int | None = None
     link_role: str | None = None    # 自由文字列。推奨: underlay / access / trunk / peer-link / management / uplink
@@ -182,8 +184,8 @@ class LacpLag(BaseModel):
 
     id: str
     type: Literal["lacp"]
-    node: str          # 単数形: 1 ノード
-    members: list[str]  # インターフェース ID リスト
+    node: Annotated[str, Ref("layer1.nodes")]          # 単数形: 1 ノード
+    members: Annotated[list[str], Ref("layer1.interfaces")]
     lacp: LacpConfig | None = None
     description: str | None = None
 
@@ -195,14 +197,14 @@ class MlagLag(BaseModel):
 
     id: str
     type: Literal["mlag"]
-    nodes: list[str]    # 複数形: 必ず 2 ノード
-    members: list[str]  # インターフェース ID リスト（両ノード分）
+    nodes: Annotated[list[str], Ref("layer1.nodes")]    # 複数形: 必ず 2 ノード
+    members: Annotated[list[str], Ref("layer1.interfaces")]  # 両ノード分
     lacp: LacpConfig | None = None
-    peer_link: str                  # 同一 lag リスト内の LacpLag.id を参照
+    peer_link: Annotated[str, Ref("layer1.lag")]   # 同一 lag リスト内の LacpLag
     peer_link_interface: str        # 例: "peerlink.4094"
     domain_id: int | None = None
     system_mac: str | None = None   # 両ノード共通の MLAG system MAC（例: "44:38:39:ff:00:0a"）
-    client_lag: str | None = None   # 対向ノード側の LacpLag.id（単方向参照）
+    client_lag: Annotated[str | None, Ref("layer1.lag")] = None   # 対向ノード側の LacpLag（単方向参照）
     description: str | None = None
 
     @model_validator(mode="after")

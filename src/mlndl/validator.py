@@ -1,79 +1,24 @@
-"""クロスフィールド参照整合性バリデーター
+"""クロスフィールドの整合性バリデーター
 
-チェック項目:
-  Layer 1:
-    - interfaces[].node → nodes
-    - links[].from / to → interfaces
-    - lag[lacp].node → nodes
-    - lag[mlag].nodes[] → nodes
-    - lag[].members[] → interfaces
-    - lag[mlag].peer_link → lag
-    - nodes/interfaces[].attaches_to 参照
+検査は 3 種類に分かれる (ADR-0015)。
 
-  Layer 2:
-    - vlans[].trunk_ports/access_ports[].node → L1 nodes (省略可。ADR-0013)
-    - vlans[].trunk_ports/access_ports[].interface → L1 interfaces ∪ lag (ADR-0013)
-    - vxlan[l2vni].vlan → layer2.vlans
-    - vteps[].sources[] → layer3.interfaces。同じ L3 IF を 2 つの VTEP が使わないか、1 ノードから 1 つか (ADR-0014)
-    - vteps のアドレス (sources が 1 つなら L3 IF の ip から導出) が VTEP 間で重複しないか
-    - MLAG ペアの片方だけが VTEP を終端していないか (warning)
-    - vxlan[l2vni].vteps[] → layer2.vteps
-    - vxlan[l2vni].vtep_source → layer3.interfaces (旧形式。warning)
-    - vxlan[l2vni].members[] → L1 nodes
-    - vxlan[l2vni].vtep_source の node が members に含まれるか
-    - trunk_ports/access_ports の interface が、同じ node に属するか。MLAG には node を書けない
-    - 同じ VLAN に LAG とそのメンバーを書いていないか (error)。メンバーだけなら warning
-    - 同じ VLAN に同じ interface を 2 回書いていないか
-    - subinterfaces[].attaches_to.interface → L1 interfaces ∪ lag (ADR-0012)
-    - 同一の親 (L1 IF / LAG) 上で subinterfaces[].vlan_id が重複していないか
-
-  ID の文法 (ADR-0002 D1):
-    - layer1 / layer2 / layer3 / protocols の全エンティティの id が正規表現に従い、63 文字以内か
-
-  ID 空間 (ADR-0002 D5 / ADR-0012):
-    - L1 interface / LAG / VLAN / サブ IF の ID は互いに重複しないこと
-      ({interface: X} は X をこれらの空間で解決するため、重複すると解決先が曖昧になる)
-    - vxlan[l3vni].vrf → layer3.vrfs
-    - VNI 番号のグローバル一意性
-
-  Layer 3 (ADR-0011):
-    - vrfs[].l3vni → layer2.vxlan (type=l3vni)。L3VxLAN.vrf との双方向一致
-    - vrfs[].rd / route_targets フォーマット (ASN:NN or IP:NN)
-    - interfaces[].node → L1 nodes
-    - interfaces[].vrf → layer3.vrfs
-    - interfaces[].attaches_to → L1 interfaces ∪ lag ∪ layer2.vlans ∪ layer2.subinterfaces
-      (L3Interface のみ。ADR-0011 D3 / ADR-0012)
-    - interfaces[].interface: vlan-N の短縮形 → layer2.vlans
-    - 短縮形と明示した attaches_to の食い違い
-    - attaches_to が L1 IF / LAG / サブ IF を指す場合、その node (群) に L3 IF の node が含まれるか
-    - 同一 (node, interface) の重複
-    - gateway_redundancy: IPv4 VIP のサブネット一致、同一 IF・同一 mode・同一 AF の group_id 重複
-    - anycast_gateway: 同じ VLAN に載る SVI 群で ip / ipv6 / anycast_mac が一致するか
-    - tunnel_interfaces[]: node / source / destination_interface / vrf / transport_vrf 参照、
-      source が同じ node の L3 IF か、destination_interface が別ノードか、
-      source と destination の外側のアドレスファミリーが一致するか
-    - routing_adjacencies[].from/to.node → L1 nodes
-    - routing_adjacencies[].from/to.update_source → layer3.interfaces
-    - routing_adjacencies[].attaches_to.link → L1 links
-
-  Protocols:
-    - bfd[].nodes[] → L1 nodes
-    - bgp[].nodes[].node → L1 nodes
-    - bgp[].nodes[].neighbors[].node → L1 nodes
-    - eBGP ペア: local_as != remote_as
-    - iBGP ペア: local_as == remote_as
-
-  MTU 整合性:
-    - VxLAN (l2vni/l3vni) が存在する場合、underlay リンクの MTU >= 1550
-
-  VLAN ID:
-    - 同一ノード上で、別の VLAN エントリが同じ vlan_id を使っていないか
-
-  規約 (severity = warning / ADR-0002 D7・ADR-0009 D3):
-    - 推奨プレフィックス: link- / lag- / vlan- / vni- / vrf- / tunnel- / subif- / bfd- /
-      bgp-peer- / ospf-adj- / isis-adj-
-    - interface が VLAN らしき名前なのに attaches_to が未指定 (ADR-0011 D3)
-    - labels のキーが ADR-0002 D1 の ID 正規表現に従っているか
+  1. 参照の存在 — スキーマの Ref 宣言から _check_refs が検査する。どのフィールドがどこを指すかは
+     スキーマ (src/mlndl/schema/*.py の Annotated[..., Ref("<パス>")]) を見る。ここには一覧を書かない
+  2. キーで参照先を選ぶ参照 — attaches_to と VLAN のポート (ADR-0001 D8 / ADR-0013 D1)。
+     _resolve_ref がキーごとに参照先を引く。旧形式 {interface: <LAG 等>} の読み替えもここ
+  3. 意味の検査 — ネットワークとしての整合性。手書き。主なもの:
+     - ID: 文法 (ADR-0002 D1)、L1 IF / LAG / VLAN / サブ IF の ID 重複 (ADR-0002 D5)
+     - L1: MLAG の client_lag が LACP を指し、メンバー数が合うか
+     - L2: VLAN のポートのノード (旧形式の node との照合、MLAG に node)、LAG とメンバーの併記、
+       同じ端点の重複、同一ノード上の vlan_id 重複 (MLAG は両ノードで数える)、サブ IF のタグ重複、
+       VNI 番号の重複、VNI に参加するノードの VLAN、VTEP の検査 (ADR-0014 D5)
+     - L3: VRF ↔ L3VNI の双方向一致、RD / RT の形式、L3 IF の (node, name) 重複と参照先のノード所属、
+       gateway_redundancy (VIP のサブネット・group_id 重複)、anycast gateway の一致、
+       トンネル (source のノード、自己トンネル、外側の AF、片側だけのトンネル)
+     - protocols: 1 ノードに複数の local_as、eBGP / iBGP の AS 矛盾
+     - MTU: VTEP を終端するノードどうしの underlay リンクが 1550 以上か
+     - 規約 (warning): 推奨プレフィックス (ADR-0002 D7)、SVI らしい名前で attaches_to なし、labels のキー
+     - 旧形式 (warning): ADR-0011 D10・ADR-0013 D2・ADR-0014 D4
 
 Severity (ADR-0002 D8):
   error   仕様違反。トポロジーは無効
@@ -91,9 +36,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
+from pydantic import BaseModel
+
 from .schema.layer1 import AttachesToObj, LacpLag, MlagLag
 from .schema.layer2 import L2VxLAN, L3VxLAN
 from .schema.topology import MLNDLTopology
+from .schema.refs import COLLECTION_LABELS, Ref
+from .index import IdIndex
 
 _RT_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+:\d+$|^\d+:\d+$")
 
@@ -220,6 +169,9 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # ── ID の文法 (ADR-0002 D1) ──────────────────────────────────────────
     _check_id_grammar(topology, errors)
 
+    # ── 参照の存在 (ADR-0015): スキーマの Ref を読んで、全参照を検査する ────
+    _check_refs(topology, topology.index(), errors)
+
     # attaches_to / VLAN のポートのキーが指す ID 空間 (ADR-0001 D8)
     spaces = {
         "node": node_ids, "interface": interface_ids, "lag": lag_ids,
@@ -277,71 +229,23 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
 # ---------------------------------------------------------------------------
 
 def _validate_l1(l1, node_ids, interface_ids, lag_ids, spaces, errors):
-    # interfaces: node 参照
-    for i, iface in enumerate(l1.interfaces):
-        if iface.node not in node_ids:
-            errors.append(ValidationError(
-                f"layer1.interfaces[{i}].node",
-                f"未定義のノード '{iface.node}' を参照しています",
-            ))
-
-    # links: endpoints 参照
-    for i, link in enumerate(l1.links):
-        for j, ep in enumerate(link.endpoints):
-            if ep not in interface_ids:
-                errors.append(ValidationError(
-                    f"layer1.links[{i}].endpoints[{j}]",
-                    f"未定義のインターフェース '{ep}' を参照しています",
-                ))
-
-    # lag: members / node(s) / peer_link
+    # 参照の存在 (node / endpoints / members / peer_link / client_lag) は _check_refs が検査する (ADR-0015)
     for i, lag in enumerate(l1.lag):
-        for j, member in enumerate(lag.members):
-            if member not in interface_ids:
-                errors.append(ValidationError(
-                    f"layer1.lag[{i}].members[{j}]",
-                    f"未定義のインターフェース '{member}' を参照しています",
-                ))
-        if isinstance(lag, LacpLag):
-            if lag.node not in node_ids:
-                errors.append(ValidationError(
-                    f"layer1.lag[{i}].node",
-                    f"未定義のノード '{lag.node}' を参照しています",
-                ))
-        elif isinstance(lag, MlagLag):
-            for j, nid in enumerate(lag.nodes):
-                if nid not in node_ids:
-                    errors.append(ValidationError(
-                        f"layer1.lag[{i}].nodes[{j}]",
-                        f"未定義のノード '{nid}' を参照しています",
-                    ))
-            if lag.peer_link not in lag_ids:
-                errors.append(ValidationError(
-                    f"layer1.lag[{i}].peer_link",
-                    f"未定義の lag '{lag.peer_link}' を参照しています",
-                ))
-            # client_lag: 同一 lag リスト内の LacpLag を参照していること
-            if lag.client_lag is not None:
-                if lag.client_lag not in lag_ids:
-                    errors.append(ValidationError(
-                        f"layer1.lag[{i}].client_lag",
-                        f"未定義の lag '{lag.client_lag}' を参照しています",
-                    ))
-                else:
-                    client = next((x for x in l1.lag if x.id == lag.client_lag), None)
-                    if client is not None and not isinstance(client, LacpLag):
-                        errors.append(ValidationError(
-                            f"layer1.lag[{i}].client_lag",
-                            f"client_lag は LacpLag (type: lacp) を参照する必要があります",
-                        ))
-                    # members 数の対称性チェック
-                    if client is not None and isinstance(client, LacpLag):
-                        if len(client.members) != len(lag.nodes):
-                            errors.append(ValidationError(
-                                f"layer1.lag[{i}].client_lag",
-                                f"client_lag '{lag.client_lag}' の members 数 ({len(client.members)}) が"
-                                f" MLAG の nodes 数 ({len(lag.nodes)}) と一致しません",
-                            ))
+        # client_lag: 同一 lag リスト内の LacpLag を参照していること
+        if not isinstance(lag, MlagLag) or lag.client_lag not in lag_ids:
+            continue
+        client = next(x for x in l1.lag if x.id == lag.client_lag)
+        if not isinstance(client, LacpLag):
+            errors.append(ValidationError(
+                f"layer1.lag[{i}].client_lag",
+                f"client_lag は LacpLag (type: lacp) を参照する必要があります",
+            ))
+        elif len(client.members) != len(lag.nodes):            # members 数の対称性
+            errors.append(ValidationError(
+                f"layer1.lag[{i}].client_lag",
+                f"client_lag '{lag.client_lag}' の members 数 ({len(client.members)}) が"
+                f" MLAG の nodes 数 ({len(lag.nodes)}) と一致しません",
+            ))
 
     # attaches_to
     for i, node in enumerate(l1.nodes):
@@ -377,8 +281,8 @@ def _port_nodes(pr, kind, path, iface_node, lag_nodes, node_ids, errors) -> set[
         "warning",
     ))
     if pr.node not in node_ids:
-        errors.append(ValidationError(f"{path}.node", f"未定義のノード '{pr.node}' を参照しています"))
-    elif kind == "lag" and len(owners) > 1:
+        return owners                           # 未定義のノードは _check_refs が検査する
+    if kind == "lag" and len(owners) > 1:
         errors.append(ValidationError(
             f"{path}.node",
             f"MLAG '{pr.target}' は {' / '.join(sorted(owners))} の両方に効くため、node は書けません (ADR-0013 D2)",
@@ -482,11 +386,6 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
             seen_vnis[vx.vni] = vx.id
 
         if isinstance(vx, L2VxLAN):
-            if vx.vlan not in vlan_ids:
-                errors.append(ValidationError(
-                    f"layer2.vxlan[{i}].vlan",
-                    f"未定義の VLAN '{vx.vlan}' を参照しています",
-                ))
             if vx.vteps:
                 participants = _check_vni_vteps(vx, i, vtep_nodes, errors)
             else:
@@ -503,12 +402,6 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
                             f"VLAN を載せ忘れていないか確認してください (ADR-0011 D9)",
                             "warning",
                         ))
-        elif isinstance(vx, L3VxLAN):
-            if vx.vrf not in vrf_ids:
-                errors.append(ValidationError(
-                    f"layer2.vxlan[{i}].vrf",
-                    f"未定義の VRF '{vx.vrf}' を参照しています",
-                ))
 
 
 def _check_vni_vteps(vx, i, vtep_nodes, errors) -> set[str]:
@@ -521,10 +414,7 @@ def _check_vni_vteps(vx, i, vtep_nodes, errors) -> set[str]:
             errors.append(ValidationError(path, f"VTEP '{vt}' が重複しています (ADR-0014 D3)"))
             continue
         seen.add(vt)
-        if vt not in vtep_nodes:
-            errors.append(ValidationError(path, f"未定義の VTEP '{vt}' を参照しています (ADR-0014 D3)"))
-            continue
-        participants |= vtep_nodes[vt]
+        participants |= vtep_nodes.get(vt, set())     # 未定義の VTEP は _check_refs が検査する
     return participants
 
 
@@ -536,17 +426,6 @@ def _check_legacy_vtep_source(vx, i, node_ids, l3interface_ids, l3iface_node, er
         "vteps: [<VTEP の id>] で参照してください (ADR-0014 D4)",
         "warning",
     ))
-    if vx.vtep_source not in l3interface_ids:
-        errors.append(ValidationError(
-            f"layer2.vxlan[{i}].vtep_source",
-            f"未定義の L3 インターフェース '{vx.vtep_source}' を参照しています",
-        ))
-    for j, m in enumerate(vx.members or []):
-        if m not in node_ids:
-            errors.append(ValidationError(
-                f"layer2.vxlan[{i}].members[{j}]",
-                f"未定義のノード '{m}' を参照しています",
-            ))
     vtep_node = l3iface_node.get(vx.vtep_source)
     if vtep_node is not None and vx.members and vtep_node not in vx.members:
         errors.append(ValidationError(
@@ -569,8 +448,7 @@ def _validate_vteps(topology: MLNDLTopology, vtep_nodes: dict[str, set[str]], er
             spath = f"{path}.sources[{j}]"
             iface = l3ifs.get(src)
             if iface is None:
-                errors.append(ValidationError(spath, f"未定義の L3 インターフェース '{src}' を参照しています"))
-                continue
+                continue                                # 未定義は _check_refs が検査する
             if src in used_by:
                 same = used_by[src] == vtep.id
                 errors.append(ValidationError(
@@ -654,12 +532,7 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
 
     # VRF
     for i, vrf in enumerate(l3.vrfs):
-        if vrf.l3vni is not None and vrf.l3vni not in l3vni_ids:
-            errors.append(ValidationError(
-                f"layer3.vrfs[{i}].l3vni",
-                f"未定義の L3VNI '{vrf.l3vni}' を参照しています（type=l3vni の vxlan が必要）",
-            ))
-        elif vrf.l3vni is not None and l3vni_vrf.get(vrf.l3vni) != vrf.id:
+        if vrf.l3vni in l3vni_ids and l3vni_vrf.get(vrf.l3vni) != vrf.id:
             errors.append(ValidationError(
                 f"layer3.vrfs[{i}].l3vni",
                 f"VRF '{vrf.id}' は L3VNI '{vrf.l3vni}' を指していますが、その L3VNI は"
@@ -699,14 +572,6 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
     seen_if: dict[tuple[str, str], str] = {}
     for i, iface in enumerate(l3.interfaces):
         path = f"layer3.interfaces[{i}]"
-        if iface.node not in node_ids:
-            errors.append(ValidationError(
-                f"{path}.node", f"未定義のノード '{iface.node}' を参照しています",
-            ))
-        if iface.vrf is not None and iface.vrf not in vrf_ids:
-            errors.append(ValidationError(
-                f"{path}.vrf", f"未定義の VRF '{iface.vrf}' を参照しています",
-            ))
 
         key = (iface.node, iface.name)
         if key in seen_if:
@@ -779,26 +644,13 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
     l3iface = {iface.id: iface for iface in l3.interfaces}
     for i, tun in enumerate(l3.tunnel_interfaces):
         path = f"layer3.tunnel_interfaces[{i}]"
-        if tun.node not in node_ids:
-            errors.append(ValidationError(
-                f"{path}.node", f"未定義のノード '{tun.node}' を参照しています",
-            ))
-        if tun.source not in l3interface_ids:
-            errors.append(ValidationError(
-                f"{path}.source", f"未定義の L3 インターフェース '{tun.source}' を参照しています",
-            ))
-        elif tun.node in node_ids and l3iface_node[tun.source] != tun.node:
+        if tun.source in l3iface_node and tun.node in node_ids and l3iface_node[tun.source] != tun.node:
             errors.append(ValidationError(
                 f"{path}.source",
                 f"source '{tun.source}' はノード '{l3iface_node[tun.source]}' に属しており、"
                 f"トンネルのノード '{tun.node}' のものではありません",
             ))
-        if tun.destination_interface is not None and tun.destination_interface not in l3interface_ids:
-            errors.append(ValidationError(
-                f"{path}.destination_interface",
-                f"未定義の L3 インターフェース '{tun.destination_interface}' を参照しています",
-            ))
-        elif tun.destination_interface is not None and l3iface_node[tun.destination_interface] == tun.node:
+        if tun.destination_interface in l3iface_node and l3iface_node[tun.destination_interface] == tun.node:
             errors.append(ValidationError(
                 f"{path}.destination_interface",
                 f"destination_interface '{tun.destination_interface}' はトンネルと同じノード"
@@ -817,12 +669,6 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
                 f"source '{tun.source}' のアドレスは {_af_names(src_afs)}、destination は"
                 f" {_af_names(dst_afs)} で、外側のアドレスファミリーが一致しません (ADR-0011 D6)",
             ))
-        for fld in ("vrf", "transport_vrf"):
-            v = getattr(tun, fld)
-            if v is not None and v not in vrf_ids:
-                errors.append(ValidationError(
-                    f"{path}.{fld}", f"未定義の VRF '{v}' を参照しています",
-                ))
 
     # 対向がトポロジー内なのに、逆向きのトンネルが書かれていない (round4 E8)
     back = {(t.source, t.destination_interface) for t in l3.tunnel_interfaces}
@@ -840,22 +686,6 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
 
     # Routing Adjacencies
     for i, adj in enumerate(l3.routing_adjacencies):
-        if adj.from_.node not in node_ids:
-            errors.append(ValidationError(
-                f"layer3.routing_adjacencies[{i}].from.node",
-                f"未定義のノード '{adj.from_.node}' を参照しています",
-            ))
-        if adj.to.node not in node_ids:
-            errors.append(ValidationError(
-                f"layer3.routing_adjacencies[{i}].to.node",
-                f"未定義のノード '{adj.to.node}' を参照しています",
-            ))
-        for side, ep in [("from", adj.from_), ("to", adj.to)]:
-            if ep.update_source is not None and ep.update_source not in l3interface_ids:
-                errors.append(ValidationError(
-                    f"layer3.routing_adjacencies[{i}].{side}.update_source",
-                    f"未定義の L3 インターフェース '{ep.update_source}' を参照しています",
-                ))
         if adj.attaches_to is not None:
             _check_attaches_to(adj.attaches_to, f"layer3.routing_adjacencies[{i}].attaches_to", spaces, errors)
 
@@ -865,15 +695,6 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
 # ---------------------------------------------------------------------------
 
 def _validate_protocols(protocols, node_ids, errors):
-    # BFD
-    for i, bfd in enumerate(protocols.bfd):
-        for j, nid in enumerate(bfd.nodes):
-            if nid not in node_ids:
-                errors.append(ValidationError(
-                    f"protocols.bfd[{i}].nodes[{j}]",
-                    f"未定義のノード '{nid}' を参照しています",
-                ))
-
     # 同一ノードが複数 BGP プロセスで異なる local_as を持つ矛盾を検出
     # (1 台の機器は通常 1 つの BGP AS。VRF 分離/confederation は別途明示が必要)
     node_local_as: dict[str, set[int]] = {}
@@ -892,17 +713,7 @@ def _validate_protocols(protocols, node_ids, errors):
     # BGP
     for i, bgp in enumerate(protocols.bgp):
         for j, bn in enumerate(bgp.nodes):
-            if bn.node not in node_ids:
-                errors.append(ValidationError(
-                    f"protocols.bgp[{i}].nodes[{j}].node",
-                    f"未定義のノード '{bn.node}' を参照しています",
-                ))
             for k, nb in enumerate(bn.neighbors):
-                if nb.node not in node_ids:
-                    errors.append(ValidationError(
-                        f"protocols.bgp[{i}].nodes[{j}].neighbors[{k}].node",
-                        f"未定義のノード '{nb.node}' を参照しています",
-                    ))
                 # AS 番号整合性チェック
                 if nb.type == "ebgp" and bn.local_as is not None and nb.remote_as is not None:
                     if bn.local_as == nb.remote_as:
@@ -1049,6 +860,54 @@ def _id_grammar_problems(entity_id: str) -> list[str]:
     if len(entity_id) > _ID_MAX_LEN:
         problems.append(f"{_ID_MAX_LEN} 文字を超えています ({len(entity_id)} 文字)")
     return problems
+
+
+def _check_refs(topology: MLNDLTopology, index: IdIndex, errors: list[ValidationError]) -> None:
+    """Ref が付いたフィールドの値が、参照先のコレクションに実在するか (ADR-0015)
+
+    スキーマを辿って Ref を探すので、構文を足しても Ref を書けば検査が付く。
+    参照先の種類をキーで選ぶ参照 (attaches_to、VLAN のポート) は _resolve_ref が検査する
+    """
+    for section_name in _ID_SECTIONS:
+        section = getattr(topology, section_name)
+        if section is not None:
+            _walk_refs(section, section_name, index, errors)
+
+
+def _walk_refs(model: BaseModel, path: str, index: IdIndex, errors: list[ValidationError]) -> None:
+    for name, info in type(model).model_fields.items():
+        value = getattr(model, name)
+        if value is None:
+            continue
+        field_path = f"{path}.{info.alias or name}"
+        ref = next((m for m in info.metadata if isinstance(m, Ref)), None)
+        if ref is not None:
+            valid = index.ids(ref.path, ref.where)
+            targets = value if isinstance(value, list) else [value]
+            for j, target in enumerate(targets):
+                if target not in valid:
+                    errors.append(ValidationError(
+                        f"{field_path}[{j}]" if isinstance(value, list) else field_path,
+                        _undefined_ref_message(ref, target, index),
+                    ))
+        elif isinstance(value, BaseModel):
+            _walk_refs(value, field_path, index, errors)
+        elif isinstance(value, list):
+            for j, item in enumerate(value):
+                if isinstance(item, BaseModel):
+                    _walk_refs(item, f"{field_path}[{j}]", index, errors)
+
+
+def _undefined_ref_message(ref: Ref, target: str, index: IdIndex) -> str:
+    message = f"未定義の{_ja(ref.label).rstrip()} '{target}' を参照しています"
+    if ref.where is not None and target in index.ids(ref.path):
+        field, value = ref.where
+        return f"{message}。'{target}' は {field}: {value} ではありません"
+    elsewhere = index.paths_of(target)
+    if elsewhere:
+        kinds = " / ".join(COLLECTION_LABELS.get(p, p) for p in elsewhere)
+        return f"{message}。'{target}' は{_ja(kinds)}です"
+    return message
 
 
 def _check_id_grammar(topology: MLNDLTopology, errors: list[ValidationError]) -> None:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+from .refs import Ref
 
 
 class BFDConfig(BaseModel):
@@ -16,7 +18,7 @@ class BFDConfig(BaseModel):
     min_tx: int = 300       # ms
     min_rx: int = 300       # ms
     multiplier: int = 3
-    nodes: list[str] = []   # layer1.nodes[].id を参照
+    nodes: Annotated[list[str], Ref("layer1.nodes")] = []
 
 
 class BGPNeighbor(BaseModel):
@@ -24,7 +26,7 @@ class BGPNeighbor(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    node: str                                       # layer1.nodes[].id を参照
+    node: Annotated[str, Ref("layer1.nodes")]
     remote_as: int | None = None
     type: Literal["ebgp", "ibgp"] | None = None
     bfd: bool = False
@@ -37,7 +39,7 @@ class BGPNode(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    node: str                       # layer1.nodes[].id を参照
+    node: Annotated[str, Ref("layer1.nodes")]
     local_as: int | None = None
     role: str | None = None         # route_reflector 等
     neighbors: list[BGPNeighbor] = []

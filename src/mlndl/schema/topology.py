@@ -47,3 +47,16 @@ class MLNDLTopology(BaseModel):
                 f"サポートされていない MLNDL バージョン: {ver!r}。1.x が必要です"
             )
         return data
+
+    def index(self):
+        """id の索引 (mlndl.index.IdIndex) を作る。何度も引くときはこれを使い回す"""
+        from ..index import IdIndex
+        return IdIndex(self)
+
+    def resolve(self, entity_id: str, path: str | None = None):
+        """id からエンティティを引く。見つからなければ None (ADR-0015)
+
+        例: topology.resolve("vtep-leaf1-leaf2") → Vtep。
+        path ("layer2.vxlan" など) を省略すると全コレクションから探す
+        """
+        return self.index().get(entity_id, path)
