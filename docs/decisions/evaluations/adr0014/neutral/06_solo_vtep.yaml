@@ -1,0 +1,43 @@
+# 仮構文: layer2.vteps は現行スキーマに存在しない。方式中立モデル (sources + address) の試し書き。
+#
+# ケース: 単独 VTEP (border1 のみが VTEP となる最小構成)
+#
+# 焦点: 「ノード数 1 の VTEP」も複数ノードの VTEP と同じ構文で書けること。
+#       Discriminated Union (solo / mlag) を避ける狙い。
+#
+# 書けたか: 書けた。sources に 1 要素、address 省略で L3 IF.ip から導出。
+#
+# 示唆: solo VTEP が「複数 VTEP の退化形」として収まり、構文が 1 つで済む。
+#       書き手が増やしたい（border1 を MLAG ペア化する）ときの差分は
+#       「sources に 1 要素追加 / address を明示する」だけで、ID の付け替えが不要。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-neutral-solo-vtep
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: border1, implementation: vm, role: border}
+  interfaces: []
+  links: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+  vteps:
+    - id: vtep-border1
+      sources: [border1-lo1]
+      # address 省略 → border1-lo1.ip (10.0.1.31/32) から導出
+
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-border1]}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - {id: border1-lo0, node: border1, name: lo0, ip: 10.0.0.31/32}
+    - {id: border1-lo1, node: border1, name: lo1, ip: 10.0.1.31/32}

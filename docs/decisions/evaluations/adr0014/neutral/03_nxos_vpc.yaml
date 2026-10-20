@@ -1,0 +1,57 @@
+# 仮構文: layer2.vteps は現行スキーマに存在しない。方式中立モデル (sources + address) の試し書き。
+#
+# ケース: Cisco NX-OS vPC + VXLAN BGP EVPN
+#   - 実機: interface loopback1 に 2 IP (primary = 固有、secondary = 共有)
+#     例: ip address 10.0.1.11/32 ; ip address 10.0.1.12/32 secondary
+#   - NVE source-interface loopback1 を VTEP として使う
+#
+# 焦点: 現行の L3Interface.ip は単数。同じ IF に 2 IP を貼る実機構文は mlndl では直接書けない
+#
+# どう書いたか:
+#   - primary (ユニーク IP) を L3 IF に書く: leaf1-lo1 ip: 10.0.1.11/32
+#   - secondary (共有 IP) は L3 IF に書かず、VTEP の address に直接書く
+#   - sources はピアそれぞれの primary L3 IF を指す
+#   - 結果: VTEP の address と sources[*].ip は意図的に異なる値になる
+#
+# 書けたか: 書けたが「VTEP address は sources の ip から独立してよい」という緩い規約が必要
+# 不足情報:
+#   - 「primary IP とは何か」は構文からは消え、L3 IF.ip の値が primary / VTEP.address が secondary
+#     という暗黙了解になる。これはベンダ固有の設定詳細 (eve-lab-builder の仕事) として許容する想定
+#   - 構文中に「primary / secondary」の語は現れない (= 方式中立が保てている)
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-neutral-nxos-vpc
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: leaf1, implementation: vm, role: leaf, device_type: cisco_nxos}
+    - {id: leaf2, implementation: vm, role: leaf, device_type: cisco_nxos}
+  interfaces: []
+  links: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+  vteps:
+    - id: vtep-vpc-a
+      sources: [leaf1-lo1, leaf2-lo1]   # 各ピアの loopback1 (primary IP を持つ IF)
+      address: 10.0.1.12/32             # NX-OS で言う secondary IP (vPC 共有)
+      # ← sources[*].ip (= primary 10.0.1.11 / 10.0.1.21) とは意図的に異なる
+
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-vpc-a]}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - {id: leaf1-lo0, node: leaf1, name: loopback0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0, node: leaf2, name: loopback0, ip: 10.0.0.12/32}
+    # primary IP (NX-OS では同じ loopback1 の 1 行目)
+    - {id: leaf1-lo1, node: leaf1, name: loopback1, ip: 10.0.1.11/32}
+    - {id: leaf2-lo1, node: leaf2, name: loopback1, ip: 10.0.1.21/32}
+    # secondary IP は L3Interface として書けない (ip は単数)。VTEP.address に書く

@@ -187,7 +187,7 @@ validator で読み替える 2 つ (ID の種類に依存するもの) は、war
 
 ### 書けないまま残るもの (別 ADR で扱う。network-tech-reviewer の優先順)
 
-1. VXLAN の anycast VTEP (MLAG ペアで共有する VTEP の IP)。`vtep_source` が単数
+1. ~~VXLAN の anycast VTEP (MLAG ペアで共有する VTEP の IP)。`vtep_source` が単数~~ → [drafts/0014](drafts/0014-vteps.md) で解決 (2026-10-20)
 2. MLAG の peer-keepalive
 3. L3 IF 単位の MTU
 4. VXLAN の BUM 配送方式 (ingress replication / multicast)

@@ -1,0 +1,90 @@
+# 案C: MLAG ペアで 1 つの VTEP エンティティ (nodes + anycast_ip)
+# 仮構文: 現行スキーマに layer2.vteps は存在しない。
+# 要点:
+#   - MLAG ペアはそれ自体を 1 VTEP として扱い、anycast IP をエンティティに直接書く
+#   - 単独ノードの VTEP は node 単数 + source (L3 IF id) で書く (= Discriminated Union)
+#   - anycast IP が「VTEP の属性」になるため、ペアで同一であることを validator が
+#     単一箇所から読める。L3 IF 側の二重記述は不要
+#   - 代償: 「VTEP IP」が L3 IF と VTEP エンティティで二箇所に書ける構造になり
+#     どちらが権威か決める必要がある。ここでは MLAG VTEP は L3 IF を参照しない
+#     (anycast_ip がソース) 設計を試す
+#   - NX-OS の primary+secondary は {primary_source: leaf1-lo0, anycast_ip: ...} で
+#     1 エンティティに同居させられる (ペア共有ではこれが最自然)
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-planC-vtep-mlag-pair
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, implementation: vm, role: spine}
+    - {id: spine2, implementation: vm, role: spine}
+    - {id: leaf1,  implementation: vm, role: leaf}
+    - {id: leaf2,  implementation: vm, role: leaf}
+    - {id: leaf3,  implementation: vm, role: leaf}
+    - {id: leaf4,  implementation: vm, role: leaf}
+    - {id: border1, implementation: vm, role: border}
+  interfaces: []
+  links: []
+  lag: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+    - {id: vlan-200, vlan_id: 200}
+
+  # ← 仮構文。Discriminated Union 相当 (nodes 複数 → MLAG / node 単数 → solo)
+  vteps:
+    - id: vtep-mlag-a                 # MLAG ペア A: leaf1 + leaf2
+      nodes: [leaf1, leaf2]
+      anycast_ip: 10.0.1.12/32
+      # 各ノード固有の primary (NX-OS で言う primary IP) を書きたいときはここに:
+      # primary_sources: {leaf1: leaf1-lo0, leaf2: leaf2-lo0}
+
+    - id: vtep-mlag-b
+      nodes: [leaf3, leaf4]
+      anycast_ip: 10.0.1.34/32
+
+    - id: vtep-border1                # 単独 VTEP: L3 IF を参照
+      node: border1
+      source: border1-lo0
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vteps: [vtep-mlag-a, vtep-mlag-b, vtep-border1]
+
+    - id: vni-10200
+      type: l2vni
+      vni: 10200
+      vlan: vlan-200
+      vteps: [vtep-mlag-a]
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    - {id: spine1-lo0,  node: spine1,  name: lo0, ip: 10.0.0.1/32}
+    - {id: spine2-lo0,  node: spine2,  name: lo0, ip: 10.0.0.2/32}
+    - {id: leaf1-lo0,   node: leaf1,   name: lo0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0,   node: leaf2,   name: lo0, ip: 10.0.0.12/32}
+    - {id: leaf3-lo0,   node: leaf3,   name: lo0, ip: 10.0.0.13/32}
+    - {id: leaf4-lo0,   node: leaf4,   name: lo0, ip: 10.0.0.14/32}
+    - {id: border1-lo0, node: border1, name: lo0, ip: 10.0.0.21/32}
+    # 案C では MLAG ペアの L3 IF (lo1 anycast) を書かなくてよい
+    # anycast_ip は VTEP エンティティに権威的に 1 箇所だけ書く

@@ -1,0 +1,45 @@
+# 仮構文: layer2.vteps は現行スキーマに存在しない。方式中立モデル (sources + address) の試し書き。
+#
+# ケース: Cumulus Linux の MLAG + anycast VXLAN
+#   - lo (lo0 相当) は各ノード固有 IP (BGP update-source / router-id)
+#   - clagd-vxlan-anycast-ip 相当の共有 IP は別 loopback (lo1) に貼る
+#   - 両ノードの lo1 に同じ IP を書く (= anycast)
+#
+# 書けたか: 書けた。方式名 (anycast / clag) は構文には出ない。
+# 不足情報: Cumulus 特有の clagd-vxlan-anycast-ip 設定は eve-lab-builder 側で device_type から決める想定。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-neutral-cumulus-mlag
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: leaf1, implementation: vm, role: leaf, device_type: cumulus_linux}
+    - {id: leaf2, implementation: vm, role: leaf, device_type: cumulus_linux}
+  interfaces: []
+  links: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+  vteps:
+    - id: vtep-mlag-a
+      sources: [leaf1-lo1, leaf2-lo1]   # 両ピアの共有ループバック (anycast)
+      address: 10.0.1.12/32             # 省略可だが、anycast であることを読者に明示するため記載
+
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-mlag-a]}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    # 固有 loopback (BGP update-source)
+    - {id: leaf1-lo0, node: leaf1, name: lo0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0, node: leaf2, name: lo0, ip: 10.0.0.12/32}
+    # 共有 VTEP loopback (anycast; 両ノードで同じ IP)
+    - {id: leaf1-lo1, node: leaf1, name: lo1, ip: 10.0.1.12/32}
+    - {id: leaf2-lo1, node: leaf2, name: lo1, ip: 10.0.1.12/32}

@@ -1,0 +1,86 @@
+# 案B: ノード単位の VTEP エンティティを layer2.vteps に導入
+# 仮構文: 現行スキーマに layer2.vteps は存在しない。
+# 要点:
+#   - VTEP は 1 ノードにつき 1 つのエンティティ。source は L3 IF id を参照
+#   - VNI は vteps: [vtep id] で参加者を列挙 (members は冗長なので削る案も可)
+#   - MLAG anycast は L3 IF 側に同じ IP を書くことで表現 (= 案A と同じ機構)
+#     → VTEP エンティティは「どの VTEP が同じ anycast グループか」を直接は示せない
+#   - NX-OS の primary + secondary IP は、VTEP エンティティに
+#     primary_source / secondary_source を 2 フィールドで持たせる拡張が自然
+#     (ここでは primary_source のみ用意し、secondary 問題はスキーマ提案として
+#      README に書く)
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-planB-vtep-per-node
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, implementation: vm, role: spine}
+    - {id: spine2, implementation: vm, role: spine}
+    - {id: leaf1,  implementation: vm, role: leaf}
+    - {id: leaf2,  implementation: vm, role: leaf}
+    - {id: leaf3,  implementation: vm, role: leaf}
+    - {id: leaf4,  implementation: vm, role: leaf}
+    - {id: border1, implementation: vm, role: border}
+  interfaces: []
+  links: []
+  lag: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+    - {id: vlan-200, vlan_id: 200}
+
+  # ← 仮構文: 新規コレクション
+  vteps:
+    - {id: vtep-leaf1,   node: leaf1,   source: leaf1-vtep}
+    - {id: vtep-leaf2,   node: leaf2,   source: leaf2-vtep}
+    - {id: vtep-leaf3,   node: leaf3,   source: leaf3-vtep}
+    - {id: vtep-leaf4,   node: leaf4,   source: leaf4-vtep}
+    - {id: vtep-border1, node: border1, source: border1-lo0}
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3, vtep-leaf4, vtep-border1]
+      # members は冗長 (VTEP の node から導出) のため不要と判断
+
+    - id: vni-10200
+      type: l2vni
+      vni: 10200
+      vlan: vlan-200
+      vteps: [vtep-leaf1, vtep-leaf2]
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    - {id: spine1-lo0,  node: spine1,  name: lo0, ip: 10.0.0.1/32}
+    - {id: spine2-lo0,  node: spine2,  name: lo0, ip: 10.0.0.2/32}
+    - {id: leaf1-lo0,   node: leaf1,   name: lo0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0,   node: leaf2,   name: lo0, ip: 10.0.0.12/32}
+    - {id: leaf3-lo0,   node: leaf3,   name: lo0, ip: 10.0.0.13/32}
+    - {id: leaf4-lo0,   node: leaf4,   name: lo0, ip: 10.0.0.14/32}
+    - {id: border1-lo0, node: border1, name: lo0, ip: 10.0.0.21/32}
+
+    # MLAG ペアの anycast は L3 IF に同一 IP を書くことで実現 (案A と同じ)
+    - {id: leaf1-vtep,  node: leaf1,   name: lo1, ip: 10.0.1.12/32}
+    - {id: leaf2-vtep,  node: leaf2,   name: lo1, ip: 10.0.1.12/32}
+    - {id: leaf3-vtep,  node: leaf3,   name: lo1, ip: 10.0.1.34/32}
+    - {id: leaf4-vtep,  node: leaf4,   name: lo1, ip: 10.0.1.34/32}

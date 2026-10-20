@@ -1,0 +1,58 @@
+# 仮構文: layer2.vteps は現行スキーマに存在しない。方式中立モデル (sources + address) の試し書き。
+#
+# ケース: Arista EOS の MLAG
+#   - Loopback0 で BGP update-source (各ノード固有)
+#   - Loopback1 を VTEP source とし、両ピアで同じ IP を貼る
+#
+# 焦点: address を省略できるか / 書くべきか
+#   - sources が複数あっても、それぞれの L3 IF.ip が全て一致していれば導出可能
+#   - しかし省略形は「書き手が anycast を意図したか / 単なる書き間違いか」の区別を奪う
+#   - 本例では省略した版と記載した版の 2 つを並べる (下の vtep-mlag-a2)
+#
+# 書けたか: 書けた。
+# 不足情報: ない。方式名 (anycast / MLAG) を書く必要はない。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-neutral-arista-mlag
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: leaf1, implementation: vm, role: leaf, device_type: arista_eos}
+    - {id: leaf2, implementation: vm, role: leaf, device_type: arista_eos}
+  interfaces: []
+  links: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+  vteps:
+    # パターン 1: address を省略 (sources の L3 IF.ip から導出)
+    #   validator は「全 source の ip が同一であること」を確認して導出
+    - id: vtep-mlag-a
+      sources: [leaf1-lo1, leaf2-lo1]
+      # address 省略 → 10.0.1.12/32 として扱う
+
+    # パターン 2: address を明示 (読み手に意図を伝える)
+    #   同じ事実を書くが、「2 ノードで同じ IP = anycast」であることが宣言的に読める
+    - id: vtep-mlag-a-explicit
+      sources: [leaf1-lo1-x, leaf2-lo1-x]
+      address: 10.0.1.13/32
+
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-mlag-a]}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - {id: leaf1-lo0, node: leaf1, name: Loopback0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0, node: leaf2, name: Loopback0, ip: 10.0.0.12/32}
+    - {id: leaf1-lo1, node: leaf1, name: Loopback1, ip: 10.0.1.12/32}
+    - {id: leaf2-lo1, node: leaf2, name: Loopback1, ip: 10.0.1.12/32}
+    # パターン 2 用 (架空の別 loopback):
+    - {id: leaf1-lo1-x, node: leaf1, name: Loopback2, ip: 10.0.1.13/32}
+    - {id: leaf2-lo1-x, node: leaf2, name: Loopback2, ip: 10.0.1.13/32}

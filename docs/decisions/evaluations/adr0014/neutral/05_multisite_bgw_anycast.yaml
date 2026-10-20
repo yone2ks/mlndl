@@ -1,0 +1,67 @@
+# 仮構文: layer2.vteps は現行スキーマに存在しない。方式中立モデル (sources + address) の試し書き。
+#
+# ケース: VXLAN EVPN Multi-Site (RFC 9014) の Border Gateway (BGW) anycast
+#   - 1 サイトに BGW を 3 ノード配置 (bgw1, bgw2, bgw3)
+#   - 3 ノードが共有する anycast VTEP IP を持ち、対向サイトからは 1 つの VTEP に見える
+#   - サイト内では各 BGW が固有の VTEP も持つ (サイト内 EVPN 用)
+#
+# 焦点: 共有ノード数が 2 (MLAG) 以外のケースで、構文が破綻しないか
+#
+# 書けたか: 書けた。sources の長さは 2 でも 3 でも同じ構文。
+#          方式名 (anycast / BGW) は構文に出ない。
+#
+# 示唆: 「nodes: list[str] 固定長 2」のような制約を VTEP に入れなくてよい。
+#       sources の長さ = 共有ノード数 で自然に 3 ノード以上の anycast が書ける。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-neutral-multisite-bgw-anycast
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: bgw1, implementation: vm, role: border}
+    - {id: bgw2, implementation: vm, role: border}
+    - {id: bgw3, implementation: vm, role: border}
+  interfaces: []
+  links: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+  vteps:
+    # サイト内 VTEP: 各 BGW 固有
+    - {id: vtep-bgw1, sources: [bgw1-lo1]}
+    - {id: vtep-bgw2, sources: [bgw2-lo1]}
+    - {id: vtep-bgw3, sources: [bgw3-lo1]}
+
+    # Multi-Site 対外 anycast VTEP: 3 ノードで共有
+    - id: vtep-site-anycast
+      sources: [bgw1-lo2, bgw2-lo2, bgw3-lo2]
+      address: 10.0.9.1/32   # 3 ノードで同じ IP
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vteps: [vtep-bgw1, vtep-bgw2, vtep-bgw3, vtep-site-anycast]
+      # ↑ サイト内固有 VTEP も対外 anycast VTEP も両方この VNI に参加
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - {id: bgw1-lo0, node: bgw1, name: lo0, ip: 10.0.0.21/32}
+    - {id: bgw2-lo0, node: bgw2, name: lo0, ip: 10.0.0.22/32}
+    - {id: bgw3-lo0, node: bgw3, name: lo0, ip: 10.0.0.23/32}
+    # サイト内 VTEP source (固有)
+    - {id: bgw1-lo1, node: bgw1, name: lo1, ip: 10.0.1.21/32}
+    - {id: bgw2-lo1, node: bgw2, name: lo1, ip: 10.0.1.22/32}
+    - {id: bgw3-lo1, node: bgw3, name: lo1, ip: 10.0.1.23/32}
+    # 対外 anycast VTEP source (3 ノードで同一 IP)
+    - {id: bgw1-lo2, node: bgw1, name: lo2, ip: 10.0.9.1/32}
+    - {id: bgw2-lo2, node: bgw2, name: lo2, ip: 10.0.9.1/32}
+    - {id: bgw3-lo2, node: bgw3, name: lo2, ip: 10.0.9.1/32}

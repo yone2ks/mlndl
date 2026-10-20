@@ -1,0 +1,80 @@
+# 案A: L2VNI の vtep_source を list に拡張する (vtep_sources: [L3 IF id, ...])
+# 仮構文: 現行スキーマは vtep_source: str (単数) のみ受け付けるため validator は通らない。
+# 要点:
+#   - VNI ごとに VTEP ソース L3 IF の list を書く
+#   - MLAG ペアの anycast は 2 ノードの L3 IF に同じ IP を書くことで実現 (下記 leaf1-vtep / leaf2-vtep)
+#   - members は冗長 (L3 IF の node から導出できる) ので省略も検討可能 (ここでは残した)
+#   - NX-OS 式「1 つの lo に primary(ユニーク)+secondary(共有)」は現行 L3Interface.ip が単数のため
+#     表現不可。別 loopback を立てる想定にしている (下記 leaf1-lo0 と leaf1-vtep は別 IF)。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-planA-vtep-sources-list
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, implementation: vm, role: spine}
+    - {id: spine2, implementation: vm, role: spine}
+    - {id: leaf1,  implementation: vm, role: leaf}
+    - {id: leaf2,  implementation: vm, role: leaf}
+    - {id: leaf3,  implementation: vm, role: leaf}
+    - {id: leaf4,  implementation: vm, role: leaf}
+    - {id: border1, implementation: vm, role: border}
+  interfaces: []        # 本評価ではデータプレーン配線は省略
+  links: []
+  lag:
+    - {id: lag-mlag-a-peerlink, type: lacp, node: leaf1, members: []}
+    - {id: lag-mlag-b-peerlink, type: lacp, node: leaf3, members: []}
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+    - {id: vlan-200, vlan_id: 200}
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      # ← 仮構文: 単数 vtep_source を複数 vtep_sources に変える
+      vtep_sources: [leaf1-vtep, leaf2-vtep, leaf3-vtep, leaf4-vtep, border1-lo0]
+      members: [leaf1, leaf2, leaf3, leaf4, border1]
+
+    - id: vni-10200
+      type: l2vni
+      vni: 10200
+      vlan: vlan-200
+      vtep_sources: [leaf1-vtep, leaf2-vtep]   # MLAG ペア A のみ
+      members: [leaf1, leaf2]
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    # 固有 loopback (router-id / BGP update-source)
+    - {id: spine1-lo0,  node: spine1,  name: lo0, ip: 10.0.0.1/32}
+    - {id: spine2-lo0,  node: spine2,  name: lo0, ip: 10.0.0.2/32}
+    - {id: leaf1-lo0,   node: leaf1,   name: lo0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0,   node: leaf2,   name: lo0, ip: 10.0.0.12/32}
+    - {id: leaf3-lo0,   node: leaf3,   name: lo0, ip: 10.0.0.13/32}
+    - {id: leaf4-lo0,   node: leaf4,   name: lo0, ip: 10.0.0.14/32}
+    - {id: border1-lo0, node: border1, name: lo0, ip: 10.0.0.21/32}   # border は VTEP 兼用
+
+    # MLAG ペアで共有する VTEP loopback (同じ IP を 2 回書く = anycast)
+    - {id: leaf1-vtep,  node: leaf1,   name: lo1, ip: 10.0.1.12/32}   # ペア A anycast
+    - {id: leaf2-vtep,  node: leaf2,   name: lo1, ip: 10.0.1.12/32}   # ← 同じ IP (anycast)
+    - {id: leaf3-vtep,  node: leaf3,   name: lo1, ip: 10.0.1.34/32}   # ペア B anycast
+    - {id: leaf4-vtep,  node: leaf4,   name: lo1, ip: 10.0.1.34/32}   # ← 同じ IP (anycast)

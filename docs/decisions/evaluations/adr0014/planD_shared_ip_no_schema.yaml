@@ -1,0 +1,79 @@
+# 案D: スキーマを拡張しない。両ピアの VTEP 用 loopback L3 IF に同じ IP を書き、
+#      VNI 側で各ノードの VTEP を指す
+# 現行スキーマでは L2VxLAN.vtep_source は str (単数) のため、
+# 「VNI 側で各ノードの VTEP を指す」書き方は厳密には現行で通らない。
+# 本ファイルは最小の加算的変更として vtep_source: str → vtep_source: str | list[str]
+# に広げる (= 実質 案A 相当) 想定で書いた。
+# つまり案D は「新規エンティティは入れない」案A と同義になる。
+# 仮構文: vtep_source をリストにする点のみ現行と差分。
+#
+# NX-OS 式の primary+secondary IP は L3Interface.ip が単数のため表現不可。
+# L3Interface に secondary_ip (list) を追加するか、別 L3 IF を立てるしかない。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-planD-no-schema-shared-ip
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, implementation: vm, role: spine}
+    - {id: spine2, implementation: vm, role: spine}
+    - {id: leaf1,  implementation: vm, role: leaf}
+    - {id: leaf2,  implementation: vm, role: leaf}
+    - {id: leaf3,  implementation: vm, role: leaf}
+    - {id: leaf4,  implementation: vm, role: leaf}
+    - {id: border1, implementation: vm, role: border}
+  interfaces: []
+  links: []
+  lag: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+    - {id: vlan-200, vlan_id: 200}
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vtep_source: [leaf1-vtep, leaf2-vtep, leaf3-vtep, leaf4-vtep, border1-lo0]
+      members: [leaf1, leaf2, leaf3, leaf4, border1]
+
+    - id: vni-10200
+      type: l2vni
+      vni: 10200
+      vlan: vlan-200
+      vtep_source: [leaf1-vtep, leaf2-vtep]
+      members: [leaf1, leaf2]
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    - {id: spine1-lo0,  node: spine1,  name: lo0, ip: 10.0.0.1/32}
+    - {id: spine2-lo0,  node: spine2,  name: lo0, ip: 10.0.0.2/32}
+    - {id: leaf1-lo0,   node: leaf1,   name: lo0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0,   node: leaf2,   name: lo0, ip: 10.0.0.12/32}
+    - {id: leaf3-lo0,   node: leaf3,   name: lo0, ip: 10.0.0.13/32}
+    - {id: leaf4-lo0,   node: leaf4,   name: lo0, ip: 10.0.0.14/32}
+    - {id: border1-lo0, node: border1, name: lo0, ip: 10.0.0.21/32}
+
+    # anycast は L3 IF 側の「同じ IP を 2 回書く」で表現
+    - {id: leaf1-vtep,  node: leaf1,   name: lo1, ip: 10.0.1.12/32}
+    - {id: leaf2-vtep,  node: leaf2,   name: lo1, ip: 10.0.1.12/32}
+    - {id: leaf3-vtep,  node: leaf3,   name: lo1, ip: 10.0.1.34/32}
+    - {id: leaf4-vtep,  node: leaf4,   name: lo1, ip: 10.0.1.34/32}

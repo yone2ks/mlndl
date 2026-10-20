@@ -1,0 +1,82 @@
+# 仮構文: layer2.vteps は現行スキーマに存在しない。方式中立モデル (sources + address) の試し書き。
+#
+# ケース: 書き手がやりがちな誤り 3 種を 1 ファイルにまとめ、
+#        validator が何を検出すべきかをコメントで並記する。
+# このファイルは意図的に invalid。
+#
+# 誤り 1: 共有 VTEP のピアを書き忘れ (sources に片方だけ)
+# 誤り 2: address と sources[*].ip の矛盾
+# 誤り 3: 同じループバックを 2 つの VTEP で参照
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-neutral-pitfalls-invalid
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: leaf1, implementation: vm, role: leaf}
+    - {id: leaf2, implementation: vm, role: leaf}
+    - {id: leaf3, implementation: vm, role: leaf}
+    - {id: leaf4, implementation: vm, role: leaf}
+  interfaces: []
+  links: []
+
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+  vteps:
+    # ---- 誤り 1: ピア書き忘れ ----
+    # 書き手の意図: leaf1 と leaf2 の MLAG ペアで anycast VTEP
+    # 実際に書いたもの: leaf1 のみ
+    # 検出手段:
+    #   (a) 構造だけでは検出不可能。sources=[leaf1-lo1] は solo VTEP としても valid
+    #   (b) leaf1-lo1 と leaf2-lo1 が同じ IP を持つことから、validator が
+    #       「同一 IP の L3 IF が複数ノードにあり、片方だけ VTEP に書かれている」を
+    #       warning として指摘できる (= 書き忘れ候補)
+    #   (c) layer1.lag[type:mlag].nodes を見て、片方だけが VTEP に属していたら warning
+    # 現実的には (b)(c) のどちらも「推測」の域を出ないので、ユーザー教育と
+    # サンプルで補うのが妥当
+    - id: vtep-mlag-a-oops
+      sources: [leaf1-lo1]            # ← leaf2-lo1 を書き忘れ
+      address: 10.0.1.12/32
+
+    # ---- 誤り 2: address と sources[*].ip の矛盾 ----
+    # 書き手の意図: 共有 anycast IP を 10.0.1.34/32 にしたい
+    # 実際に書いたもの: address は 10.0.1.34、sources の L3 IF は 10.0.1.35
+    # 検出手段:
+    #   (a) 「全 source の ip が一致していて、かつ address と一致」を strict ルールにすると
+    #       NX-OS vPC (03) が書けなくなる → NG
+    #   (b) 「全 source の ip が一致しているなら address と一致を要求」なら
+    #       NX-OS は source の ip がピア間で異なるので除外される。これは妥当
+    #   (c) いずれにせよ warning / error のどちらにするかは判断が要る
+    - id: vtep-mlag-b-oops
+      sources: [leaf3-lo1, leaf4-lo1]   # 両方とも ip: 10.0.1.35/32
+      address: 10.0.1.34/32             # ← 不一致 (全 source ip が同じなのに address が違う)
+
+    # ---- 誤り 3: 同じループバックを 2 つの VTEP で参照 ----
+    # 書き手の意図: サイト内 VTEP と対外 anycast VTEP を分けたかったが、
+    #              うっかり同じ L3 IF を両方で参照してしまった
+    # 検出手段:
+    #   (a) グローバルに「同一 L3 IF が 2 つ以上の VTEP.sources に現れる」を error にできる
+    #   (b) これは valid な設計を阻害しないか? → 1 本の loopback が 2 つの NVE source に
+    #       なることは通常ない (NVE source-interface は 1 つ)。error でよさそう
+    - id: vtep-leaf3-dup-a
+      sources: [leaf3-lo1]
+    - id: vtep-leaf3-dup-b
+      sources: [leaf3-lo1]   # ← 誤り 3 と同時に、leaf3-lo1 を 2 回参照している
+
+  vxlan:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,
+       vteps: [vtep-mlag-a-oops, vtep-mlag-b-oops, vtep-leaf3-dup-a, vtep-leaf3-dup-b]}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - {id: leaf1-lo1, node: leaf1, name: lo1, ip: 10.0.1.12/32}
+    - {id: leaf2-lo1, node: leaf2, name: lo1, ip: 10.0.1.12/32}   # leaf1 と同じ IP だが VTEP に書かれていない
+    - {id: leaf3-lo1, node: leaf3, name: lo1, ip: 10.0.1.35/32}
+    - {id: leaf4-lo1, node: leaf4, name: lo1, ip: 10.0.1.35/32}

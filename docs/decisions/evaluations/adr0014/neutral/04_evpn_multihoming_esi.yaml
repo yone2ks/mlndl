@@ -1,0 +1,89 @@
+# 仮構文: layer2.vteps は現行スキーマに存在しない。方式中立モデル (sources + address) の試し書き。
+#
+# ケース: EVPN all-active multihoming (ESI-LAG, RFC 7432)
+#   - 2 ノード (leaf1, leaf2) が同一セグメントのサーバに multihoming
+#   - VTEP IP は共有しない。各ノードが固有の VTEP source を持つ
+#   - 冗長は EVPN Type 1 (Ethernet A-D) / Type 4 (ES route) と ESI (LAG 側) で実現
+#
+# 書けたか:
+#   - VTEP 部分は書けた。1 ノード = 1 VTEP エントリ (sources に 1 要素)
+#   - VNI には両 VTEP を列挙するだけで multihoming の冗長が成り立つ
+# 書けない部分:
+#   - ESI 値 (10 進 or 16 進のセグメント識別子) を書く場所がない。
+#     現在の layer1.lag には esi フィールドがない。これは本評価のスコープ外 (ADR-0014 本体ではない)
+#   - ESI 割当方式 (type 0/1/3/5) も書けない
+#   - df_election (Designated Forwarder) アルゴリズムも書けない
+#
+# 示唆: VTEP モデルは multihoming 側で何も特別扱いしなくてよい (=「各ノードが自分の VTEP を持つだけ」)。
+#       冗長のメタデータは LAG 側に生えるべきもので、VTEP 構文に方式名を足す必要はない。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0014-neutral-evpn-multihoming-esi
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: leaf1,   implementation: vm, role: leaf}
+    - {id: leaf2,   implementation: vm, role: leaf}
+    - {id: server1, implementation: vm, role: server}
+  interfaces:
+    - {id: leaf1-swp1,   node: leaf1,   name: swp1}
+    - {id: leaf2-swp1,   node: leaf2,   name: swp1}
+    - {id: server1-eth0, node: server1, name: eth0}
+    - {id: server1-eth1, node: server1, name: eth1}
+  links:
+    - {id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0]}
+    - {id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1]}
+  lag:
+    # サーバ側 bond (サーバは MLAG を意識しない、普通の LACP bond)
+    - id: lag-server1-bond0
+      type: lacp
+      node: server1
+      members: [server1-eth0, server1-eth1]
+      lacp: {mode: active, min_links: 1}
+    # ESI-LAG: 2 ノードにまたがる。現在の mlndl は type: mlag しかないので流用。
+    # ESI 値 (例: 00:11:22:33:44:55:66:77:88:99) を書く場所がない → labels に逃がすしかない
+    - id: lag-esi-a
+      type: mlag                      # 本来は type: esi_lag が欲しいが現行は mlag のみ
+      nodes: [leaf1, leaf2]
+      members: [leaf1-swp1, leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-esi-a-peerlink
+      peer_link_interface: peerlink.4094
+      labels:
+        esi: "00:11:22:33:44:55:66:77:88:99"   # ← 本来は構文で持ちたい情報
+        df_algorithm: modulus                   # ← 同上
+    - id: lag-esi-a-peerlink
+      type: lacp
+      node: leaf1
+      members: []
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      access_ports:
+        - {lag: lag-esi-a}
+
+  vteps:
+    # 各ノード固有 VTEP。sources に 1 要素だけ書く
+    - {id: vtep-leaf1, sources: [leaf1-lo1]}   # address 省略 → sources[0].ip から導出 (10.0.1.11/32)
+    - {id: vtep-leaf2, sources: [leaf2-lo1]}
+
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlan: vlan-100
+      vteps: [vtep-leaf1, vtep-leaf2]   # 両方を列挙。anycast ではないので別々の VTEP ID
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+  interfaces:
+    - {id: leaf1-lo0, node: leaf1, name: lo0, ip: 10.0.0.11/32}
+    - {id: leaf2-lo0, node: leaf2, name: lo0, ip: 10.0.0.12/32}
+    - {id: leaf1-lo1, node: leaf1, name: lo1, ip: 10.0.1.11/32}
+    - {id: leaf2-lo1, node: leaf2, name: lo1, ip: 10.0.1.12/32}   # ← 共有しない

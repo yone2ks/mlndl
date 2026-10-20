@@ -322,13 +322,19 @@ layer2:
       access_ports:
         - {interface: server1-eth0}
 
+  vteps:                         # ADR-0014。VXLAN のトンネル端点。方式名（anycast 等）は構文に出さない
+    - id: vtep-leaf1-leaf2       # 推奨プレフィックス vtep-
+      sources: [leaf1-lo, leaf2-lo]   # この VTEP を終端するノードの L3 IF（ループバック）。node は書かない
+      address: 10.0.100.12/32    # VTEP のアドレス（IPv6 は address_v6）。複数ノードで共有するときは必須
+    - id: vtep-border1
+      sources: [border1-lo]      # sources が 1 つなら address は省略でき、その L3 IF の ip になる
+
   vxlan:
     - id: vni-10100             # ADR-0002: vni-<N> 形式
       type: l2vni                # l2vni / l3vni を明示
       vni: 10100
       vlan: vlan-100
-      vtep_source: leaf1-lo      # layer3.interfaces[].id（node は members に含まれること）
-      members: [leaf1, leaf2]
+      vteps: [vtep-leaf1-leaf2, vtep-border1]   # 参加ノードは VTEP から導出（旧 vtep_source / members は 1.x の間 warning）
     - id: vni-10900
       type: l3vni                # Symmetric IRB 用 L3VNI（必須）
       vni: 10900
@@ -390,6 +396,8 @@ layer3:
       node: leaf1
       name: lo
       ip: 10.0.0.1/32
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}
+    - {id: border1-lo, node: border1, name: lo, ip: 10.0.0.21/32}   # vtep-border1 のアドレスになる
 
   tunnel_interfaces:             # ADR-0011 D6。source / destination を自分で持つ（tunnel_links はない）
     - id: tunnel-border1-dc2
@@ -484,7 +492,8 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | AS 番号 | eBGP ペアで同一 AS / iBGP ペアで異なる AS の矛盾 | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
-| VTEP source | vtep_source が layer3.interfaces に存在し、その node が members に含まれるか | error |
+| VTEP | `sources` が L3 IF に存在するか。同じ L3 IF を 2 つの VTEP / 1 つの VTEP に 2 回書いていないか。1 つの VTEP に同じノードの L3 IF を 2 つ書いていないか。共有（`sources` が複数）なら `address` 必須（型）。アドレスが決まらない / VTEP 間で重複していないか。L2VNI の `vteps` が定義済みか（ADR-0014） | error |
+| VTEP の注意 | `sources` が 1 つで `address` が L3 IF の ip と食い違う。MLAG ペアの片方だけが VTEP を終端している。旧形式 `vtep_source` / `members` | warning |
 | ノード所属 | L3 IF の `node` が、`attaches_to` の参照先（L1 IF / LAG / サブ IF）のノード（群）に含まれるか（ADR-0011 D9） | error |
 | VLAN のポート | `{interface:}` か `{lag:}` のどちらか一方（型）。同じ VLAN に LAG とそのメンバーを併記していないか（error）。同じ VLAN に同じ端点を 2 回書いていないか（error）。LAG のメンバーだけを書いていたら `{lag:}` を促す（warning）（ADR-0013） | error / warning |
 | 参照キー | `attaches_to` のキーがそのエンティティに書けるものか（型。ADR-0001 D8）。参照先がそのキーの種類で定義されているか。キーの取り違え（`{lag: vlan-100}` 等）には正しいキーを示す | error |
@@ -497,12 +506,12 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | トンネル | `source` が同じ node の L3 IF か。`destination_interface` が別 node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。外側のアドレスファミリーが source と destination で一致するか。VRF 参照。対向がトポロジー内なのに逆向きのトンネルがなければ info | error / info |
 | 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
 | 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、`{interface: <LAG / VLAN / サブ IF>}`、VLAN のポートの `node`。ndl_version 1.x の間は読み替えて受け付ける（ADR-0011 D10） | warning |
-| VNI メンバー | `L2VxLAN.members` のノードに、その VLAN のポートがあるか | warning |
-| MTU 整合性 | VxLAN 使用時に underlay MTU が 1550 以上か | error |
+| VNI の参加ノード | L2VNI に参加するノード（VTEP から導出）に、その VLAN のポートがあるか | warning |
+| MTU 整合性 | VTEP を終端するノードどうしの underlay MTU が 1550 以上か | error |
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。MLAG に載せた VLAN は両ノードで数える） | error |
-| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
+| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
 | SVI の紐づけ忘れ | `name` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
 | ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0010 D5・D6 の一意性チェックに置き換え予定（保留中） |
@@ -535,7 +544,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0002](docs/decisions/0002-id-naming-convention.md) | ID 命名規則 | C | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`、`vlan-100`・`vni-10100`・`bgp-peer-*` 形式 |
 | [ADR-0003](docs/decisions/0003-role-vocabulary.md) | `role` 語彙 | **C2** | `role` は注釈側構成子。open-form (自由文字列)。推奨 9 語彙は `docs/role-vocabulary.md`。`hypervisor` は normative token |
 | [ADR-0004](docs/decisions/0004-implementation-role-matrix.md) | `implementation × role` | C | コアは `container × hypervisor = error` のみ。他は上位ツールに委譲 |
-| [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 | C（ADR-0011・ラウンド4 Pass C で部分改訂） | 三側面 (物理構成図/論理構成図/物理-論理連携)。D4 判定フレームワーク。D4 補則「表現の指針」（3 つの問い + D3-2 の明示表）。D6 `node` の持ち方（ノードごとの設定値を持つものだけ必須） |
+| [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) | mlndl の表現スコープ定義 | C（ADR-0011・ラウンド4 Pass C で部分改訂） | 三側面 (物理構成図/論理構成図/物理-論理連携)。D4 判定フレームワーク。D4 補則「表現の指針」（スコープを決める 3 つの問い + D3-2 の明示表、書き方を決める問い 4「方式名は構文に入れない」）。D6 `node` の持ち方（ノードごとの設定値を持つものだけ必須） |
 | [ADR-0006](docs/decisions/0006-endpoints.md) | L1 リンク端点表現 | C | `from`/`to` 廃止 → `endpoints: [a, b]`（無向リスト）。Cytoscape/RFC8345 出力のみ source/target にマップ |
 | [ADR-0009](docs/decisions/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 | C 相当 | `attaches_to`（Realization）/ `parent`（Containment）/ `labels`（Classification）の 3 軸に分離。`scope`・`pod`・`tags` 等 20 語以上を却下 |
 | [ADR-0008](docs/decisions/drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 | C (Draft) | 箱もノード（`role: vpc`）。`location` 軸。所属は `parent` + `labels` |
@@ -543,6 +552,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0011](docs/decisions/0011-layer3-data-plane.md) | layer3 データプレーン | **C** | 表現の指針（スタティックルート等はスコープ外）。L3 IF は `name`（機器上の名前）+ `attaches_to`（`{interface}` / `{lag}` / `{vlan}` / `{subinterface}`）。SVI 短縮形は廃止。`gateway_redundancy`（anycast は全ノード一致を検証）。`ip` / `ipv6`。トンネル。旧形式は 1.x の間 warning（D10） |
 | [ADR-0012](docs/decisions/0012-subinterfaces.md) | 802.1Q サブインターフェース | **C** | `layer2.subinterfaces`。`node` を持たない。`vlan_id` はリンク上のタグ番号（VLAN への参照ではなく照合もしない）。基盤は `{interface:}` か `{lag:}` |
 | [ADR-0013](docs/decisions/0013-vlan-ports-on-lag.md) | VLAN のポート | **C** | `trunk_ports` / `access_ports` は `{interface:}` か `{lag:}`。`node` は書かない。MLAG は 1 エントリで両ノード。LAG とメンバーの併記は error、メンバーだけは warning |
+| [ADR-0014](docs/decisions/drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) | A (Draft) | `layer2.vteps`（`sources` = 終端するノードの L3 IF、`address` / `address_v6`）。VNI は `vteps` で参照。方式中立（anycast / vPC / BGW を構文に出さない）。アドレス省略は `sources` が 1 つのときだけ。旧 `vtep_source` / `members` は 1.x の間 warning（**実装済み**） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---
