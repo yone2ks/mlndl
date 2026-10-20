@@ -85,8 +85,9 @@ layer1:
     - {id: Lag-r1, type: lacp, node: R1, members: [R1-eth0]}
 layer2:
   vlans: [{id: Vlan-10, vlan_id: 10}]
+  vteps: [{id: Vtep-r1, sources: [R1-lo]}]
   vxlan:
-    - {id: Vni-10010, type: l2vni, vni: 10010, vlan: Vlan-10, vtep_source: R1-lo, members: [R1]}
+    - {id: Vni-10010, type: l2vni, vni: 10010, vlan: Vlan-10, vteps: [Vtep-r1]}
   subinterfaces:
     - {id: Subif-r2-eth0-20, attaches_to: {interface: r2-eth0}, vlan_id: 20}
 layer3:
@@ -109,6 +110,7 @@ EXPECTED_PATHS = {
     "layer1.links[0].id",
     "layer1.lag[0].id",
     "layer2.vlans[0].id",
+    "layer2.vteps[0].id",
     "layer2.vxlan[0].id",
     "layer2.subinterfaces[0].id",
     "layer3.vrfs[0].id",

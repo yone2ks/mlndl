@@ -26,15 +26,21 @@ layer3:
     - id: leaf1-lo
       node: leaf1
       name: lo
+    - id: leaf2-lo
+      node: leaf2
+      name: lo
 
 layer2:
   vlans:
     - id: vlan-100
       vlan_id: 100
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
   vxlan:
     - id: vni-100
       type: l2vni
       vni: 10100
       vlan: vlan-100
-      vtep_source: leaf1-lo
-      members: [leaf1, leaf2]
+      vteps: [vtep-leaf1-leaf2]

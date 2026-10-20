@@ -153,27 +153,30 @@ layer2:
         - { interface: leaf1-swp2 }
         - { interface: leaf2-swp2 }
 
+  vteps:
+    # ノードごとの VTEP (ADR-0014)。sources が 1 つなのでアドレスは lo の ip
+    - {id: vtep-leaf1, sources: [leaf1-lo]}
+    - {id: vtep-leaf2, sources: [leaf2-lo]}
+    - {id: vtep-leaf3, sources: [leaf3-lo]}
+
   vxlan:
     - id: vni-10100
       type: l2vni
       vni: 10100
       vlan: vlan-100
-      vtep_source: leaf1-lo
-      members: [leaf1, leaf2]
+      vteps: [vtep-leaf1, vtep-leaf2]
 
     - id: vni-10200
       type: l2vni
       vni: 10200
       vlan: vlan-200
-      vtep_source: leaf1-lo
-      members: [leaf1, leaf2]
+      vteps: [vtep-leaf1, vtep-leaf2]
 
     - id: vni-10300
       type: l2vni
       vni: 10300
       vlan: vlan-300
-      vtep_source: leaf2-lo
-      members: [leaf2, leaf3]
+      vteps: [vtep-leaf2, vtep-leaf3]
 
     - id: vni-10900
       type: l3vni

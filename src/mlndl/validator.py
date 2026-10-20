@@ -14,7 +14,11 @@
     - vlans[].trunk_ports/access_ports[].node → L1 nodes (省略可。ADR-0013)
     - vlans[].trunk_ports/access_ports[].interface → L1 interfaces ∪ lag (ADR-0013)
     - vxlan[l2vni].vlan → layer2.vlans
-    - vxlan[l2vni].vtep_source → layer3.interfaces
+    - vteps[].sources[] → layer3.interfaces。同じ L3 IF を 2 つの VTEP が使わないか、1 ノードから 1 つか (ADR-0014)
+    - vteps のアドレス (sources が 1 つなら L3 IF の ip から導出) が VTEP 間で重複しないか
+    - MLAG ペアの片方だけが VTEP を終端していないか (warning)
+    - vxlan[l2vni].vteps[] → layer2.vteps
+    - vxlan[l2vni].vtep_source → layer3.interfaces (旧形式。warning)
     - vxlan[l2vni].members[] → L1 nodes
     - vxlan[l2vni].vtep_source の node が members に含まれるか
     - trunk_ports/access_ports の interface が、同じ node に属するか。MLAG には node を書けない
@@ -205,6 +209,14 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         l3interface_ids = {i.id for i in l3.interfaces}
         l3iface_node = {i.id: i.node for i in l3.interfaces}
 
+    # VTEP id → 終端するノード群 (sources の L3 IF から導出。ADR-0014)
+    vtep_nodes: dict[str, set[str]] = {}
+    if topology.layer2:
+        vtep_nodes = {
+            v.id: {l3iface_node[s] for s in v.sources if s in l3iface_node}
+            for v in topology.layer2.vteps
+        }
+
     # ── ID の文法 (ADR-0002 D1) ──────────────────────────────────────────
     _check_id_grammar(topology, errors)
 
@@ -230,7 +242,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         _validate_l2(
             topology.layer2,
             node_ids, iface_node, lag_nodes, member_lag, spaces,
-            vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node,
+            vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vtep_nodes,
             errors,
         )
 
@@ -242,6 +254,10 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
             l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids,
             errors,
         )
+
+    # ── VTEP (ADR-0014) ──────────────────────────────────────────────────
+    if topology.layer2 and topology.layer2.vteps:
+        _validate_vteps(topology, vtep_nodes, errors)
 
     # ── Protocols ────────────────────────────────────────────────────────
     if topology.protocols:
@@ -383,7 +399,7 @@ def pr_key(pr) -> str:
 
 
 def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
-                 vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, errors):
+                 vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vtep_nodes, errors):
     # VLAN trunk_ports / access_ports (ADR-0013)
     # interface (L1 IF) か lag (LAG) で指す。node は書かず、参照先から導出する
     vlans_on_node: dict[tuple[str, int], list[str]] = {}
@@ -471,33 +487,19 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
                     f"layer2.vxlan[{i}].vlan",
                     f"未定義の VLAN '{vx.vlan}' を参照しています",
                 ))
-            if vx.vtep_source not in l3interface_ids:
-                errors.append(ValidationError(
-                    f"layer2.vxlan[{i}].vtep_source",
-                    f"未定義の L3 インターフェース '{vx.vtep_source}' を参照しています",
-                ))
-            for j, m in enumerate(vx.members):
-                if m not in node_ids:
-                    errors.append(ValidationError(
-                        f"layer2.vxlan[{i}].members[{j}]",
-                        f"未定義のノード '{m}' を参照しています",
-                    ))
-            vtep_node = l3iface_node.get(vx.vtep_source)
-            if vtep_node is not None and vx.members and vtep_node not in vx.members:
-                errors.append(ValidationError(
-                    f"layer2.vxlan[{i}].vtep_source",
-                    f"vtep_source '{vx.vtep_source}' のノード '{vtep_node}' が members に含まれていません"
-                    f" (ADR-0011 D9)",
-                ))
-            # VNI のメンバーなのに、その VLAN のポートが 1 つもないノード (round4 E10)。
+            if vx.vteps:
+                participants = _check_vni_vteps(vx, i, vtep_nodes, errors)
+            else:
+                participants = _check_legacy_vtep_source(vx, i, node_ids, l3interface_ids, l3iface_node, errors)
+            # VNI に参加するノードなのに、その VLAN のポートが 1 つもない (round4 E10)。
             # VLAN にポートが書かれていない場合は判断できないので見ない
             carried = vlan_nodes.get(vx.vlan)
             if carried:
-                for j, m in enumerate(vx.members):
+                for m in sorted(participants):
                     if m in node_ids and m not in carried:
                         errors.append(ValidationError(
-                            f"layer2.vxlan[{i}].members[{j}]",
-                            f"VNI のメンバー '{m}' には VLAN '{vx.vlan}' のポートがありません。"
+                            f"layer2.vxlan[{i}]",
+                            f"VNI に参加するノード '{m}' には VLAN '{vx.vlan}' のポートがありません。"
                             f"VLAN を載せ忘れていないか確認してください (ADR-0011 D9)",
                             "warning",
                         ))
@@ -507,6 +509,137 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
                     f"layer2.vxlan[{i}].vrf",
                     f"未定義の VRF '{vx.vrf}' を参照しています",
                 ))
+
+
+def _check_vni_vteps(vx, i, vtep_nodes, errors) -> set[str]:
+    """VNI の vteps を解決し、参加するノード群を返す (ADR-0014 D3)"""
+    participants: set[str] = set()
+    seen: set[str] = set()
+    for j, vt in enumerate(vx.vteps):
+        path = f"layer2.vxlan[{i}].vteps[{j}]"
+        if vt in seen:
+            errors.append(ValidationError(path, f"VTEP '{vt}' が重複しています (ADR-0014 D3)"))
+            continue
+        seen.add(vt)
+        if vt not in vtep_nodes:
+            errors.append(ValidationError(path, f"未定義の VTEP '{vt}' を参照しています (ADR-0014 D3)"))
+            continue
+        participants |= vtep_nodes[vt]
+    return participants
+
+
+def _check_legacy_vtep_source(vx, i, node_ids, l3interface_ids, l3iface_node, errors) -> set[str]:
+    """旧形式 vtep_source / members (ndl_version 1.x の間だけ受け付ける。ADR-0014 D4)"""
+    errors.append(ValidationError(
+        f"layer2.vxlan[{i}].vtep_source",
+        "vtep_source と members は廃止予定です。layer2.vteps に VTEP を定義し、"
+        "vteps: [<VTEP の id>] で参照してください (ADR-0014 D4)",
+        "warning",
+    ))
+    if vx.vtep_source not in l3interface_ids:
+        errors.append(ValidationError(
+            f"layer2.vxlan[{i}].vtep_source",
+            f"未定義の L3 インターフェース '{vx.vtep_source}' を参照しています",
+        ))
+    for j, m in enumerate(vx.members or []):
+        if m not in node_ids:
+            errors.append(ValidationError(
+                f"layer2.vxlan[{i}].members[{j}]",
+                f"未定義のノード '{m}' を参照しています",
+            ))
+    vtep_node = l3iface_node.get(vx.vtep_source)
+    if vtep_node is not None and vx.members and vtep_node not in vx.members:
+        errors.append(ValidationError(
+            f"layer2.vxlan[{i}].vtep_source",
+            f"vtep_source '{vx.vtep_source}' のノード '{vtep_node}' が members に含まれていません"
+            f" (ADR-0011 D9)",
+        ))
+    return set(vx.members or []) | ({vtep_node} if vtep_node else set())
+
+
+def _validate_vteps(topology: MLNDLTopology, vtep_nodes: dict[str, set[str]], errors) -> None:
+    """layer2.vteps の検証 (ADR-0014 D5)"""
+    l3ifs = {i.id: i for i in topology.layer3.interfaces} if topology.layer3 else {}
+    used_by: dict[str, str] = {}             # L3 IF id → それを使う VTEP の id
+    by_address: dict[object, str] = {}      # VTEP のアドレス → VTEP の id
+    for i, vtep in enumerate(topology.layer2.vteps):
+        path = f"layer2.vteps[{i}]"
+        node_of: dict[str, str] = {}
+        for j, src in enumerate(vtep.sources):
+            spath = f"{path}.sources[{j}]"
+            iface = l3ifs.get(src)
+            if iface is None:
+                errors.append(ValidationError(spath, f"未定義の L3 インターフェース '{src}' を参照しています"))
+                continue
+            if src in used_by:
+                same = used_by[src] == vtep.id
+                errors.append(ValidationError(
+                    spath,
+                    f"'{src}' はこの VTEP に 2 回書かれています (ADR-0014 D5)" if same else
+                    f"'{src}' は VTEP '{used_by[src]}' でも使われています。1 つの L3 IF が終端する VTEP は"
+                    f" 1 つです (ADR-0014 D5)",
+                ))
+                continue
+            used_by[src] = vtep.id
+            if iface.node in node_of:
+                errors.append(ValidationError(
+                    spath,
+                    f"ノード '{iface.node}' の L3 IF が、この VTEP に '{node_of[iface.node]}' と '{src}' の 2 つ"
+                    f"書かれています。1 ノードからは 1 つだけ書きます (ADR-0014 D5)",
+                ))
+            node_of.setdefault(iface.node, src)
+
+        # アドレス: sources が 1 つなら省略でき、その L3 IF の ip / ipv6 になる (ADR-0014 D2)
+        effective = []
+        if len(vtep.sources) == 1 and vtep.sources[0] in l3ifs:
+            src = l3ifs[vtep.sources[0]]
+            for fld, given, own in (("address", vtep.address, src.ip),
+                                    ("address_v6", vtep.address_v6, src.ipv6)):
+                if given is not None and own is not None and given.ip != own.ip:
+                    errors.append(ValidationError(
+                        f"{path}.{fld}",
+                        f"{fld} {given} が source '{src.id}' のアドレス {own} と異なります。"
+                        f"1 ノードの VTEP は source のアドレスを使うので、{fld} は省略できます (ADR-0014 D2)",
+                        "warning",
+                    ))
+                addr = given if given is not None else own
+                if addr is not None:
+                    effective.append(addr.ip)
+            if not effective:
+                errors.append(ValidationError(
+                    f"{path}.sources[0]",
+                    f"VTEP のアドレスが決まりません。source '{src.id}' に ip / ipv6 を書くか、"
+                    f"address を書いてください (ADR-0014 D2)",
+                ))
+        else:
+            effective = [a.ip for a in (vtep.address, vtep.address_v6) if a is not None]
+        for addr in effective:
+            if addr in by_address:
+                errors.append(ValidationError(
+                    path,
+                    f"VTEP のアドレス {addr} が VTEP '{by_address[addr]}' と重複しています。"
+                    f"複数のノードで共有するなら、1 つの VTEP の sources に並べてください (ADR-0014 D5)",
+                ))
+            else:
+                by_address[addr] = vtep.id
+
+    # MLAG ペアの片方だけが VTEP を終端している (相方の書き忘れの可能性)
+    if topology.layer1:
+        for lag in topology.layer1.lag:
+            if not isinstance(lag, MlagLag):
+                continue
+            pair = set(lag.nodes)
+            for i, vtep in enumerate(topology.layer2.vteps):
+                inside = vtep_nodes.get(vtep.id, set()) & pair
+                if len(inside) == 1:
+                    (one,) = inside
+                    (other,) = pair - inside
+                    errors.append(ValidationError(
+                        f"layer2.vteps[{i}].sources",
+                        f"MLAG '{lag.id}' のノード '{one}' はこの VTEP を終端していますが、相方 '{other}' は"
+                        f"含まれていません。MLAG ペアは通常 VTEP を共有します (ADR-0014 D5)",
+                        "warning",
+                    ))
 
 
 # ---------------------------------------------------------------------------
@@ -803,9 +936,11 @@ def _validate_mtu(topology: MLNDLTopology, errors: list[ValidationError]) -> Non
     # VxLAN ドメインに参加するノード集合
     vtep_nodes: set[str] = set()
     l3if_node = {i.id: i.node for i in topology.layer3.interfaces} if topology.layer3 else {}
+    for vtep in topology.layer2.vteps:
+        vtep_nodes.update(l3if_node[s] for s in vtep.sources if s in l3if_node)
     for vx in topology.layer2.vxlan:
-        if isinstance(vx, L2VxLAN):
-            vtep_nodes.update(vx.members)
+        if isinstance(vx, L2VxLAN):                     # 旧形式 (ADR-0014 D4)
+            vtep_nodes.update(vx.members or [])
             if vx.vtep_source in l3if_node:
                 vtep_nodes.add(l3if_node[vx.vtep_source])
     if not vtep_nodes:
@@ -1030,6 +1165,8 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
             _warn_prefix(errors, f"layer2.vlans[{i}].id", vlan.id, "vlan-", "VLAN")
         for i, vx in enumerate(topology.layer2.vxlan):
             _warn_prefix(errors, f"layer2.vxlan[{i}].id", vx.id, "vni-", "VNI")
+        for i, vtep in enumerate(topology.layer2.vteps):
+            _warn_prefix(errors, f"layer2.vteps[{i}].id", vtep.id, "vtep-", "VTEP")
         for i, si in enumerate(topology.layer2.subinterfaces):
             _warn_prefix(errors, f"layer2.subinterfaces[{i}].id", si.id, "subif-", "サブインターフェース")
 

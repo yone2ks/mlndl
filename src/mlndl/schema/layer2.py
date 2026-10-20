@@ -1,7 +1,8 @@
-"""Layer 2 スキーマ定義 (VLAN / VxLAN / Subinterface)"""
+"""Layer 2 スキーマ定義 (VLAN / VTEP / VxLAN / Subinterface)"""
 
 from __future__ import annotations
 
+from ipaddress import IPv4Interface, IPv6Interface
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -55,18 +56,70 @@ class VLAN(BaseModel):
     description: str | None = None
 
 
+class Vtep(BaseModel):
+    """VXLAN トンネル端点 (ADR-0014)
+
+    1 つ以上のノードが終端するトンネル端点アドレスとして表す。冗長化の方式名
+    (anycast / vPC / virtual VTEP / BGW など) は構文に入れない (ADR-0014 D1)。
+
+    - sources: この VTEP を終端するノードの L3 IF (ループバック) の id。ノードは各 L3 IF から決まる
+    - address / address_v6: VTEP のアドレス。sources が 1 つなら省略でき、その L3 IF の ip / ipv6 になる。
+      sources が複数 (複数ノードで共有) なら必須
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str                                         # 推奨プレフィックス vtep- (ADR-0002 D7)
+    sources: list[str] = Field(min_length=1)        # layer3.interfaces[].id
+    address: IPv4Interface | None = None
+    address_v6: IPv6Interface | None = None
+    description: str | None = None
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def address_is_ipv4(cls, v: Any) -> Any:
+        if isinstance(v, str) and ":" in v:
+            raise ValueError(f"address は IPv4 専用です。IPv6 アドレス '{v}' は address_v6 に書いてください (ADR-0014 D2)")
+        return v
+
+    @model_validator(mode="after")
+    def shared_vtep_needs_address(self) -> "Vtep":
+        if len(self.sources) > 1 and self.address is None and self.address_v6 is None:
+            raise ValueError(
+                "複数のノードで共有する VTEP には、共有するアドレスを address (または address_v6) に"
+                "書いてください。省略できるのは sources が 1 つのときだけです (ADR-0014 D2)"
+            )
+        return self
+
+
 class L2VxLAN(BaseModel):
-    """L2VNI — VLAN を VxLAN セグメントにマッピング"""
+    """L2VNI — VLAN を VxLAN セグメントにマッピング
+
+    vteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014
+    vtep_source / members: 旧形式。ndl_version 1.x の間だけ受け付け、validator が warning を出す
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     type: Literal["l2vni"]
     vni: int
-    vlan: str               # layer2.vlans[].id を参照
-    vtep_source: str        # layer3.interfaces[].id を参照（VTEP ループバック）
-    members: list[str] = [] # layer1.nodes[].id を参照
+    vlan: str                       # layer2.vlans[].id を参照
+    vteps: list[str] = []           # layer2.vteps[].id を参照
+    vtep_source: str | None = None  # 旧形式 (layer3.interfaces[].id)
+    members: list[str] | None = None  # 旧形式 (layer1.nodes[].id)。書き出しに出ないよう既定は None
     description: str | None = None
+
+    @model_validator(mode="after")
+    def vteps_or_legacy(self) -> "L2VxLAN":
+        legacy = self.vtep_source is not None or bool(self.members)
+        if self.vteps and legacy:
+            raise ValueError(
+                "vteps と旧形式の vtep_source / members は併記できません。vteps だけを書いてください (ADR-0014 D4)"
+            )
+        if not self.vteps and self.vtep_source is None:
+            raise ValueError("L2VNI が載る VTEP を vteps: [<layer2.vteps の id>] で書いてください (ADR-0014 D3)")
+        return self
 
 
 class L3VxLAN(BaseModel):
@@ -129,5 +182,6 @@ class L2Layer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     vlans: list[VLAN] = []
+    vteps: list[Vtep] = []
     vxlan: list[VxLAN] = []
     subinterfaces: list[Subinterface] = []

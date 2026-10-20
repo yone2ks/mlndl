@@ -346,6 +346,8 @@ def _export_l2_overlay(topology, if_to_name, elements):
         if isinstance(vx, L2VxLAN):
             data.update({"id": vx.id, "label": f"L2VNI {vx.vni}", "type": "l2vni",
                          "vlan": vx.vlan})
+            if vx.vteps:
+                data["vteps"] = list(vx.vteps)       # ADR-0014
         elif isinstance(vx, L3VxLAN):
             data.update({"id": vx.id, "label": f"L3VNI {vx.vni}", "type": "l3vni",
                          "vrf": vx.vrf})

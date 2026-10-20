@@ -210,13 +210,18 @@ layer2:
       trunk_ports:
         - {lag: lag-mlag-server1}   # MLAG は 1 エントリで leaf1 / leaf2 の両方 (ADR-0013 D2)
 
+  vteps:
+    # MLAG ペア leaf1 / leaf2 が共有する VTEP (ADR-0014)。各 lo は固有 IP、共有するアドレスは address
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
   vxlan:
     - id: vni-10100
       type: l2vni
       vni: 10100
       vlan: vlan-100
-      vtep_source: leaf1-lo
-      members: [leaf1, leaf2]
+      vteps: [vtep-leaf1-leaf2]
 
     - id: vni-10900
       type: l3vni

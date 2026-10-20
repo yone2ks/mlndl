@@ -203,7 +203,8 @@ layer3:
         assert {"layer3.vrfs[0].l3vni", "layer3.vrfs[1].l3vni"} <= paths
         assert {"layer2.vxlan[0].vrf", "layer2.vxlan[1].vrf"} <= paths
 
-    def test_vtep_source_node_not_in_members(self):
+    def test_legacy_vtep_source_node_not_in_members(self):
+        """旧形式 (ADR-0014 D4) でも従来の検査は働く"""
         body = _l3("    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}\n").replace(
             "layer3:",
             "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,"
@@ -505,25 +506,30 @@ class TestPassCChecks:
         r = validate_all(_topo(_svi("        - {mode: vrrp, group_id: 10, vip: 'fe80::1'}\n", ip="ipv6: 2001:db8:100::2/64")))
         assert r.errors == [] and r.warnings == []
 
-    def _vni(self, members: str) -> str:
-        return _l3("    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}\n").replace(
+    def _vni(self, vteps: str) -> str:
+        return _l3(
+            "    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}\n"
+            "    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}\n"
+        ).replace(
             "layer3:",
+            "  vteps:\n    - {id: vtep-leaf1, sources: [leaf1-lo]}\n    - {id: vtep-leaf2, sources: [leaf2-lo]}\n"
             "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,"
-            f" vtep_source: leaf1-lo, members: [{members}]}}\nlayer3:",
+            f" vteps: [{vteps}]}}\nlayer3:",
         )
 
     def test_vni_member_without_vlan_port_is_warning(self):
-        """E10: leaf2 は VNI のメンバーだが vlan-100 のポートを持たない"""
-        r = validate_all(_topo(self._vni("leaf1, leaf2")))
+        """E10: leaf2 は VNI に参加するが vlan-100 のポートを持たない"""
+        r = validate_all(_topo(self._vni("vtep-leaf1, vtep-leaf2")))
         assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer2.vxlan[0].members[1]"]
+        assert [w.path for w in r.warnings] == ["layer2.vxlan[0]"]
+        assert "leaf2" in r.warnings[0].message
 
     def test_vni_members_matching_vlan_ports(self):
-        r = validate_all(_topo(self._vni("leaf1")))
+        r = validate_all(_topo(self._vni("vtep-leaf1")))
         assert r.errors == [] and r.warnings == []
 
     def test_vlan_without_ports_is_not_judged(self):
-        body = self._vni("leaf1, leaf2").replace(
+        body = self._vni("vtep-leaf1, vtep-leaf2").replace(
             "{id: vlan-100, vlan_id: 100, trunk_ports: [{interface: leaf1-swp1}]}",
             "{id: vlan-100, vlan_id: 100}",
         )

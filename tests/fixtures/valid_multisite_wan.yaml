@@ -285,13 +285,18 @@ layer2:
         - {interface: cm-dist1-ge0-1}
         - {interface: cm-dist2-ge0-1}
 
+  vteps:
+    # MLAG ペア dc-leaf1 / dc-leaf2 が共有する VTEP (ADR-0014)
+    - id: vtep-dc-leaf1-leaf2
+      sources: [dc-leaf1-lo, dc-leaf2-lo]
+      address: 10.0.100.12/32
+
   vxlan:
     - id: vni-10100
       type: l2vni
       vni: 10100
       vlan: vlan-100
-      vtep_source: dc-leaf1-lo
-      members: [dc-leaf1, dc-leaf2]
+      vteps: [vtep-dc-leaf1-leaf2]
 
     - id: vni-10900
       type: l3vni
