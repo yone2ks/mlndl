@@ -144,7 +144,7 @@ VTEP として使うアドレス、という役割の違いだけを表し、ど
 
 - スキーマ: `layer2.py` (`Vtep`、`L2VxLAN.vteps`、旧 `vtep_source` / `members` を任意に)
 - バリデーター: `validator.py` (`_validate_vteps`、`_check_vni_vteps`、`_check_legacy_vtep_source`、MTU の範囲、推奨プレフィックス)
-- エクスポーター: `cytoscape.py` (L2VNI のノードに `vteps` を出す)
+- エクスポーター: `cytoscape.py` (L2VNI のノードに `vteps` を出す。L3VNI のノードには D3 の導き方で求めた `vteps` を、機器ノードには終端する VTEP の id・アドレス・共有相手を `vteps` として出す。ndl-viz は VNI を選ぶとこれを使って VTEP 間のトンネルを描く)
 - テスト: `tests/test_vteps.py` (32 件)
 
 ## Alternatives Considered

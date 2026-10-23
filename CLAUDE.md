@@ -466,6 +466,7 @@ mlndl/
 │       │   ├── refs.py         # Ref（参照先の宣言。ADR-0015）
 │       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
 │       ├── index.py            # IdIndex（id → エンティティの索引）
+│       ├── derive.py           # 参照をたどって求める関係（VLAN の端点。ADR-0013 D7）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
 │       ├── validator.py        # 整合性チェック
 │       └── exporter/
@@ -513,6 +514,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
 | 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、`{interface: <LAG / VLAN / サブ IF>}`、VLAN のポートの `node`。ndl_version 1.x の間は読み替えて受け付ける（ADR-0011 D10） | warning |
 | VNI の参加ノード | L2VNI に参加するノード（VTEP から導出）に、その VLAN のポートがあるか | warning |
+| VLAN の端点 | ポート → L1 リンクの対向 → 対向の L3 IF を id でたどって求めた端点（1 ホップ。`derive.vlan_endpoints`）の IP が、その VLAN の SVI のサブネットに入っているか。SVI がなければ検査しない（ADR-0013 D7） | info |
 | MTU 整合性 | VTEP を終端するノードどうしの underlay MTU が 1550 以上か | error |
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
@@ -557,7 +559,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0010](docs/decisions/drafts/0010-control-plane-separation.md) | control plane と data plane の分離 | A r2 (Draft・**保留**) | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（決定済み・**未実装**）。BGP エントリの単位は未決 |
 | [ADR-0011](docs/decisions/0011-layer3-data-plane.md) | layer3 データプレーン | **C** | 表現の指針（スタティックルート等はスコープ外）。L3 IF は `name`（機器上の名前）+ `attaches_to`（`{interface}` / `{lag}` / `{vlan}` / `{subinterface}`）。SVI 短縮形は廃止。`gateway_redundancy`（anycast は全ノード一致を検証）。`ip` / `ipv6`。トンネル。旧形式は 1.x の間 warning（D10） |
 | [ADR-0012](docs/decisions/0012-subinterfaces.md) | 802.1Q サブインターフェース | **C** | `layer2.subinterfaces`。`node` を持たない。`vlan_id` はリンク上のタグ番号（VLAN への参照ではなく照合もしない）。基盤は `{interface:}` か `{lag:}` |
-| [ADR-0013](docs/decisions/0013-vlan-ports-on-lag.md) | VLAN のポート | **C** | `trunk_ports` / `access_ports` は `{interface:}` か `{lag:}`。`node` は書かない。MLAG は 1 エントリで両ノード。LAG とメンバーの併記は error、メンバーだけは warning |
+| [ADR-0013](docs/decisions/0013-vlan-ports-on-lag.md) | VLAN のポート | **C**（D7 を追記） | `trunk_ports` / `access_ports` は `{interface:}` か `{lag:}`。`node` は書かない。MLAG は 1 エントリで両ノード。LAG とメンバーの併記は error、メンバーだけは warning。D7: VLAN の端点（ポートの対向の IF と IP）を参照をたどって導く。1 ホップ、`name` では引かない。tagged trunk のタグ一致は推定 |
 | [ADR-0014](docs/decisions/drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) | A (Draft) | `layer2.vteps`（`sources` = 終端するノードの L3 IF、`address` / `address_v6`）。VNI は `vteps` で参照。方式中立（anycast / vPC / BGW を構文に出さない）。アドレス省略は `sources` が 1 つのときだけ。旧 `vtep_source` / `members` は 1.x の間 warning（**実装済み**） |
 | [ADR-0015](docs/decisions/drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する | A (Draft) | 参照先が 1 つに決まる参照は `Annotated[str, Ref("layer2.vlans")]` と型に書き、汎用の検査が全参照を検査する。キーで選ぶ参照（attaches_to 等）と意味の検査は別。`topology.resolve(id)` で id から実体を引く（**実装済み**） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
