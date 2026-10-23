@@ -1,0 +1,357 @@
+ndl_version: "1.0"
+
+# EVE-NG で学ぶ Spine-Leaf EVPN + VXLAN 学習ラボ（Lab B4 完了時点）
+# 出典: ~/Documents/Sandbox/eveng/PLAN.md, design/addressing.md, configs/b1〜b4, configs/mgmt
+
+meta:
+  name: eveng-evpn-vxlan-lab
+  description: >
+    NX-OSv 9300v の 2 spine / 2 leaf と VPCS 2 台。eBGP アンダーレイ + eBGP EVPN オーバーレイ
+    （spine が route server）、L2VNI 10010/10020、対称 IRB の L3VNI 50001、Anycast GW。
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    # ── 仮想化基盤 ───────────────────────────────────────────────────────
+    - id: windows-host
+      name: Windows Host
+      implementation: physical
+      role: hypervisor
+      description: 6 コア / 12 論理プロセッサ。EVE-NG の VM を載せる
+
+    - id: eve-ng
+      name: EVE-NG
+      implementation: vm
+      role: hypervisor
+      device_type: eve_ng_community
+      attaches_to: windows-host
+      description: EVE-NG Community 6.2.0-4（192.168.0.229）。8 vCPU / RAM 46GB
+
+    # ── ファブリック（NX-OSv 9300v 10.5.2.F）─────────────────────────────
+    - id: spine1
+      name: spine1
+      implementation: vm
+      role: spine
+      device_type: cisco_nxosv9300
+      attaches_to: eve-ng
+
+    - id: spine2
+      name: spine2
+      implementation: vm
+      role: spine
+      device_type: cisco_nxosv9300
+      attaches_to: eve-ng
+
+    - id: leaf1
+      name: leaf1
+      implementation: vm
+      role: leaf
+      device_type: cisco_nxosv9300
+      attaches_to: eve-ng
+
+    - id: leaf2
+      name: leaf2
+      implementation: vm
+      role: leaf
+      device_type: cisco_nxosv9300
+      attaches_to: eve-ng
+
+    # ── ホスト（VPCS）──────────────────────────────────────────────────
+    - id: host1
+      name: host1
+      implementation: container
+      role: server
+      device_type: vpcs
+      attaches_to: eve-ng
+
+    - id: host2
+      name: host2
+      implementation: container
+      role: server
+      device_type: vpcs
+      attaches_to: eve-ng
+
+  interfaces:
+    # EVE-NG 上は NX-OSv の eth0 = mgmt0、eth1 = Ethernet1/1、eth2 = Ethernet1/2 …
+    - { id: spine1-mgmt0, node: spine1, name: mgmt0 }
+    - { id: spine1-e1-1,  node: spine1, name: Ethernet1/1 }   # → leaf1
+    - { id: spine1-e1-2,  node: spine1, name: Ethernet1/2 }   # → leaf2
+
+    - { id: spine2-mgmt0, node: spine2, name: mgmt0 }
+    - { id: spine2-e1-1,  node: spine2, name: Ethernet1/1 }   # → leaf1
+    - { id: spine2-e1-2,  node: spine2, name: Ethernet1/2 }   # → leaf2
+
+    - { id: leaf1-mgmt0, node: leaf1, name: mgmt0 }
+    - { id: leaf1-e1-1,  node: leaf1, name: Ethernet1/1 }     # → spine1
+    - { id: leaf1-e1-2,  node: leaf1, name: Ethernet1/2 }     # → spine2
+    - { id: leaf1-e1-3,  node: leaf1, name: Ethernet1/3 }     # → host1
+
+    - { id: leaf2-mgmt0, node: leaf2, name: mgmt0 }
+    - { id: leaf2-e1-1,  node: leaf2, name: Ethernet1/1 }     # → spine1
+    - { id: leaf2-e1-2,  node: leaf2, name: Ethernet1/2 }     # → spine2
+    - { id: leaf2-e1-3,  node: leaf2, name: Ethernet1/3 }     # → host2
+
+    - { id: host1-eth0, node: host1, name: eth0 }
+    - { id: host2-eth0, node: host2, name: eth0 }
+
+  links:
+    # ── アンダーレイ（P2P /31、MTU 9216）────────────────────────────────
+    - id: link-spine1-leaf1
+      endpoints: [spine1-e1-1, leaf1-e1-1]
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-spine1-leaf2
+      endpoints: [spine1-e1-2, leaf2-e1-1]
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-spine2-leaf1
+      endpoints: [spine2-e1-1, leaf1-e1-2]
+      mtu: 9216
+      link_role: underlay
+
+    - id: link-spine2-leaf2
+      endpoints: [spine2-e1-2, leaf2-e1-2]
+      mtu: 9216
+      link_role: underlay
+
+    # ── ホスト収容（MTU 1500）──────────────────────────────────────────
+    - id: link-leaf1-host1
+      endpoints: [leaf1-e1-3, host1-eth0]
+      mtu: 1500
+      link_role: access
+
+    - id: link-leaf2-host2
+      endpoints: [leaf2-e1-3, host2-eth0]
+      mtu: 1500
+      link_role: access
+
+layer2:
+  vlans:
+    - id: vlan-10
+      vlan_id: 10
+      access_ports:
+        - {interface: leaf1-e1-3}      # host1
+
+    - id: vlan-20
+      vlan_id: 20
+      access_ports:
+        - {interface: leaf2-e1-3}      # host2（B3 では VLAN10、B4 で VLAN20 に変更）
+
+    - id: vlan-3001
+      vlan_id: 3001
+      name: transit-tenant-a
+      description: L3VNI 50001 用の transit VLAN（ホストポートなし）
+
+  vteps:
+    # nve1 の source-interface loopback1
+    - id: vtep-leaf1
+      sources: [leaf1-lo1]
+    - id: vtep-leaf2
+      sources: [leaf2-lo1]
+
+  vxlan:
+    - id: vni-10010
+      type: l2vni
+      vni: 10010
+      vlan: vlan-10
+      vteps: [vtep-leaf1, vtep-leaf2]
+      description: ingress-replication protocol bgp / suppress-arp。RT 65000:10010（手動）
+
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlan: vlan-20
+      vteps: [vtep-leaf1, vtep-leaf2]
+      description: ingress-replication protocol bgp / suppress-arp。RT 65000:10020（手動）
+
+    - id: vni-50001
+      type: l3vni
+      vni: 50001
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+    - id: vrf-management
+      description: mgmt0 用（NX-OS の vrf management）。既定経路 192.168.0.1
+
+    - id: vrf-tenant-a
+      l3vni: vni-50001
+      route_targets:                   # rd は auto
+        import: ["65000:50001"]
+        export: ["65000:50001"]
+      description: NX-OS 上の名前は TENANT-A
+
+  interfaces:
+    # ── Loopback0（Router-ID / BGP）・Loopback1（VTEP）────────────────────
+    - { id: spine1-lo0, node: spine1, name: loopback0, ip: 10.1.0.1/32,  vrf: vrf-default }
+    - { id: spine2-lo0, node: spine2, name: loopback0, ip: 10.1.0.2/32,  vrf: vrf-default }
+    - { id: leaf1-lo0,  node: leaf1,  name: loopback0, ip: 10.1.0.11/32, vrf: vrf-default }
+    - { id: leaf1-lo1,  node: leaf1,  name: loopback1, ip: 10.2.0.11/32, vrf: vrf-default }
+    - { id: leaf2-lo0,  node: leaf2,  name: loopback0, ip: 10.1.0.12/32, vrf: vrf-default }
+    - { id: leaf2-lo1,  node: leaf2,  name: loopback1, ip: 10.2.0.12/32, vrf: vrf-default }
+
+    # ── アンダーレイ P2P（10.0.0.0/24 から /31）──────────────────────────
+    - { id: spine1-e1-1-l3, node: spine1, name: Ethernet1/1, ip: 10.0.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-e1-1} }
+    - { id: spine1-e1-2-l3, node: spine1, name: Ethernet1/2, ip: 10.0.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-e1-2} }
+    - { id: spine2-e1-1-l3, node: spine2, name: Ethernet1/1, ip: 10.0.0.4/31, vrf: vrf-default, attaches_to: {interface: spine2-e1-1} }
+    - { id: spine2-e1-2-l3, node: spine2, name: Ethernet1/2, ip: 10.0.0.6/31, vrf: vrf-default, attaches_to: {interface: spine2-e1-2} }
+    - { id: leaf1-e1-1-l3,  node: leaf1,  name: Ethernet1/1, ip: 10.0.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-e1-1} }
+    - { id: leaf1-e1-2-l3,  node: leaf1,  name: Ethernet1/2, ip: 10.0.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf1-e1-2} }
+    - { id: leaf2-e1-1-l3,  node: leaf2,  name: Ethernet1/1, ip: 10.0.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-e1-1} }
+    - { id: leaf2-e1-2-l3,  node: leaf2,  name: Ethernet1/2, ip: 10.0.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf2-e1-2} }
+
+    # ── 管理 IF（mgmt0）────────────────────────────────────────────────
+    - { id: spine1-mgmt0-l3, node: spine1, name: mgmt0, ip: 192.168.0.240/24, vrf: vrf-management, attaches_to: {interface: spine1-mgmt0} }
+    - { id: spine2-mgmt0-l3, node: spine2, name: mgmt0, ip: 192.168.0.241/24, vrf: vrf-management, attaches_to: {interface: spine2-mgmt0} }
+    - { id: leaf1-mgmt0-l3,  node: leaf1,  name: mgmt0, ip: 192.168.0.242/24, vrf: vrf-management, attaches_to: {interface: leaf1-mgmt0} }
+    - { id: leaf2-mgmt0-l3,  node: leaf2,  name: mgmt0, ip: 192.168.0.243/24, vrf: vrf-management, attaches_to: {interface: leaf2-mgmt0} }
+
+    # ── SVI（Anycast GW: fabric forwarding anycast-gateway-mac 0000.2222.3333）──
+    - id: leaf1-vlan-10
+      node: leaf1
+      name: Vlan10
+      attaches_to: {vlan: vlan-10}
+      ip: 172.16.10.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+
+    - id: leaf1-vlan-20
+      node: leaf1
+      name: Vlan20
+      attaches_to: {vlan: vlan-20}
+      ip: 172.16.20.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+
+    - id: leaf2-vlan-10
+      node: leaf2
+      name: Vlan10
+      attaches_to: {vlan: vlan-10}
+      ip: 172.16.10.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+
+    - id: leaf2-vlan-20
+      node: leaf2
+      name: Vlan20
+      attaches_to: {vlan: vlan-20}
+      ip: 172.16.20.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+
+    # L3VNI の transit SVI（ip forward、アドレスなし）
+    - { id: leaf1-vlan-3001, node: leaf1, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+    - { id: leaf2-vlan-3001, node: leaf2, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+
+    # ── ホスト ─────────────────────────────────────────────────────────
+    - { id: host1-eth0-l3, node: host1, name: eth0, ip: 172.16.10.11/24, attaches_to: {interface: host1-eth0} }
+    - { id: host2-eth0-l3, node: host2, name: eth0, ip: 172.16.20.12/24, attaches_to: {interface: host2-eth0} }
+
+  routing_adjacencies:
+    # ── アンダーレイ eBGP（P2P アドレスで張る）───────────────────────────
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      from: {node: spine1, update_source: spine1-e1-1-l3}
+      to:   {node: leaf1,  update_source: leaf1-e1-1-l3}
+      attaches_to: {link: link-spine1-leaf1}
+
+    - id: bgp-peer-spine1-leaf2
+      type: bgp
+      from: {node: spine1, update_source: spine1-e1-2-l3}
+      to:   {node: leaf2,  update_source: leaf2-e1-1-l3}
+      attaches_to: {link: link-spine1-leaf2}
+
+    - id: bgp-peer-spine2-leaf1
+      type: bgp
+      from: {node: spine2, update_source: spine2-e1-1-l3}
+      to:   {node: leaf1,  update_source: leaf1-e1-2-l3}
+      attaches_to: {link: link-spine2-leaf1}
+
+    - id: bgp-peer-spine2-leaf2
+      type: bgp
+      from: {node: spine2, update_source: spine2-e1-2-l3}
+      to:   {node: leaf2,  update_source: leaf2-e1-2-l3}
+      attaches_to: {link: link-spine2-leaf2}
+
+    # ── オーバーレイ eBGP EVPN（loopback0 間、ebgp-multihop 3）────────────
+    # 特定の物理リンクに載らない（ECMP で両 spine 経由になりうる）ので attaches_to は書かない
+    - id: bgp-peer-evpn-spine1-leaf1
+      type: bgp
+      from: {node: spine1, update_source: spine1-lo0}
+      to:   {node: leaf1,  update_source: leaf1-lo0}
+
+    - id: bgp-peer-evpn-spine1-leaf2
+      type: bgp
+      from: {node: spine1, update_source: spine1-lo0}
+      to:   {node: leaf2,  update_source: leaf2-lo0}
+
+    - id: bgp-peer-evpn-spine2-leaf1
+      type: bgp
+      from: {node: spine2, update_source: spine2-lo0}
+      to:   {node: leaf1,  update_source: leaf1-lo0}
+
+    - id: bgp-peer-evpn-spine2-leaf2
+      type: bgp
+      from: {node: spine2, update_source: spine2-lo0}
+      to:   {node: leaf2,  update_source: leaf2-lo0}
+
+protocols:
+  bgp:
+    - id: bgp-underlay
+      role: underlay                   # maximum-paths 4 / bestpath as-path multipath-relax
+      nodes:
+        - node: spine1
+          local_as: 65000
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, address_families: [ipv4_unicast]}
+        - node: spine2
+          local_as: 65000
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, address_families: [ipv4_unicast]}
+        - node: leaf1
+          local_as: 65001
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+        - node: leaf2
+          local_as: 65002
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+
+    - id: bgp-evpn
+      role: overlay                    # spine は route server（next-hop unchanged / retain route-target all）
+      nodes:
+        - node: spine1
+          local_as: 65000
+          role: route_server
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+        - node: spine2
+          local_as: 65000
+          role: route_server
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+        - node: leaf1
+          local_as: 65001
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+        - node: leaf2
+          local_as: 65002
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
