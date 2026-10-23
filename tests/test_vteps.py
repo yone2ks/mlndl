@@ -222,6 +222,35 @@ def test_cytoscape_vni_lists_vteps():
     assert vni["vteps"] == ["vtep-mlag-a"]
 
 
+def test_cytoscape_nodes_carry_vteps():
+    """VTEP は終端するノードに載る。共有 VTEP は両ノードに載り、アドレスは address、相手は shared_with"""
+    out = cytoscape.export(_topo(MLAG_A, "    - {id: vtep-border1, sources: [border1-lo1]}\n"))
+    nodes = {n["data"]["id"]: n["data"] for n in out["nodes"]}
+    assert nodes["leaf1"]["vteps"] == [{"id": "vtep-mlag-a", "source": "lo1", "address": "10.0.100.12/32",
+                                        "shared_with": ["leaf2"]}]
+    assert nodes["leaf2"]["vteps"][0]["shared_with"] == ["leaf1"]
+    # sources が 1 つで address を省略したら、その L3 IF の ip / ipv6 になる (ADR-0014 D2)
+    assert nodes["border1"]["vteps"] == [{"id": "vtep-border1", "source": "lo1", "address": "10.0.0.21/32",
+                                          "address_v6": "2001:db8::21/128"}]
+    assert "vteps" not in nodes["leaf3"]
+
+
+def test_cytoscape_l3vni_vteps_derived_from_vrf():
+    """L3VNI の vteps は、その VRF に L3 IF を持つノードの VTEP から導く (ADR-0014 D3)"""
+    body = ('ndl_version: "1.0"\n' + L1 + "layer2:\n  vlans: [{id: vlan-100, vlan_id: 100}]\n  vteps:\n"
+            + MLAG_A + "    - {id: vtep-border1, sources: [border1-lo1]}\n"
+            + "    - {id: vtep-leaf3, sources: [leaf3-lo1]}\n"
+            + "  vxlan:\n    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-a}\n"
+            + L3.replace("layer3:\n", "layer3:\n  vrfs: [{id: vrf-a, l3vni: vni-10900}]\n")
+            + "    - {id: leaf1-vlan-100, node: leaf1, name: Vlan100, ip: 192.168.100.1/24, vrf: vrf-a,"
+              " attaches_to: {vlan: vlan-100}}\n"
+            + "    - {id: border1-vlan-100, node: border1, name: Vlan100, vrf: vrf-a, attaches_to: {vlan: vlan-100}}\n")
+    out = cytoscape.export(parse(body))
+    vni = next(n["data"] for n in out["nodes"] if n["data"]["id"] == "vni-10900")
+    # leaf1 は共有 VTEP vtep-mlag-a を終端しているので、それに載る。VRF にいない leaf3 の VTEP には載らない
+    assert vni["vteps"] == ["vtep-mlag-a", "vtep-border1"]
+
+
 def test_yaml_round_trip():
     t1 = _topo(MLAG_A, "    - {id: vtep-border1, sources: [border1-lo1]}\n",
                vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-mlag-a]}\n")

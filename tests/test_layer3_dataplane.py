@@ -375,6 +375,23 @@ class TestExport:
         assert vlan["subnet"] == "192.168.100.0/24"
         assert vlan["subnet_v6"] == "2001:db8:100::/64"
 
+    @pytest.mark.parametrize("name", ["lo", "lo0", "lo0.0", "loopback0", "Loopback0"])
+    def test_cytoscape_loopback_names(self, name):
+        """機器ごとのループバックの名前を loopback として扱い、先に書かれたものを lo_ip にする"""
+        t = _topo(_l3(
+            f"    - {{id: l0, node: leaf1, name: {name}, ip: 10.1.0.11/32}}\n"
+            "    - {id: l1, node: leaf1, name: loopback1, ip: 10.2.0.11/32}\n"
+        ))
+        leaf1 = next(n["data"] for n in cytoscape.export(t)["nodes"] if n["data"]["id"] == "leaf1")
+        assert leaf1["lo_ip"] == "10.1.0.11/32"
+        assert {x["kind"] for x in leaf1["l3_interfaces"]} == {"loopback"}
+
+    def test_cytoscape_loopback_needs_no_attaches_to(self):
+        """名前が lo でも、物理 IF の上に載る L3 IF はループバックではない"""
+        t = _topo(_l3("    - {id: x, node: leaf1, name: lo1, ip: 10.9.0.1/31, attaches_to: {interface: leaf1-swp1}}\n"))
+        leaf1 = next(n["data"] for n in cytoscape.export(t)["nodes"] if n["data"]["id"] == "leaf1")
+        assert "lo_ip" not in leaf1 and leaf1["l3_interfaces"][0]["kind"] == "routed"
+
     def test_cytoscape_derives_one_tunnel_edge_per_pair(self):
         out = cytoscape.export(_topo(_tun(T1, T2)))
         tunnels = [e["data"] for e in out["edges"] if e["data"]["type"] == "tunnel"]

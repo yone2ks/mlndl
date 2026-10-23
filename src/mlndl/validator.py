@@ -11,7 +11,8 @@
      - L1: MLAG の client_lag が LACP を指し、メンバー数が合うか
      - L2: VLAN のポートのノード (旧形式の node との照合、MLAG に node)、LAG とメンバーの併記、
        同じ端点の重複、同一ノード上の vlan_id 重複 (MLAG は両ノードで数える)、サブ IF のタグ重複、
-       VNI 番号の重複、VNI に参加するノードの VLAN、VTEP の検査 (ADR-0014 D5)
+       VNI 番号の重複、VNI に参加するノードの VLAN、VTEP の検査 (ADR-0014 D5)、
+       VLAN の端点の IP が SVI のサブネット外 (info。ADR-0013 D7)
      - L3: VRF ↔ L3VNI の双方向一致、RD / RT の形式、L3 IF の (node, name) 重複と参照先のノード所属、
        gateway_redundancy (VIP のサブネット・group_id 重複)、anycast gateway の一致、
        トンネル (source のノード、自己トンネル、外側の AF、片側だけのトンネル)
@@ -38,6 +39,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from .derive import outside_svi_subnet, vlan_endpoints, vlan_svi_networks
 from .schema.layer1 import AttachesToObj, LacpLag, MlagLag
 from .schema.layer2 import L2VxLAN, L3VxLAN
 from .schema.topology import MLNDLTopology
@@ -210,6 +212,9 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # ── VTEP (ADR-0014) ──────────────────────────────────────────────────
     if topology.layer2 and topology.layer2.vteps:
         _validate_vteps(topology, vtep_nodes, errors)
+
+    # ── VLAN の端点 (ADR-0013 D7) ─────────────────────────────────────────
+    _check_vlan_endpoints(topology, errors)
 
     # ── Protocols ────────────────────────────────────────────────────────
     if topology.protocols:
@@ -523,6 +528,31 @@ def _validate_vteps(topology: MLNDLTopology, vtep_nodes: dict[str, set[str]], er
 # ---------------------------------------------------------------------------
 # Layer 3
 # ---------------------------------------------------------------------------
+
+def _check_vlan_endpoints(topology: MLNDLTopology, errors: list[ValidationError]) -> None:
+    """VLAN の端点の IP が、その VLAN の SVI のサブネットに入っているか (info。ADR-0013 D7)
+
+    L2 だけのセグメントや設計途中の構成があるので warning にはしない。
+    """
+    if not topology.layer3:
+        return
+    l3_index = {iface.id: i for i, iface in enumerate(topology.layer3.interfaces)}
+    svi_nets = vlan_svi_networks(topology)
+    seen: set[tuple[str, str]] = set()      # MLAG の両脚から同じ L3 IF に届いても 1 回だけ
+    for ep in vlan_endpoints(topology):
+        outside = outside_svi_subnet(ep, svi_nets)
+        l3 = ep.l3_interfaces[0] if ep.l3_interfaces else None
+        if not outside or l3 is None or (ep.vlan, l3.id) in seen:
+            continue
+        seen.add((ep.vlan, l3.id))
+        nets = ", ".join(str(n) for n in svi_nets[ep.vlan])
+        errors.append(ValidationError(
+            f"layer3.interfaces[{l3_index[l3.id]}]",
+            f"VLAN '{ep.vlan}' の端点 '{l3.id}' ({ep.node}) の {', '.join(outside)} が、この VLAN の SVI の"
+            f"サブネット ({nets}) に入っていません (ADR-0013 D7)",
+            "info",
+        ))
+
 
 def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
                  l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids, errors):

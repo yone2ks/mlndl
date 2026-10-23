@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 
+from ..derive import outside_svi_subnet, vlan_endpoints, vlan_svi_networks
 from ..schema.layer1 import LacpLag, MlagLag
 from ..schema.layer2 import L2VxLAN, L3VxLAN
 from ..schema.topology import MLNDLTopology
@@ -53,9 +55,55 @@ def _interface_nodes(topology: MLNDLTopology) -> dict[str, list[str]]:
     return nodes
 
 
+# ループバックの機器上の名前: lo / lo0 / lo0.0 (Junos) / loopback0 / Loopback0
+_LOOPBACK_NAME = re.compile(r"^(lo|loopback)\d*(\.\d+)?$", re.IGNORECASE)
+
+
+def _is_loopback(iface) -> bool:
+    """L3 IF がループバックか。ループバックは attaches_to を持たない (下に物理 IF がない)"""
+    return iface.attaches_to is None and bool(_LOOPBACK_NAME.match(iface.name))
+
+
 def _port_nodes(pr, interface_nodes: dict[str, list[str]]) -> list[str]:
     """PortRef が載るノード群。ノードは interface / lag から導出する (ADR-0013 D2)"""
     return interface_nodes.get(pr.target) or ([pr.node] if pr.node else [])
+
+
+def _vtep_info(topology: MLNDLTopology) -> dict[str, dict]:
+    """VTEP の id → {"nodes": 終端するノード, "sources": ノード → L3 IF, アドレス}
+
+    ノードは sources の各 L3 IF から決まる。アドレスは address / address_v6 を使い、
+    省略されていれば (sources が 1 つのとき) その L3 IF の ip / ipv6 を使う (ADR-0014 D2)。
+    """
+    if not topology.layer2 or not topology.layer3:
+        return {}
+    l3ifs = {i.id: i for i in topology.layer3.interfaces}
+    info: dict[str, dict] = {}
+    for vtep in topology.layer2.vteps:
+        srcs = [l3ifs[s] for s in vtep.sources if s in l3ifs]
+        own = srcs[0] if len(vtep.sources) == 1 and srcs else None
+        address    = vtep.address    or (own.ip   if own else None)
+        address_v6 = vtep.address_v6 or (own.ipv6 if own else None)
+        entry: dict = {
+            "nodes":   list(dict.fromkeys(i.node for i in srcs)),
+            "sources": {i.node: i for i in srcs},
+        }
+        if address:    entry["address"]    = str(address)
+        if address_v6: entry["address_v6"] = str(address_v6)
+        info[vtep.id] = entry
+    return info
+
+
+def _l3vni_vteps(topology: MLNDLTopology, vx: L3VxLAN, vteps: dict[str, dict]) -> list[str]:
+    """L3VNI が載る VTEP。L3VNI は vteps を持たないので、VRF から導く (ADR-0014 D3)
+
+    その VRF に属する L3 IF を持つノードが終端する VTEP。1 ノードが複数の VTEP を
+    終端していれば (Multi-Site BGW 等)、その全部に載るとみなす。
+    """
+    if not topology.layer3:
+        return []
+    vrf_nodes = {i.node for i in topology.layer3.interfaces if i.vrf == vx.vrf}
+    return [vid for vid, v in vteps.items() if vrf_nodes & set(v["nodes"])]
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +123,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     node_vrfs: dict[str, list[str]]  = defaultdict(list)
     node_tunnels: dict[str, list[dict]] = defaultdict(list)
     node_subifs: dict[str, list[dict]] = defaultdict(list)
+    node_vteps: dict[str, list[dict]] = defaultdict(list)
     vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
 
     # サブ IF は親 (L1 IF / LAG) のノードに埋め込む。MLAG 上のサブ IF は両ノードに存在する (ADR-0012)
@@ -88,14 +137,16 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     lag_ids = {lag.id for lag in topology.layer1.lag}
     if topology.layer3:
         for iface in topology.layer3.interfaces:
-            if iface.name == "lo":
-                if iface.ip:   lo_ip[iface.node]   = str(iface.ip)
-                if iface.ipv6: lo_ipv6[iface.node] = str(iface.ipv6)
+            loopback = _is_loopback(iface)
+            # ループバックが複数あれば (Router-ID 用と VTEP 用など)、先に書かれたものを代表にする
+            if loopback:
+                if iface.ip:   lo_ip.setdefault(iface.node, str(iface.ip))
+                if iface.ipv6: lo_ipv6.setdefault(iface.node, str(iface.ipv6))
             if iface.ip or iface.ipv6:
                 ref = iface.attachment_ref()
                 vlan = ref if ref in vlan_ids else None
                 subif = subifs.get(ref)
-                kind = ("loopback" if iface.name == "lo"
+                kind = ("loopback" if loopback
                         else "svi" if vlan
                         else "subinterface" if subif else "routed")
                 # 出力のキーは ndl-viz との互換のため "interface" のまま (中身は L3Interface.name)
@@ -118,6 +169,17 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
             node_tunnels[tun.node].append(
                 tun.model_dump(mode="json", exclude_none=True, exclude={"node"})
             )
+
+    # 終端する VTEP をノードに埋め込む。共有 VTEP (sources が複数) は各ノードに載り、
+    # shared_with に相手のノードが入る (ADR-0014)
+    for vid, v in _vtep_info(topology).items():
+        for nid in v["nodes"]:
+            entry = {"id": vid, "source": v["sources"][nid].name}
+            if "address" in v:    entry["address"]    = v["address"]
+            if "address_v6" in v: entry["address_v6"] = v["address_v6"]
+            others = [n for n in v["nodes"] if n != nid]
+            if others:            entry["shared_with"] = others
+            node_vteps[nid].append(entry)
 
     # L2 VLAN メンバーシップをノード別に集約
     node_vlans: dict[str, list[str]] = defaultdict(list)
@@ -161,6 +223,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         if lo_ipv6.get(node.id):      data["lo_ipv6"]        = lo_ipv6[node.id]
         if node_tunnels[node.id]:     data["tunnels"]        = node_tunnels[node.id]
         if node_subifs[node.id]:      data["subinterfaces"]  = node_subifs[node.id]
+        if node_vteps[node.id]:       data["vteps"]          = node_vteps[node.id]
         if node_l3ifs[node.id]:       data["l3_interfaces"]  = node_l3ifs[node.id]
         if node_vrfs[node.id]:        data["vrfs"]           = node_vrfs[node.id]
 
@@ -297,6 +360,9 @@ def _export_l2_overlay(topology, if_to_name, elements):
             if iface.vrf and "vrf" not in seg:
                 seg["vrf"] = iface.vrf
 
+    # VLAN の端点 (ADR-0013 D7)。vlan_member エッジ (VLAN, ポートのノード) ごとに出す
+    endpoints = _vlan_endpoint_data(topology)
+
     # VLAN ノード
     for vlan in topology.layer2.vlans:
         data: dict = {
@@ -338,9 +404,12 @@ def _export_l2_overlay(topology, if_to_name, elements):
             }
             if tagged.get(node_id):   data_e["tagged_on"]   = tagged[node_id]
             if untagged.get(node_id): data_e["untagged_on"] = untagged[node_id]
+            if endpoints.get((vlan.id, node_id)):
+                data_e["endpoints"] = endpoints[(vlan.id, node_id)]
             elements["edges"].append({"data": data_e})
 
-    # VxLAN ノード
+    # VxLAN ノード。vteps は L2VNI なら書かれたもの、L3VNI なら VRF から導いたもの
+    vteps = _vtep_info(topology)
     for vx in topology.layer2.vxlan:
         data: dict = {"layer": "layer2", "vni": vx.vni}
         if isinstance(vx, L2VxLAN):
@@ -351,7 +420,46 @@ def _export_l2_overlay(topology, if_to_name, elements):
         elif isinstance(vx, L3VxLAN):
             data.update({"id": vx.id, "label": f"L3VNI {vx.vni}", "type": "l3vni",
                          "vrf": vx.vrf})
+            derived = _l3vni_vteps(topology, vx, vteps)
+            if derived:
+                data["vteps"] = derived              # ADR-0014 D3
         elements["nodes"].append({"data": data})
+
+
+def _vlan_endpoint_data(topology) -> dict[tuple[str, str], list[dict]]:
+    """(VLAN id, ポートのノード) → そのノードのポートの対向にいる VLAN の端点 (ADR-0013 D7)
+
+    導出は derive.vlan_endpoints が参照 (id) だけで行う。IF の name では引かない (ADR-0011 D3)。
+    L3 IF が 1 つに決まれば (direct / tag_match) その名前とアドレスを、決まらなければ (ambiguous) 候補を出す。
+    """
+    names = {i.id: i.name or i.id for i in topology.layer1.interfaces} if topology.layer1 else {}
+    svi_nets = vlan_svi_networks(topology)
+    out: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for ep in vlan_endpoints(topology):
+        entry: dict = {
+            "node":            ep.node,
+            "interfaces":      ep.interfaces,
+            "interface_names": [names.get(i, i) for i in ep.interfaces],
+            "tagged":          ep.tagged,
+            "resolution":      ep.resolution,
+        }
+        if ep.lag: entry["lag"] = ep.lag
+        if ep.resolution in ("direct", "tag_match"):
+            l3 = ep.l3_interfaces[0]
+            entry["l3_interface"] = l3.id
+            entry["name"] = l3.name
+            if l3.ip:   entry["ip"]   = str(l3.ip)
+            if l3.ipv6: entry["ipv6"] = str(l3.ipv6)
+            outside = outside_svi_subnet(ep, svi_nets)
+            if outside: entry["outside_svi_subnet"] = outside
+        elif ep.resolution == "ambiguous":
+            entry["candidates"] = [
+                {"l3_interface": c.id, "name": c.name,
+                 **({"ip": str(c.ip)} if c.ip else {}), **({"ipv6": str(c.ipv6)} if c.ipv6 else {})}
+                for c in ep.l3_interfaces
+            ]
+        out[(ep.vlan, ep.port_node)].append(entry)
+    return out
 
 
 # ---------------------------------------------------------------------------
