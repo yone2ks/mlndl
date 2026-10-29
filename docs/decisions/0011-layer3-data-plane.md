@@ -1,7 +1,7 @@
 # ADR-0011: layer3 データプレーン
 
 - **Status**: Accepted
-- **Date**: 2026-10-15
+- **Date**: 2026-10-15 (D11 を 2026-10-24 に追記)
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、ユーザー (論点 A〜D の判断)
 - **Pass**: C (ラウンド4。[評価メモ](evaluations/round4-evaluation.md) を入力に再設計)
 - **Supersedes**: [drafts/0011](drafts/0011-layer3-data-plane.md)
@@ -176,6 +176,66 @@ ndl_version は 1.x のまま上げない。旧形式は **1.x の間だけ受�
 
 YAML エクスポーター (`python -m mlndl export --format yaml`) は新形式で書き出すので、スキーマで読み替える 2 つの旧形式の移行に使える。
 validator で読み替える 2 つ (ID の種類に依存するもの) は、warning のメッセージに従って書き換える。
+
+### D11. 補則: L3 IF の分類 (2026-10-24 追記)
+
+L3 IF が何の上に載るかの分類は、**`attaches_to` のキーで決まる**。`name` では決めない (D3)。
+ツールが表示や集計のために L3 IF を分類するときも、これに従う。
+
+Cytoscape エクスポーターは、L3 IF を `name` の正規表現 (`lo` / `loopback0` 等) でループバックと判定し、
+`loopback` / `svi` / `subinterface` / `routed` に分けていた。5 エージェントで評価し、次の問題から作り直した。
+
+- 名前による判定は機種に依存する。SR OS の `system`、Linux の `dummy0` を取りこぼす
+- `svi` / `routed port` は Cisco 寄りの語 (Junos は IRB、サブ IF は logical unit)。`routed` は多義 (ループバックも SVI もルーティングされる)
+- 構文は `vlan` / `subinterface` など機種に依存しない概念のキーで書けているのに、出力でそれを崩していた (ADR-0005 D4 補則 問い 4)
+
+#### 分類
+
+| `attaches_to` | 分類 | 意味 |
+|---|---|---|
+| `{interface:}` | `l1_interface` | L1 IF の上 (物理ポート・VM の vNIC) |
+| `{lag:}` | `lag` | LAG の上 (routed LAG) |
+| `{vlan:}` | `vlan` | VLAN の上 (SVI / IRB / VLAN IF) |
+| `{subinterface:}` | `subinterface` | サブ IF の上 |
+| なし | `unattached` | 下位の IF を持たない |
+
+- 機種ごとの呼び名 (SVI / IRB、routed port、logical unit) は分類名にしない。表示で補うのはよい (`vlan` を「VLAN IF (SVI / IRB)」と見せる等)
+- **`unattached` の中身は定義しない**。ループバックのほか、dummy IF、L1 を書かずに書いた管理 IF、`attaches_to` の書き忘れもありうる。
+  ループバックとはみなさない。ループバックを言語で明示する必要がはっきりしたら、そのときに判断する (加算で足せる)
+
+#### 役割 (参照から導く)
+
+L3 IF がほかのエンティティから参照されていることから、役割を導ける。名前は使わない。
+
+| 役割 | 導き方 |
+|---|---|
+| `update_source` | `layer3.routing_adjacencies[].from` / `to` の `update_source` が指している |
+| `vtep_source` | `layer2.vteps[].sources` が指している (ADR-0014) |
+
+MLNDL はノードの代表アドレス (図に 1 つだけ出すアドレス) を言語として定義しない。どの L3 IF のアドレスがノードの代表かは
+YAML に書かれず、役割から選べばそれは推定になる。見せ方は表示ツールが決める (ndl-viz の扱いと旧キー `lo_ip` は
+`docs/exporter-cytoscape.md`)。当初は推奨手順を置いたが、管理 IF だけが `unattached` の構成、BGP unnumbered、
+IS-IS / OSPF だけの underlay などで外れるため外した。
+
+#### 見送った案
+
+- **名前の正規表現でループバックを判定する** (現状): 機種に依存する。D3 とも緊張する
+- **`attaches_to` がなければループバックとみなす** (dsl-designer): L1 を書かずに書いた管理 IF をループバックと誤る (example-author の試し書き)
+- **名前で絞り、合わなければ unknown として warning** (network-tech-reviewer・linguist): 名前への依存、つまり機種への依存が残る
+- **L3 IF に `loopback: true` を足す** (example-author): 言語の変更になる。必要がはっきりするまで見送る
+- **分類名を `attaches_to` のキーそのもの (`interface` 等) にする** (spec-architect): `interface` が `attaches_to.interface` (L1 IF の id) と、
+  旧出力の `interface` キー (L3 IF の名前) の両方とぶつかる
+- **`physical`** (linguist): `implementation: physical` とぶつかる。L1 IF は VM の vNIC でもありうる
+- **`svi` / `routed` を値に残す** (dsl-designer・network-tech-reviewer): 上の問題のとおり
+
+#### 実装と移行
+
+- エクスポーター (`cytoscape.py`) は機器ノードの `l3_interfaces[]` に `id` / `name` / `attaches_to` (YAML と同じ形) / `attachment` (上の分類) / `roles` を出す
+- 旧キー (`interface`、`kind`、`lo_ip` / `lo_ipv6`、`vlan` / `subinterface` / `lag` の別キー) は ndl_version 1.x の間だけ併記する。
+  旧 `kind` は分類から写す (`vlan` → `svi`、`unattached` → `loopback`、`l1_interface` / `lag` → `routed`)。名前による判定はしない。
+  旧 `lo_ip` / `lo_ipv6` は旧ビューワのための互換値で、`unattached` の L3 IF から名前によらず 1 つ選ぶ推定である。
+  「推測は出さない」(`docs/exporter-cytoscape.md` の方針) の 1.x 限定の例外とし、選び方は同文書に書く。2.0 で外す
+- 出力の語彙は `docs/exporter-cytoscape.md` (informative) にまとめる
 
 ## Consequences
 

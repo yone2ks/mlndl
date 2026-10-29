@@ -375,22 +375,58 @@ class TestExport:
         assert vlan["subnet"] == "192.168.100.0/24"
         assert vlan["subnet_v6"] == "2001:db8:100::/64"
 
-    @pytest.mark.parametrize("name", ["lo", "lo0", "lo0.0", "loopback0", "Loopback0"])
-    def test_cytoscape_loopback_names(self, name):
-        """機器ごとのループバックの名前を loopback として扱い、先に書かれたものを lo_ip にする"""
-        t = _topo(_l3(
-            f"    - {{id: l0, node: leaf1, name: {name}, ip: 10.1.0.11/32}}\n"
-            "    - {id: l1, node: leaf1, name: loopback1, ip: 10.2.0.11/32}\n"
-        ))
-        leaf1 = next(n["data"] for n in cytoscape.export(t)["nodes"] if n["data"]["id"] == "leaf1")
-        assert leaf1["lo_ip"] == "10.1.0.11/32"
-        assert {x["kind"] for x in leaf1["l3_interfaces"]} == {"loopback"}
+    @staticmethod
+    def _leaf1(t):
+        return next(n["data"] for n in cytoscape.export(t)["nodes"] if n["data"]["id"] == "leaf1")
 
-    def test_cytoscape_loopback_needs_no_attaches_to(self):
-        """名前が lo でも、物理 IF の上に載る L3 IF はループバックではない"""
+    def test_attachment_from_key_not_name(self):
+        """分類は attaches_to のキーで決まり、name では決めない (ADR-0011 D11)"""
+        t = _topo(_l3(
+            "    - {id: a, node: leaf1, name: system, ip: 10.1.0.11/32}\n"                       # SR OS 流の名前
+            "    - {id: b, node: leaf1, name: loopback9, ip: 10.9.0.1/31, attaches_to: {interface: leaf1-swp1}}\n"
+            "    - {id: c, node: leaf1, name: Vlan100, ip: 192.168.100.1/24, attaches_to: {vlan: vlan-100}}\n"
+        ))
+        ifs = {x["id"]: x for x in self._leaf1(t)["l3_interfaces"]}
+        assert {k: v["attachment"] for k, v in ifs.items()} == {"a": "unattached", "b": "l1_interface", "c": "vlan"}
+        assert ifs["b"]["attaches_to"] == {"interface": "leaf1-swp1"} and "attaches_to" not in ifs["a"]
+        assert ifs["b"]["name"] == "loopback9"
+        # 旧キーは分類から写す (1.x の間だけ)
+        assert {k: (v["interface"], v["kind"]) for k, v in ifs.items()} == {
+            "a": ("system", "loopback"), "b": ("loopback9", "routed"), "c": ("Vlan100", "svi")}
+
+    def test_attachment_reads_legacy_interface_key_by_target(self):
+        """旧形式 {interface: <LAG の id>} は参照先の種類で読む (ADR-0011 D10)"""
+        body = _l3("    - {id: po1, node: leaf1, name: Port-channel1, ip: 10.250.0.1/31,"
+                   " attaches_to: {interface: lag-leaf1-po1}}\n").replace(
+            "    - {id: leaf2-swp1, node: leaf2, name: swp1}\n",
+            "    - {id: leaf2-swp1, node: leaf2, name: swp1}\n"
+            "  lag: [{id: lag-leaf1-po1, type: lacp, node: leaf1, members: [leaf1-swp2]}]\n")
+        (entry,) = self._leaf1(_topo(body))["l3_interfaces"]
+        assert entry["attachment"] == "lag"
+
+    def test_roles_and_legacy_lo_ip(self):
+        """役割は参照から導く。旧 lo_ip (互換値) は update_source → VTEP の source 以外 → 記述順で選ぶ"""
+        body = _l3(
+            "    - {id: leaf1-lo1, node: leaf1, name: loopback1, ip: 10.2.0.11/32}\n"     # VTEP 用 (先に書く)
+            "    - {id: leaf1-lo0, node: leaf1, name: loopback0, ip: 10.1.0.11/32}\n"     # BGP の update_source
+            "    - {id: leaf2-lo0, node: leaf2, name: loopback0, ip: 10.1.0.12/32}\n",
+            "  routing_adjacencies:\n"
+            "    - {id: bgp-peer-leaf1-leaf2, type: bgp, from: {node: leaf1, update_source: leaf1-lo0},"
+            " to: {node: leaf2, update_source: leaf2-lo0}}\n",
+        ).replace("layer2:\n  vlans:", "layer2:\n  vteps: [{id: vtep-leaf1, sources: [leaf1-lo1]}]\n  vlans:")
+        leaf1 = self._leaf1(_topo(body))
+        roles = {x["id"]: x.get("roles") for x in leaf1["l3_interfaces"]}
+        assert roles == {"leaf1-lo1": ["vtep_source"], "leaf1-lo0": ["update_source"]}
+        assert leaf1["lo_ip"] == "10.1.0.11/32"
+        # update_source がなければ、VTEP の source ではないものを選ぶ
+        no_adj = body[:body.index("  routing_adjacencies:")]
+        assert self._leaf1(_topo(no_adj))["lo_ip"] == "10.1.0.11/32"
+
+    def test_no_legacy_lo_ip_without_unattached(self):
+        """下位の IF に載る L3 IF だけなら旧 lo_ip は出さない (名前が lo でも)"""
         t = _topo(_l3("    - {id: x, node: leaf1, name: lo1, ip: 10.9.0.1/31, attaches_to: {interface: leaf1-swp1}}\n"))
-        leaf1 = next(n["data"] for n in cytoscape.export(t)["nodes"] if n["data"]["id"] == "leaf1")
-        assert "lo_ip" not in leaf1 and leaf1["l3_interfaces"][0]["kind"] == "routed"
+        leaf1 = self._leaf1(t)
+        assert "lo_ip" not in leaf1 and leaf1["l3_interfaces"][0]["attachment"] == "l1_interface"
 
     def test_cytoscape_derives_one_tunnel_edge_per_pair(self):
         out = cytoscape.export(_topo(_tun(T1, T2)))

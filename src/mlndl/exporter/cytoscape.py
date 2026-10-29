@@ -10,10 +10,9 @@
 from __future__ import annotations
 
 import json
-import re
 from collections import defaultdict
 
-from ..derive import outside_svi_subnet, vlan_endpoints, vlan_svi_networks
+from ..derive import l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints, vlan_svi_networks
 from ..schema.layer1 import LacpLag, MlagLag
 from ..schema.layer2 import L2VxLAN, L3VxLAN
 from ..schema.topology import MLNDLTopology
@@ -55,13 +54,24 @@ def _interface_nodes(topology: MLNDLTopology) -> dict[str, list[str]]:
     return nodes
 
 
-# ループバックの機器上の名前: lo / lo0 / lo0.0 (Junos) / loopback0 / Loopback0
-_LOOPBACK_NAME = re.compile(r"^(lo|loopback)\d*(\.\d+)?$", re.IGNORECASE)
+# 旧 kind (ndl_version 1.x の間だけ併記)。分類 (ADR-0011 D11) から写し、name では判定しない
+_LEGACY_KIND = {"l1_interface": "routed", "lag": "routed", "vlan": "svi",
+                "subinterface": "subinterface", "unattached": "loopback"}
 
 
-def _is_loopback(iface) -> bool:
-    """L3 IF がループバックか。ループバックは attaches_to を持たない (下に物理 IF がない)"""
-    return iface.attaches_to is None and bool(_LOOPBACK_NAME.match(iface.name))
+def _legacy_lo(cands: list, roles: dict[str, list[str]]):
+    """旧 lo_ip / lo_ipv6 にする L3 IF (旧ビューワのための互換値。1.x 限定の推定。ADR-0011 D11)
+
+    unattached の L3 IF のうち、update_source に使われているもの → VTEP の source ではないもの → 先に書かれたもの。
+    選び方は docs/exporter-cytoscape.md の「旧キー lo_ip / lo_ipv6」と合わせること
+    """
+    for pick in (lambda i: "update_source" in roles.get(i.id, []),
+                 lambda i: "vtep_source" not in roles.get(i.id, []),
+                 lambda i: True):
+        for iface in cands:
+            if pick(iface):
+                return iface
+    return None
 
 
 def _port_nodes(pr, interface_nodes: dict[str, list[str]]) -> list[str]:
@@ -135,22 +145,23 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         for nid in parent_nodes.get(si.attaches_to.target, []):
             node_subifs[nid].append(entry)
     lag_ids = {lag.id for lag in topology.layer1.lag}
+    attachments = l3_attachments(topology)
+    roles = l3_roles(topology)
     if topology.layer3:
         for iface in topology.layer3.interfaces:
-            loopback = _is_loopback(iface)
-            # ループバックが複数あれば (Router-ID 用と VTEP 用など)、先に書かれたものを代表にする
-            if loopback:
-                if iface.ip:   lo_ip.setdefault(iface.node, str(iface.ip))
-                if iface.ipv6: lo_ipv6.setdefault(iface.node, str(iface.ipv6))
             if iface.ip or iface.ipv6:
                 ref = iface.attachment_ref()
                 vlan = ref if ref in vlan_ids else None
                 subif = subifs.get(ref)
-                kind = ("loopback" if loopback
-                        else "svi" if vlan
-                        else "subinterface" if subif else "routed")
-                # 出力のキーは ndl-viz との互換のため "interface" のまま (中身は L3Interface.name)
-                entry: dict = {"interface": iface.name, "kind": kind}
+                attachment = attachments[iface.id]
+                # 分類と役割は参照から決める (ADR-0011 D11)。attaches_to は YAML と同じ形で出す
+                entry: dict = {"id": iface.id, "name": iface.name, "attachment": attachment}
+                if iface.attaches_to is not None:
+                    entry["attaches_to"] = {iface.attaches_to.kind: iface.attaches_to.target}
+                if roles.get(iface.id): entry["roles"] = roles[iface.id]
+                # 旧キー (1.x の間だけ): interface (= name)、kind
+                entry["interface"] = iface.name
+                entry["kind"] = _LEGACY_KIND[attachment]
                 if iface.ip:   entry["ip"]   = str(iface.ip)
                 if iface.ipv6: entry["ipv6"] = str(iface.ipv6)
                 if iface.vrf:  entry["vrf"]  = iface.vrf
@@ -165,6 +176,14 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
                 node_l3ifs[iface.node].append(entry)
             if iface.vrf and iface.vrf not in node_vrfs[iface.node]:
                 node_vrfs[iface.node].append(iface.vrf)
+        # 旧 lo_ip / lo_ipv6 (1.x の間だけ): 互換値として 1 つ選ぶ。名前では選ばない
+        for nid in {i.node for i in topology.layer3.interfaces}:
+            for fld, out in (("ip", lo_ip), ("ipv6", lo_ipv6)):
+                cands = [i for i in topology.layer3.interfaces
+                         if i.node == nid and attachments[i.id] == "unattached" and getattr(i, fld) is not None]
+                rep = _legacy_lo(cands, roles)
+                if rep is not None:
+                    out[nid] = str(getattr(rep, fld))
         for tun in topology.layer3.tunnel_interfaces:
             node_tunnels[tun.node].append(
                 tun.model_dump(mode="json", exclude_none=True, exclude={"node"})

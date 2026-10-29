@@ -2,6 +2,8 @@
 
   vlan_endpoints(topology)    VLAN の端点 (ADR-0013 D7)
   vlan_svi_networks(topology) VLAN の SVI のサブネット
+  l3_attachments(topology)    L3 IF が何の上に載るか (ADR-0011 D11)
+  l3_roles(topology)          L3 IF がほかから参照されている役割 (ADR-0011 D11)
 
 エクスポーターと validator が同じ関数を使う。参照先が存在しない id は黙って飛ばす
 (存在の検査は validator の _check_refs が行う)。
@@ -18,6 +20,8 @@ from .schema.layer3 import L3Interface
 from .schema.topology import MLNDLTopology
 
 Resolution = Literal["direct", "tag_match", "ambiguous", "no_l3"]
+Attachment = Literal["l1_interface", "lag", "vlan", "subinterface", "unattached"]
+Role = Literal["update_source", "vtep_source"]
 
 
 @dataclass
@@ -134,3 +138,56 @@ def outside_svi_subnet(endpoint: VlanEndpoint, svi_nets: dict[str, list[IPv4Netw
         if same_af and not any(addr.ip in n for n in same_af):
             out.append(str(addr))
     return out
+
+
+def l3_attachments(topology: MLNDLTopology) -> dict[str, Attachment]:
+    """L3 IF の id → 何の上に載るか (ADR-0011 D11)
+
+    attaches_to のキーで決め、name では決めない。attaches_to がなければ unattached
+    (ループバックとはみなさない)。旧形式 {interface: <LAG / VLAN / サブ IF の id>} (ADR-0011 D10) は、
+    validator と同じく参照先の種類で読む。
+    """
+    if not topology.layer3:
+        return {}
+    lag_ids = {g.id for g in topology.layer1.lag} if topology.layer1 else set()
+    vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
+    subif_ids = {si.id for si in topology.layer2.subinterfaces} if topology.layer2 else set()
+    by_key: dict[str, Attachment] = {"interface": "l1_interface", "lag": "lag", "vlan": "vlan",
+                                     "subinterface": "subinterface"}
+    out: dict[str, Attachment] = {}
+    for iface in topology.layer3.interfaces:
+        at = iface.attaches_to
+        if at is None:
+            out[iface.id] = "unattached"
+        elif at.kind == "interface" and at.target in lag_ids:
+            out[iface.id] = "lag"
+        elif at.kind == "interface" and at.target in vlan_ids:
+            out[iface.id] = "vlan"
+        elif at.kind == "interface" and at.target in subif_ids:
+            out[iface.id] = "subinterface"
+        else:
+            out[iface.id] = by_key[at.kind]
+    return out
+
+
+def l3_roles(topology: MLNDLTopology) -> dict[str, list[Role]]:
+    """L3 IF の id → ほかのエンティティから参照されている役割 (ADR-0011 D11)
+
+    update_source: routing_adjacencies の from / to の update_source が指している
+    vtep_source:   layer2.vteps の sources が指している (ADR-0014)
+    """
+    roles: dict[str, list[Role]] = defaultdict(list)
+
+    def add(l3_id: str | None, role: Role) -> None:
+        if l3_id is not None and role not in roles[l3_id]:
+            roles[l3_id].append(role)
+
+    if topology.layer3:
+        for adj in topology.layer3.routing_adjacencies:
+            add(adj.from_.update_source, "update_source")
+            add(adj.to.update_source, "update_source")
+    if topology.layer2:
+        for vtep in topology.layer2.vteps:
+            for src in vtep.sources:
+                add(src, "vtep_source")
+    return dict(roles)
