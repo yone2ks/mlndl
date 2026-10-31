@@ -1,0 +1,639 @@
+ndl_version: "1.0"
+
+# eveng-evpn-lab.yaml（EVE-NG で実際に組んだ 2 spine / 2 leaf のラボ）を、表示の確認のために広げた架空の構成。
+# 実機の設定から写したものではない。leaf1 / leaf2 / host1 / host2 までは元のラボと同じ。
+#
+# 元のラボに足したもの:
+#   leaf3 / leaf4  vPC ペア（domain 34）。peer-link は 2 本の port-channel1。VTEP を共有（secondary 10.2.0.34）。
+#                  underlay は同じ AS 65034 で、peer-link 上の Vlan3999 に iBGP のバックアップを張る
+#   server3        leaf3 / leaf4 に vPC で 2 本つなぐ Linux。bond0 に VLAN 10 / 30 / 40 / 120 のサブ IF
+#   host4          leaf4 だけにつなぐ（orphan port）。VLAN 110（tenant-b、IPv4 / IPv6）
+#   leaf5          server5（LACP 2 本、VLAN 20 / 110 / 120 の trunk）と host5（VLAN 30 の access）
+#   leaf6          border leaf。L3VNI だけを持ち、外部とは VRF-lite（VRF ごとのサブ IF と eBGP）でつなぐ
+#   wan-rtr        外部ルーター。インターネット側の IF から別 DC へ GRE トンネルを張る（対向はトポロジーの外）
+#   fw1            テナント間のファイアウォール。leaf6 と LACP 2 本でつなぎ、bond0 に VRF ごとのサブ IF
+#   vrf-tenant-b   2 つめのテナント（L3VNI 50002）。SVI は IPv4 / IPv6 の両方
+
+meta:
+  name: eveng-evpn-vxlan-lab-extended
+  description: >
+    NX-OSv 9300v の 2 spine / 6 leaf（うち leaf3 / leaf4 は vPC ペア、leaf6 は border leaf）。
+    eBGP アンダーレイ + eBGP EVPN オーバーレイ（spine が route server）、2 テナント（L3VNI 50001 / 50002）、
+    Anycast GW、vPC の共有 VTEP、VRF-lite での外部接続、テナント間ファイアウォール、外部への GRE。
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    # ── 仮想化基盤 ───────────────────────────────────────────────────────
+    - id: windows-host
+      name: Windows Host
+      implementation: physical
+      role: hypervisor
+      description: 6 コア / 12 論理プロセッサ。EVE-NG の VM を載せる
+
+    - id: eve-ng
+      name: EVE-NG
+      implementation: vm
+      role: hypervisor
+      device_type: eve_ng_community
+      attaches_to: windows-host
+      description: EVE-NG Community 6.2.0-4（192.168.0.229）。8 vCPU / RAM 46GB
+
+    # ── ファブリック（NX-OSv 9300v 10.5.2.F）─────────────────────────────
+    - {id: spine1, name: spine1, implementation: vm, role: spine, device_type: cisco_nxosv9300, attaches_to: eve-ng}
+    - {id: spine2, name: spine2, implementation: vm, role: spine, device_type: cisco_nxosv9300, attaches_to: eve-ng}
+    - {id: leaf1,  name: leaf1,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300, attaches_to: eve-ng}
+    - {id: leaf2,  name: leaf2,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300, attaches_to: eve-ng}
+    - {id: leaf3,  name: leaf3,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300, attaches_to: eve-ng}
+    - {id: leaf4,  name: leaf4,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300, attaches_to: eve-ng}
+    - {id: leaf5,  name: leaf5,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300, attaches_to: eve-ng}
+    - id: leaf6
+      name: leaf6
+      implementation: vm
+      role: border
+      device_type: cisco_nxosv9300
+      attaches_to: eve-ng
+      description: border leaf。ホストはつながず、L3VNI と外部接続だけを持つ
+
+    # ── 外部・サービス ──────────────────────────────────────────────────
+    - id: wan-rtr
+      name: wan-rtr
+      implementation: vm
+      role: wan-router                 # 推奨語彙にない値（docs/role-vocabulary.md）。表示は既定のスタイルになる
+      device_type: cisco_csr1000v
+      attaches_to: eve-ng
+
+    - id: fw1
+      name: fw1
+      implementation: vm
+      role: firewall
+      device_type: fortigate_vm
+      attaches_to: eve-ng
+
+    # ── ホスト ─────────────────────────────────────────────────────────
+    - {id: host1,   name: host1,   implementation: container, role: server, device_type: vpcs,  attaches_to: eve-ng}
+    - {id: host2,   name: host2,   implementation: container, role: server, device_type: vpcs,  attaches_to: eve-ng}
+    - {id: server3, name: server3, implementation: vm,        role: server, device_type: linux, attaches_to: eve-ng}
+    - {id: host4,   name: host4,   implementation: container, role: server, device_type: vpcs,  attaches_to: eve-ng}
+    - {id: host5,   name: host5,   implementation: container, role: server, device_type: vpcs,  attaches_to: eve-ng}
+    - {id: server5, name: server5, implementation: vm,        role: server, device_type: linux, attaches_to: eve-ng}
+
+  interfaces:
+    # EVE-NG 上は NX-OSv の eth0 = mgmt0、eth1 = Ethernet1/1、eth2 = Ethernet1/2 …
+    - { id: spine1-mgmt0, node: spine1, name: mgmt0 }
+    - { id: spine1-e1-1,  node: spine1, name: Ethernet1/1 }   # → leaf1
+    - { id: spine1-e1-2,  node: spine1, name: Ethernet1/2 }   # → leaf2
+    - { id: spine1-e1-3,  node: spine1, name: Ethernet1/3 }   # → leaf3
+    - { id: spine1-e1-4,  node: spine1, name: Ethernet1/4 }   # → leaf4
+    - { id: spine1-e1-5,  node: spine1, name: Ethernet1/5 }   # → leaf5
+    - { id: spine1-e1-6,  node: spine1, name: Ethernet1/6 }   # → leaf6
+
+    - { id: spine2-mgmt0, node: spine2, name: mgmt0 }
+    - { id: spine2-e1-1,  node: spine2, name: Ethernet1/1 }   # → leaf1
+    - { id: spine2-e1-2,  node: spine2, name: Ethernet1/2 }   # → leaf2
+    - { id: spine2-e1-3,  node: spine2, name: Ethernet1/3 }   # → leaf3
+    - { id: spine2-e1-4,  node: spine2, name: Ethernet1/4 }   # → leaf4
+    - { id: spine2-e1-5,  node: spine2, name: Ethernet1/5 }   # → leaf5
+    - { id: spine2-e1-6,  node: spine2, name: Ethernet1/6 }   # → leaf6
+
+    - { id: leaf1-mgmt0, node: leaf1, name: mgmt0 }
+    - { id: leaf1-e1-1,  node: leaf1, name: Ethernet1/1 }     # → spine1
+    - { id: leaf1-e1-2,  node: leaf1, name: Ethernet1/2 }     # → spine2
+    - { id: leaf1-e1-3,  node: leaf1, name: Ethernet1/3 }     # → host1
+
+    - { id: leaf2-mgmt0, node: leaf2, name: mgmt0 }
+    - { id: leaf2-e1-1,  node: leaf2, name: Ethernet1/1 }     # → spine1
+    - { id: leaf2-e1-2,  node: leaf2, name: Ethernet1/2 }     # → spine2
+    - { id: leaf2-e1-3,  node: leaf2, name: Ethernet1/3 }     # → host2
+
+    - { id: leaf3-mgmt0, node: leaf3, name: mgmt0 }           # vPC peer-keepalive もここ（vrf management）
+    - { id: leaf3-e1-1,  node: leaf3, name: Ethernet1/1 }     # → spine1
+    - { id: leaf3-e1-2,  node: leaf3, name: Ethernet1/2 }     # → spine2
+    - { id: leaf3-e1-3,  node: leaf3, name: Ethernet1/3 }     # → server3（vPC 3）
+    - { id: leaf3-e1-5,  node: leaf3, name: Ethernet1/5 }     # → leaf4（peer-link）
+    - { id: leaf3-e1-6,  node: leaf3, name: Ethernet1/6 }     # → leaf4（peer-link）
+
+    - { id: leaf4-mgmt0, node: leaf4, name: mgmt0 }
+    - { id: leaf4-e1-1,  node: leaf4, name: Ethernet1/1 }     # → spine1
+    - { id: leaf4-e1-2,  node: leaf4, name: Ethernet1/2 }     # → spine2
+    - { id: leaf4-e1-3,  node: leaf4, name: Ethernet1/3 }     # → server3（vPC 3）
+    - { id: leaf4-e1-4,  node: leaf4, name: Ethernet1/4 }     # → host4（orphan port）
+    - { id: leaf4-e1-5,  node: leaf4, name: Ethernet1/5 }     # → leaf3（peer-link）
+    - { id: leaf4-e1-6,  node: leaf4, name: Ethernet1/6 }     # → leaf3（peer-link）
+
+    - { id: leaf5-mgmt0, node: leaf5, name: mgmt0 }
+    - { id: leaf5-e1-1,  node: leaf5, name: Ethernet1/1 }     # → spine1
+    - { id: leaf5-e1-2,  node: leaf5, name: Ethernet1/2 }     # → spine2
+    - { id: leaf5-e1-3,  node: leaf5, name: Ethernet1/3 }     # → server5（port-channel5）
+    - { id: leaf5-e1-4,  node: leaf5, name: Ethernet1/4 }     # → server5（port-channel5）
+    - { id: leaf5-e1-5,  node: leaf5, name: Ethernet1/5 }     # → host5
+
+    - { id: leaf6-mgmt0, node: leaf6, name: mgmt0 }
+    - { id: leaf6-e1-1,  node: leaf6, name: Ethernet1/1 }     # → spine1
+    - { id: leaf6-e1-2,  node: leaf6, name: Ethernet1/2 }     # → spine2
+    - { id: leaf6-e1-3,  node: leaf6, name: Ethernet1/3 }     # → wan-rtr（VRF-lite）
+    - { id: leaf6-e1-4,  node: leaf6, name: Ethernet1/4 }     # → fw1（port-channel10）
+    - { id: leaf6-e1-5,  node: leaf6, name: Ethernet1/5 }     # → fw1（port-channel10）
+
+    - { id: wan-rtr-gi1, node: wan-rtr, name: GigabitEthernet1 }   # → leaf6
+    - { id: wan-rtr-gi2, node: wan-rtr, name: GigabitEthernet2 }   # インターネット（対向はトポロジーの外）
+
+    - { id: fw1-port1, node: fw1, name: port1 }               # → leaf6
+    - { id: fw1-port2, node: fw1, name: port2 }               # → leaf6
+
+    - { id: host1-eth0,   node: host1,   name: eth0 }
+    - { id: host2-eth0,   node: host2,   name: eth0 }
+    - { id: server3-eth0, node: server3, name: eth0 }         # → leaf3
+    - { id: server3-eth1, node: server3, name: eth1 }         # → leaf4
+    - { id: host4-eth0,   node: host4,   name: eth0 }
+    - { id: host5-eth0,   node: host5,   name: eth0 }
+    - { id: server5-eth0, node: server5, name: eth0 }
+    - { id: server5-eth1, node: server5, name: eth1 }
+
+  links:
+    # ── アンダーレイ（P2P /31、MTU 9216）────────────────────────────────
+    - {id: link-spine1-leaf1, endpoints: [spine1-e1-1, leaf1-e1-1], mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf2, endpoints: [spine1-e1-2, leaf2-e1-1], mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf3, endpoints: [spine1-e1-3, leaf3-e1-1], mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf4, endpoints: [spine1-e1-4, leaf4-e1-1], mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf5, endpoints: [spine1-e1-5, leaf5-e1-1], mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf6, endpoints: [spine1-e1-6, leaf6-e1-1], mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf1, endpoints: [spine2-e1-1, leaf1-e1-2], mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf2, endpoints: [spine2-e1-2, leaf2-e1-2], mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf3, endpoints: [spine2-e1-3, leaf3-e1-2], mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf4, endpoints: [spine2-e1-4, leaf4-e1-2], mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf5, endpoints: [spine2-e1-5, leaf5-e1-2], mtu: 9216, link_role: underlay}
+    - {id: link-spine2-leaf6, endpoints: [spine2-e1-6, leaf6-e1-2], mtu: 9216, link_role: underlay}
+
+    # ── vPC peer-link（leaf3 ↔ leaf4、2 本）─────────────────────────────
+    - {id: link-leaf3-leaf4-1, endpoints: [leaf3-e1-5, leaf4-e1-5], mtu: 9216, link_role: peer-link}
+    - {id: link-leaf3-leaf4-2, endpoints: [leaf3-e1-6, leaf4-e1-6], mtu: 9216, link_role: peer-link}
+
+    # ── ホスト収容（MTU 1500）──────────────────────────────────────────
+    - {id: link-leaf1-host1,     endpoints: [leaf1-e1-3, host1-eth0],   mtu: 1500, link_role: access}
+    - {id: link-leaf2-host2,     endpoints: [leaf2-e1-3, host2-eth0],   mtu: 1500, link_role: access}
+    - {id: link-leaf3-server3,   endpoints: [leaf3-e1-3, server3-eth0], mtu: 1500, link_role: trunk}
+    - {id: link-leaf4-server3,   endpoints: [leaf4-e1-3, server3-eth1], mtu: 1500, link_role: trunk}
+    - {id: link-leaf4-host4,     endpoints: [leaf4-e1-4, host4-eth0],   mtu: 1500, link_role: access}
+    - {id: link-leaf5-server5-1, endpoints: [leaf5-e1-3, server5-eth0], mtu: 1500, link_role: trunk}
+    - {id: link-leaf5-server5-2, endpoints: [leaf5-e1-4, server5-eth1], mtu: 1500, link_role: trunk}
+    - {id: link-leaf5-host5,     endpoints: [leaf5-e1-5, host5-eth0],   mtu: 1500, link_role: access}
+
+    # ── 外部・サービス ──────────────────────────────────────────────────
+    - {id: link-leaf6-wan-rtr, endpoints: [leaf6-e1-3, wan-rtr-gi1], mtu: 1500, link_role: uplink}
+    - {id: link-leaf6-fw1-1,   endpoints: [leaf6-e1-4, fw1-port1],   mtu: 1500, link_role: trunk}
+    - {id: link-leaf6-fw1-2,   endpoints: [leaf6-e1-5, fw1-port2],   mtu: 1500, link_role: trunk}
+
+  lag:
+    # vPC peer-link。MLNDL の LACP LAG は 1 ノードごとなので、両側に 1 つずつ書く
+    - {id: lag-leaf3-po1, type: lacp, node: leaf3, members: [leaf3-e1-5, leaf3-e1-6], lacp: {mode: active, min_links: 1}}
+    - {id: lag-leaf4-po1, type: lacp, node: leaf4, members: [leaf4-e1-5, leaf4-e1-6], lacp: {mode: active, min_links: 1}}
+
+    # server3 向け vPC（leaf3 + leaf4 の port-channel3）
+    - id: lag-vpc-server3
+      type: mlag
+      nodes: [leaf3, leaf4]
+      members: [leaf3-e1-3, leaf4-e1-3]
+      lacp: {mode: active, min_links: 1}
+      peer_link: lag-leaf3-po1
+      peer_link_interface: port-channel1
+      domain_id: 34
+      client_lag: lag-server3-bond0
+    - {id: lag-server3-bond0, type: lacp, node: server3, members: [server3-eth0, server3-eth1], lacp: {mode: active}}
+
+    # server5 向け（leaf5 単独の port-channel5）
+    - {id: lag-leaf5-po5,     type: lacp, node: leaf5,   members: [leaf5-e1-3, leaf5-e1-4],     lacp: {mode: active}}
+    - {id: lag-server5-bond0, type: lacp, node: server5, members: [server5-eth0, server5-eth1], lacp: {mode: active}}
+
+    # fw1 向け（leaf6 の port-channel10。上にテナントごとのサブ IF を載せる）
+    - {id: lag-leaf6-po10, type: lacp, node: leaf6, members: [leaf6-e1-4, leaf6-e1-5], lacp: {mode: active}}
+    - {id: lag-fw1-agg1,   type: lacp, node: fw1,   members: [fw1-port1, fw1-port2],   lacp: {mode: active}}
+
+layer2:
+  vlans:
+    # ── tenant-a ──────────────────────────────────────────────────────
+    - id: vlan-10
+      vlan_id: 10
+      access_ports:
+        - {interface: leaf1-e1-3}      # host1
+      trunk_ports:
+        - {lag: lag-vpc-server3}       # server3（vPC は 1 行で leaf3 / leaf4 の両方）
+        - {lag: lag-leaf3-po1}         # peer-link
+        - {lag: lag-leaf4-po1}
+
+    - id: vlan-20
+      vlan_id: 20
+      access_ports:
+        - {interface: leaf2-e1-3}      # host2
+      trunk_ports:
+        - {lag: lag-leaf5-po5}         # server5
+
+    - id: vlan-30
+      vlan_id: 30
+      access_ports:
+        - {interface: leaf5-e1-5}      # host5
+      trunk_ports:
+        - {lag: lag-vpc-server3}
+        - {lag: lag-leaf3-po1}
+        - {lag: lag-leaf4-po1}
+
+    - id: vlan-40
+      vlan_id: 40
+      description: server3 だけが使う（leaf3 / leaf4 の中で閉じる VNI）
+      trunk_ports:
+        - {lag: lag-vpc-server3}
+        - {lag: lag-leaf3-po1}
+        - {lag: lag-leaf4-po1}
+
+    # ── tenant-b（IPv4 / IPv6）──────────────────────────────────────────
+    - id: vlan-110
+      vlan_id: 110
+      access_ports:
+        - {interface: leaf4-e1-4}      # host4（orphan port）
+      trunk_ports:
+        - {lag: lag-leaf5-po5}         # server5
+        - {lag: lag-leaf3-po1}
+        - {lag: lag-leaf4-po1}
+
+    - id: vlan-120
+      vlan_id: 120
+      trunk_ports:
+        - {lag: lag-vpc-server3}
+        - {lag: lag-leaf5-po5}
+        - {lag: lag-leaf3-po1}
+        - {lag: lag-leaf4-po1}
+
+    # ── L3VNI 用の transit VLAN（ホストポートなし）──────────────────────
+    - {id: vlan-3001, vlan_id: 3001, name: transit-tenant-a, description: L3VNI 50001 用}
+    - {id: vlan-3002, vlan_id: 3002, name: transit-tenant-b, description: L3VNI 50002 用}
+
+    # ── vPC のアンダーレイ・バックアップ（peer-link の上だけ）──────────────
+    - id: vlan-3999
+      vlan_id: 3999
+      name: vpc-backup
+      description: leaf3 / leaf4 の iBGP（underlay のバックアップ経路）。VNI には載せない
+      trunk_ports:
+        - {lag: lag-leaf3-po1}
+        - {lag: lag-leaf4-po1}
+
+  vteps:
+    # nve1 の source-interface loopback1
+    - {id: vtep-leaf1, sources: [leaf1-lo1]}
+    - {id: vtep-leaf2, sources: [leaf2-lo1]}
+    # vPC ペアは loopback1 の secondary アドレスを共有する
+    - id: vtep-leaf3-leaf4
+      sources: [leaf3-lo1, leaf4-lo1]
+      address: 10.2.0.34/32
+    - {id: vtep-leaf5, sources: [leaf5-lo1]}
+    - {id: vtep-leaf6, sources: [leaf6-lo1]}
+
+  vxlan:
+    - {id: vni-10010, type: l2vni, vni: 10010, vlan: vlan-10,  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3-leaf4]}
+    - {id: vni-10020, type: l2vni, vni: 10020, vlan: vlan-20,  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf5]}
+    - {id: vni-10030, type: l2vni, vni: 10030, vlan: vlan-30,  vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
+    - {id: vni-10040, type: l2vni, vni: 10040, vlan: vlan-40,  vteps: [vtep-leaf3-leaf4]}
+    - {id: vni-10110, type: l2vni, vni: 10110, vlan: vlan-110, vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
+    - {id: vni-10120, type: l2vni, vni: 10120, vlan: vlan-120, vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
+
+    - {id: vni-50001, type: l3vni, vni: 50001, vrf: vrf-tenant-a, irb_mode: symmetric}
+    - {id: vni-50002, type: l3vni, vni: 50002, vrf: vrf-tenant-b, irb_mode: symmetric}
+
+  subinterfaces:
+    # ── leaf6 → wan-rtr（VRF-lite。テナントごとに 1 本）──────────────────
+    - {id: subif-leaf6-e1-3-100,   attaches_to: {interface: leaf6-e1-3},  vlan_id: 100, name: Ethernet1/3.100}
+    - {id: subif-leaf6-e1-3-200,   attaches_to: {interface: leaf6-e1-3},  vlan_id: 200, name: Ethernet1/3.200}
+    - {id: subif-wan-rtr-gi1-100,  attaches_to: {interface: wan-rtr-gi1}, vlan_id: 100, name: GigabitEthernet1.100}
+    - {id: subif-wan-rtr-gi1-200,  attaches_to: {interface: wan-rtr-gi1}, vlan_id: 200, name: GigabitEthernet1.200}
+
+    # ── leaf6 → fw1（LAG の上。テナントごとに 1 本）──────────────────────
+    - {id: subif-leaf6-po10-100,   attaches_to: {lag: lag-leaf6-po10}, vlan_id: 100, name: port-channel10.100}
+    - {id: subif-leaf6-po10-200,   attaches_to: {lag: lag-leaf6-po10}, vlan_id: 200, name: port-channel10.200}
+    - {id: subif-fw1-agg1-100,     attaches_to: {lag: lag-fw1-agg1},   vlan_id: 100, name: agg1.100}
+    - {id: subif-fw1-agg1-200,     attaches_to: {lag: lag-fw1-agg1},   vlan_id: 200, name: agg1.200}
+
+    # ── サーバーの bond0 に載る VLAN IF ───────────────────────────────────
+    - {id: subif-server3-bond0-10,  attaches_to: {lag: lag-server3-bond0}, vlan_id: 10,  name: bond0.10}
+    - {id: subif-server3-bond0-30,  attaches_to: {lag: lag-server3-bond0}, vlan_id: 30,  name: bond0.30}
+    - {id: subif-server3-bond0-40,  attaches_to: {lag: lag-server3-bond0}, vlan_id: 40,  name: bond0.40}
+    - {id: subif-server3-bond0-120, attaches_to: {lag: lag-server3-bond0}, vlan_id: 120, name: bond0.120}
+    - {id: subif-server5-bond0-20,  attaches_to: {lag: lag-server5-bond0}, vlan_id: 20,  name: bond0.20}
+    - {id: subif-server5-bond0-110, attaches_to: {lag: lag-server5-bond0}, vlan_id: 110, name: bond0.110}
+    - {id: subif-server5-bond0-120, attaches_to: {lag: lag-server5-bond0}, vlan_id: 120, name: bond0.120}
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+    - id: vrf-management
+      description: mgmt0 用（NX-OS の vrf management）。既定経路 192.168.0.1
+
+    - id: vrf-tenant-a
+      l3vni: vni-50001
+      route_targets:                   # rd は auto
+        import: ["65000:50001"]
+        export: ["65000:50001"]
+      description: NX-OS 上の名前は TENANT-A
+
+    - id: vrf-tenant-b
+      l3vni: vni-50002
+      route_targets:
+        import: ["65000:50002"]
+        export: ["65000:50002"]
+      description: NX-OS 上の名前は TENANT-B
+
+  interfaces:
+    # ── Loopback0（Router-ID / BGP）・Loopback1（VTEP）────────────────────
+    - { id: spine1-lo0, node: spine1, name: loopback0, ip: 10.1.0.1/32,  vrf: vrf-default }
+    - { id: spine2-lo0, node: spine2, name: loopback0, ip: 10.1.0.2/32,  vrf: vrf-default }
+    - { id: leaf1-lo0,  node: leaf1,  name: loopback0, ip: 10.1.0.11/32, vrf: vrf-default }
+    - { id: leaf1-lo1,  node: leaf1,  name: loopback1, ip: 10.2.0.11/32, vrf: vrf-default }
+    - { id: leaf2-lo0,  node: leaf2,  name: loopback0, ip: 10.1.0.12/32, vrf: vrf-default }
+    - { id: leaf2-lo1,  node: leaf2,  name: loopback1, ip: 10.2.0.12/32, vrf: vrf-default }
+    - { id: leaf3-lo0,  node: leaf3,  name: loopback0, ip: 10.1.0.13/32, vrf: vrf-default }
+    - { id: leaf3-lo1,  node: leaf3,  name: loopback1, ip: 10.2.0.13/32, vrf: vrf-default }   # secondary 10.2.0.34 は vtep-leaf3-leaf4
+    - { id: leaf4-lo0,  node: leaf4,  name: loopback0, ip: 10.1.0.14/32, vrf: vrf-default }
+    - { id: leaf4-lo1,  node: leaf4,  name: loopback1, ip: 10.2.0.14/32, vrf: vrf-default }
+    - { id: leaf5-lo0,  node: leaf5,  name: loopback0, ip: 10.1.0.15/32, vrf: vrf-default }
+    - { id: leaf5-lo1,  node: leaf5,  name: loopback1, ip: 10.2.0.15/32, vrf: vrf-default }
+    - { id: leaf6-lo0,  node: leaf6,  name: loopback0, ip: 10.1.0.16/32, vrf: vrf-default }
+    - { id: leaf6-lo1,  node: leaf6,  name: loopback1, ip: 10.2.0.16/32, vrf: vrf-default }
+
+    # ── アンダーレイ P2P（10.0.0.0/24 から /31）──────────────────────────
+    - { id: spine1-e1-1-l3, node: spine1, name: Ethernet1/1, ip: 10.0.0.0/31,  vrf: vrf-default, attaches_to: {interface: spine1-e1-1} }
+    - { id: spine1-e1-2-l3, node: spine1, name: Ethernet1/2, ip: 10.0.0.2/31,  vrf: vrf-default, attaches_to: {interface: spine1-e1-2} }
+    - { id: spine1-e1-3-l3, node: spine1, name: Ethernet1/3, ip: 10.0.0.8/31,  vrf: vrf-default, attaches_to: {interface: spine1-e1-3} }
+    - { id: spine1-e1-4-l3, node: spine1, name: Ethernet1/4, ip: 10.0.0.10/31, vrf: vrf-default, attaches_to: {interface: spine1-e1-4} }
+    - { id: spine1-e1-5-l3, node: spine1, name: Ethernet1/5, ip: 10.0.0.12/31, vrf: vrf-default, attaches_to: {interface: spine1-e1-5} }
+    - { id: spine1-e1-6-l3, node: spine1, name: Ethernet1/6, ip: 10.0.0.14/31, vrf: vrf-default, attaches_to: {interface: spine1-e1-6} }
+    - { id: spine2-e1-1-l3, node: spine2, name: Ethernet1/1, ip: 10.0.0.4/31,  vrf: vrf-default, attaches_to: {interface: spine2-e1-1} }
+    - { id: spine2-e1-2-l3, node: spine2, name: Ethernet1/2, ip: 10.0.0.6/31,  vrf: vrf-default, attaches_to: {interface: spine2-e1-2} }
+    - { id: spine2-e1-3-l3, node: spine2, name: Ethernet1/3, ip: 10.0.0.16/31, vrf: vrf-default, attaches_to: {interface: spine2-e1-3} }
+    - { id: spine2-e1-4-l3, node: spine2, name: Ethernet1/4, ip: 10.0.0.18/31, vrf: vrf-default, attaches_to: {interface: spine2-e1-4} }
+    - { id: spine2-e1-5-l3, node: spine2, name: Ethernet1/5, ip: 10.0.0.20/31, vrf: vrf-default, attaches_to: {interface: spine2-e1-5} }
+    - { id: spine2-e1-6-l3, node: spine2, name: Ethernet1/6, ip: 10.0.0.22/31, vrf: vrf-default, attaches_to: {interface: spine2-e1-6} }
+    - { id: leaf1-e1-1-l3,  node: leaf1,  name: Ethernet1/1, ip: 10.0.0.1/31,  vrf: vrf-default, attaches_to: {interface: leaf1-e1-1} }
+    - { id: leaf1-e1-2-l3,  node: leaf1,  name: Ethernet1/2, ip: 10.0.0.5/31,  vrf: vrf-default, attaches_to: {interface: leaf1-e1-2} }
+    - { id: leaf2-e1-1-l3,  node: leaf2,  name: Ethernet1/1, ip: 10.0.0.3/31,  vrf: vrf-default, attaches_to: {interface: leaf2-e1-1} }
+    - { id: leaf2-e1-2-l3,  node: leaf2,  name: Ethernet1/2, ip: 10.0.0.7/31,  vrf: vrf-default, attaches_to: {interface: leaf2-e1-2} }
+    - { id: leaf3-e1-1-l3,  node: leaf3,  name: Ethernet1/1, ip: 10.0.0.9/31,  vrf: vrf-default, attaches_to: {interface: leaf3-e1-1} }
+    - { id: leaf3-e1-2-l3,  node: leaf3,  name: Ethernet1/2, ip: 10.0.0.17/31, vrf: vrf-default, attaches_to: {interface: leaf3-e1-2} }
+    - { id: leaf4-e1-1-l3,  node: leaf4,  name: Ethernet1/1, ip: 10.0.0.11/31, vrf: vrf-default, attaches_to: {interface: leaf4-e1-1} }
+    - { id: leaf4-e1-2-l3,  node: leaf4,  name: Ethernet1/2, ip: 10.0.0.19/31, vrf: vrf-default, attaches_to: {interface: leaf4-e1-2} }
+    - { id: leaf5-e1-1-l3,  node: leaf5,  name: Ethernet1/1, ip: 10.0.0.13/31, vrf: vrf-default, attaches_to: {interface: leaf5-e1-1} }
+    - { id: leaf5-e1-2-l3,  node: leaf5,  name: Ethernet1/2, ip: 10.0.0.21/31, vrf: vrf-default, attaches_to: {interface: leaf5-e1-2} }
+    - { id: leaf6-e1-1-l3,  node: leaf6,  name: Ethernet1/1, ip: 10.0.0.15/31, vrf: vrf-default, attaches_to: {interface: leaf6-e1-1} }
+    - { id: leaf6-e1-2-l3,  node: leaf6,  name: Ethernet1/2, ip: 10.0.0.23/31, vrf: vrf-default, attaches_to: {interface: leaf6-e1-2} }
+
+    # ── 管理 IF（mgmt0）────────────────────────────────────────────────
+    - { id: spine1-mgmt0-l3, node: spine1, name: mgmt0, ip: 192.168.0.240/24, vrf: vrf-management, attaches_to: {interface: spine1-mgmt0} }
+    - { id: spine2-mgmt0-l3, node: spine2, name: mgmt0, ip: 192.168.0.241/24, vrf: vrf-management, attaches_to: {interface: spine2-mgmt0} }
+    - { id: leaf1-mgmt0-l3,  node: leaf1,  name: mgmt0, ip: 192.168.0.242/24, vrf: vrf-management, attaches_to: {interface: leaf1-mgmt0} }
+    - { id: leaf2-mgmt0-l3,  node: leaf2,  name: mgmt0, ip: 192.168.0.243/24, vrf: vrf-management, attaches_to: {interface: leaf2-mgmt0} }
+    - { id: leaf3-mgmt0-l3,  node: leaf3,  name: mgmt0, ip: 192.168.0.244/24, vrf: vrf-management, attaches_to: {interface: leaf3-mgmt0} }
+    - { id: leaf4-mgmt0-l3,  node: leaf4,  name: mgmt0, ip: 192.168.0.245/24, vrf: vrf-management, attaches_to: {interface: leaf4-mgmt0} }
+    - { id: leaf5-mgmt0-l3,  node: leaf5,  name: mgmt0, ip: 192.168.0.246/24, vrf: vrf-management, attaches_to: {interface: leaf5-mgmt0} }
+    - { id: leaf6-mgmt0-l3,  node: leaf6,  name: mgmt0, ip: 192.168.0.247/24, vrf: vrf-management, attaches_to: {interface: leaf6-mgmt0} }
+
+    # ── SVI（Anycast GW: fabric forwarding anycast-gateway-mac 0000.2222.3333）──
+    # tenant-a
+    - {id: leaf1-vlan-10, node: leaf1, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf2-vlan-10, node: leaf2, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf3-vlan-10, node: leaf3, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf4-vlan-10, node: leaf4, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+
+    - {id: leaf1-vlan-20, node: leaf1, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf2-vlan-20, node: leaf2, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf5-vlan-20, node: leaf5, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+
+    - {id: leaf3-vlan-30, node: leaf3, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf4-vlan-30, node: leaf4, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf5-vlan-30, node: leaf5, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+
+    - {id: leaf3-vlan-40, node: leaf3, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 172.16.40.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf4-vlan-40, node: leaf4, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 172.16.40.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+
+    # tenant-b（IPv4 / IPv6 の両方）
+    - {id: leaf3-vlan-110, node: leaf3, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf4-vlan-110, node: leaf4, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf5-vlan-110, node: leaf5, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+
+    - {id: leaf3-vlan-120, node: leaf3, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf4-vlan-120, node: leaf4, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf5-vlan-120, node: leaf5, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+
+    # L3VNI の transit SVI（ip forward、アドレスなし）
+    - { id: leaf1-vlan-3001, node: leaf1, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+    - { id: leaf2-vlan-3001, node: leaf2, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+    - { id: leaf3-vlan-3001, node: leaf3, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+    - { id: leaf4-vlan-3001, node: leaf4, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+    - { id: leaf5-vlan-3001, node: leaf5, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+    - { id: leaf6-vlan-3001, node: leaf6, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }
+    - { id: leaf3-vlan-3002, node: leaf3, name: Vlan3002, attaches_to: {vlan: vlan-3002}, vrf: vrf-tenant-b }
+    - { id: leaf4-vlan-3002, node: leaf4, name: Vlan3002, attaches_to: {vlan: vlan-3002}, vrf: vrf-tenant-b }
+    - { id: leaf5-vlan-3002, node: leaf5, name: Vlan3002, attaches_to: {vlan: vlan-3002}, vrf: vrf-tenant-b }
+    - { id: leaf6-vlan-3002, node: leaf6, name: Vlan3002, attaches_to: {vlan: vlan-3002}, vrf: vrf-tenant-b }
+
+    # vPC バックアップ（peer-link 上の /31）
+    - { id: leaf3-vlan-3999, node: leaf3, name: Vlan3999, attaches_to: {vlan: vlan-3999}, ip: 10.3.0.0/31, vrf: vrf-default }
+    - { id: leaf4-vlan-3999, node: leaf4, name: Vlan3999, attaches_to: {vlan: vlan-3999}, ip: 10.3.0.1/31, vrf: vrf-default }
+
+    # ── border leaf の外部接続（VRF-lite）・ファイアウォール ────────────────
+    - { id: leaf6-e1-3-100, node: leaf6, name: Ethernet1/3.100, ip: 10.100.0.1/30, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-leaf6-e1-3-100} }
+    - { id: leaf6-e1-3-200, node: leaf6, name: Ethernet1/3.200, ip: 10.100.0.5/30, vrf: vrf-tenant-b, attaches_to: {subinterface: subif-leaf6-e1-3-200} }
+    - { id: leaf6-po10-100, node: leaf6, name: port-channel10.100, ip: 10.110.0.1/30, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-leaf6-po10-100} }
+    - { id: leaf6-po10-200, node: leaf6, name: port-channel10.200, ip: 10.110.0.5/30, vrf: vrf-tenant-b, attaches_to: {subinterface: subif-leaf6-po10-200} }
+
+    - { id: wan-rtr-gi1-100, node: wan-rtr, name: GigabitEthernet1.100, ip: 10.100.0.2/30, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-wan-rtr-gi1-100} }
+    - { id: wan-rtr-gi1-200, node: wan-rtr, name: GigabitEthernet1.200, ip: 10.100.0.6/30, vrf: vrf-tenant-b, attaches_to: {subinterface: subif-wan-rtr-gi1-200} }
+    - { id: wan-rtr-gi2-l3,  node: wan-rtr, name: GigabitEthernet2,     ip: 198.51.100.2/30, vrf: vrf-default, attaches_to: {interface: wan-rtr-gi2} }
+
+    # fw1 はテナント間の通信を検査する（leaf6 との経路はスタティック。ADR-0011 によりスコープ外）
+    - { id: fw1-agg1-100, node: fw1, name: agg1.100, ip: 10.110.0.2/30, attaches_to: {subinterface: subif-fw1-agg1-100} }
+    - { id: fw1-agg1-200, node: fw1, name: agg1.200, ip: 10.110.0.6/30, attaches_to: {subinterface: subif-fw1-agg1-200} }
+
+    # ── ホスト ─────────────────────────────────────────────────────────
+    - { id: host1-eth0-l3, node: host1, name: eth0, ip: 172.16.10.11/24, attaches_to: {interface: host1-eth0} }
+    - { id: host2-eth0-l3, node: host2, name: eth0, ip: 172.16.20.12/24, attaches_to: {interface: host2-eth0} }
+    - { id: host4-eth0-l3, node: host4, name: eth0, ip: 172.17.110.14/24, ipv6: "2001:db8:110::14/64", attaches_to: {interface: host4-eth0} }
+    - { id: host5-eth0-l3, node: host5, name: eth0, ip: 172.16.30.15/24, attaches_to: {interface: host5-eth0} }
+
+    - { id: server3-bond0-10,  node: server3, name: bond0.10,  ip: 172.16.10.13/24, attaches_to: {subinterface: subif-server3-bond0-10} }
+    - { id: server3-bond0-30,  node: server3, name: bond0.30,  ip: 172.16.30.13/24, attaches_to: {subinterface: subif-server3-bond0-30} }
+    - { id: server3-bond0-40,  node: server3, name: bond0.40,  ip: 172.16.40.13/24, attaches_to: {subinterface: subif-server3-bond0-40} }
+    - { id: server3-bond0-120, node: server3, name: bond0.120, ip: 172.17.120.13/24, ipv6: "2001:db8:120::13/64", attaches_to: {subinterface: subif-server3-bond0-120} }
+    - { id: server5-bond0-20,  node: server5, name: bond0.20,  ip: 172.16.20.15/24, attaches_to: {subinterface: subif-server5-bond0-20} }
+    - { id: server5-bond0-110, node: server5, name: bond0.110, ip: 172.17.110.15/24, ipv6: "2001:db8:110::15/64", attaches_to: {subinterface: subif-server5-bond0-110} }
+    - { id: server5-bond0-120, node: server5, name: bond0.120, ip: 172.17.120.15/24, ipv6: "2001:db8:120::15/64", attaches_to: {subinterface: subif-server5-bond0-120} }
+
+  tunnel_interfaces:
+    # 別 DC への GRE（対向はトポロジーの外なので destination_ip）
+    - id: tunnel-wan-rtr-dc2
+      node: wan-rtr
+      type: gre
+      source: wan-rtr-gi2-l3
+      destination_ip: 203.0.113.10
+      ip: 172.31.0.1/30
+      vrf: vrf-tenant-a
+      transport_vrf: vrf-default
+      mtu: 1476
+
+  routing_adjacencies:
+    # ── アンダーレイ eBGP（P2P アドレスで張る）───────────────────────────
+    - {id: bgp-peer-spine1-leaf1, type: bgp, from: {node: spine1, update_source: spine1-e1-1-l3}, to: {node: leaf1, update_source: leaf1-e1-1-l3}, attaches_to: {link: link-spine1-leaf1}}
+    - {id: bgp-peer-spine1-leaf2, type: bgp, from: {node: spine1, update_source: spine1-e1-2-l3}, to: {node: leaf2, update_source: leaf2-e1-1-l3}, attaches_to: {link: link-spine1-leaf2}}
+    - {id: bgp-peer-spine1-leaf3, type: bgp, from: {node: spine1, update_source: spine1-e1-3-l3}, to: {node: leaf3, update_source: leaf3-e1-1-l3}, attaches_to: {link: link-spine1-leaf3}}
+    - {id: bgp-peer-spine1-leaf4, type: bgp, from: {node: spine1, update_source: spine1-e1-4-l3}, to: {node: leaf4, update_source: leaf4-e1-1-l3}, attaches_to: {link: link-spine1-leaf4}}
+    - {id: bgp-peer-spine1-leaf5, type: bgp, from: {node: spine1, update_source: spine1-e1-5-l3}, to: {node: leaf5, update_source: leaf5-e1-1-l3}, attaches_to: {link: link-spine1-leaf5}}
+    - {id: bgp-peer-spine1-leaf6, type: bgp, from: {node: spine1, update_source: spine1-e1-6-l3}, to: {node: leaf6, update_source: leaf6-e1-1-l3}, attaches_to: {link: link-spine1-leaf6}}
+    - {id: bgp-peer-spine2-leaf1, type: bgp, from: {node: spine2, update_source: spine2-e1-1-l3}, to: {node: leaf1, update_source: leaf1-e1-2-l3}, attaches_to: {link: link-spine2-leaf1}}
+    - {id: bgp-peer-spine2-leaf2, type: bgp, from: {node: spine2, update_source: spine2-e1-2-l3}, to: {node: leaf2, update_source: leaf2-e1-2-l3}, attaches_to: {link: link-spine2-leaf2}}
+    - {id: bgp-peer-spine2-leaf3, type: bgp, from: {node: spine2, update_source: spine2-e1-3-l3}, to: {node: leaf3, update_source: leaf3-e1-2-l3}, attaches_to: {link: link-spine2-leaf3}}
+    - {id: bgp-peer-spine2-leaf4, type: bgp, from: {node: spine2, update_source: spine2-e1-4-l3}, to: {node: leaf4, update_source: leaf4-e1-2-l3}, attaches_to: {link: link-spine2-leaf4}}
+    - {id: bgp-peer-spine2-leaf5, type: bgp, from: {node: spine2, update_source: spine2-e1-5-l3}, to: {node: leaf5, update_source: leaf5-e1-2-l3}, attaches_to: {link: link-spine2-leaf5}}
+    - {id: bgp-peer-spine2-leaf6, type: bgp, from: {node: spine2, update_source: spine2-e1-6-l3}, to: {node: leaf6, update_source: leaf6-e1-2-l3}, attaches_to: {link: link-spine2-leaf6}}
+
+    # vPC ペアの iBGP（peer-link 上の Vlan3999）。peer-link は 2 本のリンクの LAG なので attaches_to は書かない
+    - {id: bgp-peer-leaf3-leaf4, type: bgp, from: {node: leaf3, update_source: leaf3-vlan-3999}, to: {node: leaf4, update_source: leaf4-vlan-3999}}
+
+    # ── オーバーレイ eBGP EVPN（loopback0 間、ebgp-multihop 3）────────────
+    # 特定の物理リンクに載らない（ECMP で両 spine 経由になりうる）ので attaches_to は書かない
+    - {id: bgp-peer-evpn-spine1-leaf1, type: bgp, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf1, update_source: leaf1-lo0}}
+    - {id: bgp-peer-evpn-spine1-leaf2, type: bgp, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf2, update_source: leaf2-lo0}}
+    - {id: bgp-peer-evpn-spine1-leaf3, type: bgp, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf3, update_source: leaf3-lo0}}
+    - {id: bgp-peer-evpn-spine1-leaf4, type: bgp, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf4, update_source: leaf4-lo0}}
+    - {id: bgp-peer-evpn-spine1-leaf5, type: bgp, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf5, update_source: leaf5-lo0}}
+    - {id: bgp-peer-evpn-spine1-leaf6, type: bgp, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf6, update_source: leaf6-lo0}}
+    - {id: bgp-peer-evpn-spine2-leaf1, type: bgp, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf1, update_source: leaf1-lo0}}
+    - {id: bgp-peer-evpn-spine2-leaf2, type: bgp, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf2, update_source: leaf2-lo0}}
+    - {id: bgp-peer-evpn-spine2-leaf3, type: bgp, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf3, update_source: leaf3-lo0}}
+    - {id: bgp-peer-evpn-spine2-leaf4, type: bgp, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf4, update_source: leaf4-lo0}}
+    - {id: bgp-peer-evpn-spine2-leaf5, type: bgp, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf5, update_source: leaf5-lo0}}
+    - {id: bgp-peer-evpn-spine2-leaf6, type: bgp, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf6, update_source: leaf6-lo0}}
+
+    # ── VRF-lite（leaf6 ↔ wan-rtr、テナントごとに 1 セッション）────────────
+    - {id: bgp-peer-leaf6-wan-rtr-tenant-a, type: bgp, from: {node: leaf6, update_source: leaf6-e1-3-100}, to: {node: wan-rtr, update_source: wan-rtr-gi1-100}, attaches_to: {link: link-leaf6-wan-rtr}}
+    - {id: bgp-peer-leaf6-wan-rtr-tenant-b, type: bgp, from: {node: leaf6, update_source: leaf6-e1-3-200}, to: {node: wan-rtr, update_source: wan-rtr-gi1-200}, attaches_to: {link: link-leaf6-wan-rtr}}
+
+protocols:
+  bgp:
+    - id: bgp-underlay
+      role: underlay                   # maximum-paths 4 / bestpath as-path multipath-relax
+      nodes:
+        - node: spine1
+          local_as: 65000
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf3, remote_as: 65034, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf4, remote_as: 65034, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf5, remote_as: 65005, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf6, remote_as: 65006, type: ebgp, address_families: [ipv4_unicast]}
+        - node: spine2
+          local_as: 65000
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf3, remote_as: 65034, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf4, remote_as: 65034, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf5, remote_as: 65005, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf6, remote_as: 65006, type: ebgp, address_families: [ipv4_unicast]}
+        - node: leaf1
+          local_as: 65001
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+        - node: leaf2
+          local_as: 65002
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+        - node: leaf3                  # vPC ペアは同じ AS（spine から相手の経路は allowas-in なしでは受けないので iBGP で補う）
+          local_as: 65034
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf4,  remote_as: 65034, type: ibgp, address_families: [ipv4_unicast]}
+        - node: leaf4
+          local_as: 65034
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: leaf3,  remote_as: 65034, type: ibgp, address_families: [ipv4_unicast]}
+        - node: leaf5
+          local_as: 65005
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+        - node: leaf6
+          local_as: 65006
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [ipv4_unicast]}
+
+    - id: bgp-evpn
+      role: overlay                    # spine は route server（next-hop unchanged / retain route-target all）
+      nodes:
+        - node: spine1
+          local_as: 65000
+          role: route_server
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf3, remote_as: 65034, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf4, remote_as: 65034, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf5, remote_as: 65005, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf6, remote_as: 65006, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+        - node: spine2
+          local_as: 65000
+          role: route_server
+          neighbors:
+            - {node: leaf1, remote_as: 65001, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf2, remote_as: 65002, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf3, remote_as: 65034, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf4, remote_as: 65034, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf5, remote_as: 65005, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+            - {node: leaf6, remote_as: 65006, type: ebgp, role: route_server_client, address_families: [l2vpn_evpn]}
+        - node: leaf1
+          local_as: 65001
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+        - node: leaf2
+          local_as: 65002
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+        - node: leaf3
+          local_as: 65034
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+        - node: leaf4
+          local_as: 65034
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+        - node: leaf5
+          local_as: 65005
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+        - node: leaf6
+          local_as: 65006
+          neighbors:
+            - {node: spine1, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+            - {node: spine2, remote_as: 65000, type: ebgp, address_families: [l2vpn_evpn]}
+
+    # VRF-lite の外部接続。protocols.bgp にはテナント（VRF）の区別を書く場所がないので、
+    # 2 セッションでも neighbor は 1 つになる（セッションの区別は routing_adjacencies 側にある。ADR-0010 で保留中）
+    - id: bgp-external
+      role: external
+      nodes:
+        - node: leaf6
+          local_as: 65006
+          neighbors:
+            - {node: wan-rtr, remote_as: 65100, type: ebgp, address_families: [ipv4_unicast]}
+        - node: wan-rtr
+          local_as: 65100
+          neighbors:
+            - {node: leaf6, remote_as: 65006, type: ebgp, address_families: [ipv4_unicast]}
