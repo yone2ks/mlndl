@@ -1,0 +1,70 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C1 (r3)  underlay (/31 single-hop eBGP) と overlay (loopback 間 eBGP multihop)
+#          を 2 本のセッションに分離
+#
+# r2 からの変更点 (本ケースに関係するもの):
+#   - `process:` → `instance:` (D3・Terms)
+#   - router_id は ADR-0016 に委ねる (ここでは参考までに残すが本 ADR では規定しない)
+#   - single-hop セッションの attaches_to のキーは {link:} か {lag:}
+#   - 両方のセッションがどの BGP インスタンスに属するかを `instance:` で明示
+#     (今回は type: bgp のエントリが 1 つしかないので省略可だが、
+#      D7 の推奨に従って明示する)
+#
+# 検証したいこと:
+#   - 2 本のセッションを書き分けられるか (ID 接尾辞 `-2` ではなく、
+#     D7 の推奨に沿って意味の分かる語 `-evpn` を使う)
+#   - ビューアーが参照をたどるだけで両端の IP・AS・eBGP・AF を復元できるか
+# ============================================================================
+
+meta:
+  name: r3-c1-split-underlay-overlay
+  description: spine1-leaf1, D8-a。underlay と overlay を 2 セッション (r3 構文)
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: spine1, implementation: vm, role: spine, device_type: cisco_nxosv9300 }
+    - { id: leaf1,  name: leaf1,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300 }
+  interfaces:
+    - { id: spine1-e1-1, node: spine1, name: Ethernet1/1 }
+    - { id: leaf1-e1-1,  node: leaf1,  name: Ethernet1/1 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-e1-1, leaf1-e1-1], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: spine1-lo0,     node: spine1, name: loopback0,   ip: 10.1.0.1/32,  vrf: vrf-default }
+    - { id: leaf1-lo0,      node: leaf1,  name: loopback0,   ip: 10.1.0.11/32, vrf: vrf-default }
+    - { id: spine1-e1-1-l3, node: spine1, name: Ethernet1/1, ip: 10.0.0.0/31,  vrf: vrf-default, attaches_to: {interface: spine1-e1-1} }
+    - { id: leaf1-e1-1-l3,  node: leaf1,  name: Ethernet1/1, ip: 10.0.0.1/31,  vrf: vrf-default, attaches_to: {interface: leaf1-e1-1} }
+
+control_plane:
+  bgp:
+    # D8-a: 1 VRF = 1 インスタンス。default VRF 1 つに underlay と overlay の両セッションがぶら下がる。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+
+  routing_neighbors:
+    # Underlay (/31 single-hop eBGP)。attaches_to で物理リンクを指す。
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      instance: bgp-default
+      from: { node: spine1, update_source: spine1-e1-1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-e1-1-l3 }
+      address_families: [ipv4_unicast]
+      attaches_to: { link: link-spine1-leaf1 }
+
+    # Overlay EVPN (loopback 間の eBGP multihop)。両 spine 経由の ECMP で流れるので attaches_to は書かない。
+    # D7 の推奨「同じノード対の 2 本目は何のセッションかが分かる語を入れる」。
+    - id: bgp-peer-evpn-spine1-leaf1
+      type: bgp
+      instance: bgp-default
+      from: { node: spine1, update_source: spine1-lo0 }
+      to:   { node: leaf1,  update_source: leaf1-lo0 }
+      address_families: [l2vpn_evpn]

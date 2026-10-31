@@ -1,0 +1,88 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# R_extended_control_plane (r3)
+#
+# examples/eveng-evpn-lab-extended.yaml の routing_adjacencies 節 (36 行) と
+# protocols 節 (123 行) を、r3 の control_plane に書き直した断片。
+# L1 / L2 / L3 の記述は元ファイルの id をそのまま参照する前提で、ここには
+# control_plane 節だけを置く。
+#
+# 元の方針との整合:
+#   - 元は「underlay は 2 本の P2P eBGP (spine1/spine2 各 1 本) + overlay は
+#     loopback 間の別セッション」構成だった (routing_adjacencies 側)。
+#   - r3 の D8 の「推奨されていた」記述の反転 (Consequences) に沿って、同じ構成を
+#     保ったまま 1 本に束ねることもできるが、ここでは元の構成を素直に移植して
+#     C1 の「2 セッション」パターンを拡張する。
+#
+# 検証したいこと:
+#   - 元の 159 行 (routing_adjacencies 36 + protocols 123) が r3 でどこまで減るか
+#   - F4 (vPC ペア leaf3/leaf4 が 65034 と 65034 で iBGP、spine から見ると eBGP) が
+#     r3 ではどう扱えるか — AS は VRF 単位インスタンスの nodes[].local_as で 1 つに
+#     決まり、ノード対の AS 関係から eBGP/iBGP が導出されるので矛盾は消える
+#   - VRF-lite の 2 本も同じ control_plane に自然に収まるか
+# ============================================================================
+
+control_plane:
+  bgp:
+    # default VRF のインスタンス。fabric 全体の underlay と overlay、
+    # および vPC backup iBGP、ISP への外部接続を含む (ここでは外部接続は VRF-lite 側のみ)。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: spine2, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+        - { node: leaf2,  local_as: 65002 }
+        - { node: leaf3,  local_as: 65034 }   # vPC ペアの両ノードが同じ AS
+        - { node: leaf4,  local_as: 65034 }
+        - { node: leaf5,  local_as: 65005 }
+        - { node: leaf6,  local_as: 65006 }
+
+    # VRF-lite のテナントインスタンス (border leaf6 と wan-rtr のみが参加)
+    - id: bgp-tenant-a
+      vrf: vrf-tenant-a
+      nodes:
+        - { node: leaf6,   local_as: 65006 }
+        - { node: wan-rtr, local_as: 65100 }
+    - id: bgp-tenant-b
+      vrf: vrf-tenant-b
+      nodes:
+        - { node: leaf6,   local_as: 65006 }
+        - { node: wan-rtr, local_as: 65100 }
+
+  routing_neighbors:
+    # ── Underlay eBGP (P2P /31 single-hop) ────────────────────────────────
+    - {id: bgp-peer-spine1-leaf1, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-e1-1-l3}, to: {node: leaf1, update_source: leaf1-e1-1-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine1-leaf1}}
+    - {id: bgp-peer-spine1-leaf2, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-e1-2-l3}, to: {node: leaf2, update_source: leaf2-e1-1-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine1-leaf2}}
+    - {id: bgp-peer-spine1-leaf3, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-e1-3-l3}, to: {node: leaf3, update_source: leaf3-e1-1-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine1-leaf3}}
+    - {id: bgp-peer-spine1-leaf4, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-e1-4-l3}, to: {node: leaf4, update_source: leaf4-e1-1-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine1-leaf4}}
+    - {id: bgp-peer-spine1-leaf5, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-e1-5-l3}, to: {node: leaf5, update_source: leaf5-e1-1-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine1-leaf5}}
+    - {id: bgp-peer-spine1-leaf6, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-e1-6-l3}, to: {node: leaf6, update_source: leaf6-e1-1-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine1-leaf6}}
+    - {id: bgp-peer-spine2-leaf1, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-e1-1-l3}, to: {node: leaf1, update_source: leaf1-e1-2-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine2-leaf1}}
+    - {id: bgp-peer-spine2-leaf2, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-e1-2-l3}, to: {node: leaf2, update_source: leaf2-e1-2-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine2-leaf2}}
+    - {id: bgp-peer-spine2-leaf3, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-e1-3-l3}, to: {node: leaf3, update_source: leaf3-e1-2-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine2-leaf3}}
+    - {id: bgp-peer-spine2-leaf4, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-e1-4-l3}, to: {node: leaf4, update_source: leaf4-e1-2-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine2-leaf4}}
+    - {id: bgp-peer-spine2-leaf5, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-e1-5-l3}, to: {node: leaf5, update_source: leaf5-e1-2-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine2-leaf5}}
+    - {id: bgp-peer-spine2-leaf6, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-e1-6-l3}, to: {node: leaf6, update_source: leaf6-e1-2-l3}, address_families: [ipv4_unicast], attaches_to: {link: link-spine2-leaf6}}
+
+    # ── vPC ペア leaf3/leaf4 の iBGP (Vlan3999 の SVI 上、peer-link LAG 上) ──
+    # r3 で初めて書ける attaches_to: {lag:}。片側 (leaf3-po1) を指す。
+    - {id: bgp-peer-leaf3-leaf4, type: bgp, instance: bgp-default, from: {node: leaf3, update_source: leaf3-vlan-3999}, to: {node: leaf4, update_source: leaf4-vlan-3999}, address_families: [ipv4_unicast], attaches_to: {lag: lag-leaf3-po1}}
+
+    # ── Overlay EVPN (loopback0 間 eBGP multihop)。D7 の推奨「同じ組の 2 本目は意味の分かる語」で `-evpn-` ──
+    - {id: bgp-peer-evpn-spine1-leaf1, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf1, update_source: leaf1-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine1-leaf2, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf2, update_source: leaf2-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine1-leaf3, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf3, update_source: leaf3-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine1-leaf4, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf4, update_source: leaf4-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine1-leaf5, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf5, update_source: leaf5-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine1-leaf6, type: bgp, instance: bgp-default, from: {node: spine1, update_source: spine1-lo0}, to: {node: leaf6, update_source: leaf6-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine2-leaf1, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf1, update_source: leaf1-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine2-leaf2, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf2, update_source: leaf2-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine2-leaf3, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf3, update_source: leaf3-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine2-leaf4, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf4, update_source: leaf4-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine2-leaf5, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf5, update_source: leaf5-lo0}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-evpn-spine2-leaf6, type: bgp, instance: bgp-default, from: {node: spine2, update_source: spine2-lo0}, to: {node: leaf6, update_source: leaf6-lo0}, address_families: [l2vpn_evpn]}
+
+    # ── VRF-lite (leaf6 ↔ wan-rtr、テナントごと) ──────────────────────────
+    - {id: bgp-peer-leaf6-wan-rtr-tenant-a, type: bgp, instance: bgp-tenant-a, from: {node: leaf6, update_source: leaf6-e1-3-100}, to: {node: wan-rtr, update_source: wan-rtr-gi1-100}, address_families: [ipv4_unicast], attaches_to: {link: link-leaf6-wan-rtr}}
+    - {id: bgp-peer-leaf6-wan-rtr-tenant-b, type: bgp, instance: bgp-tenant-b, from: {node: leaf6, update_source: leaf6-e1-3-200}, to: {node: wan-rtr, update_source: wan-rtr-gi1-200}, address_families: [ipv4_unicast], attaches_to: {link: link-leaf6-wan-rtr}}

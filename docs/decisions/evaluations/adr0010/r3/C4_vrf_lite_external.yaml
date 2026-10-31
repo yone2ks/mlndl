@@ -1,0 +1,84 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C4 (r3)  VRF-lite 外部接続 (border leaf6 ↔ WAN ルーター、サブ IF 上)
+#
+# r2 からの変更点:
+#   - `process:` → `instance:` (D3)
+#   - router_id は ADR-0016 に委ねるため記述から外した
+#
+# 検証したいこと:
+#   - VRF ごとの BGP インスタンス (D8-a) が自然に書けるか
+#   - 同じ type (bgp) のエントリが複数あるとき `instance:` の明示が必須と
+#     なる D6 規則が通るか
+#   - 両端の L3 IF がサブ IF であることを attaches_to の多段間接でたどれるか
+#     (routing_neighbor → L3 IF → subinterface → L1 IF)
+# ============================================================================
+
+meta:
+  name: r3-c4-vrf-lite-external
+  description: border leaf6 ↔ wan-rtr の VRF-lite (VRF ごとに別 BGP セッション)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: leaf6,   name: leaf6,   implementation: vm, role: border, device_type: cisco_nxosv9300 }
+    - { id: wan-rtr, name: wan-rtr, implementation: vm, role: wan-router, device_type: cisco_csr1000v }
+  interfaces:
+    - { id: leaf6-e1-3,  node: leaf6,   name: Ethernet1/3 }
+    - { id: wan-rtr-gi1, node: wan-rtr, name: GigabitEthernet1 }
+  links:
+    - { id: link-leaf6-wan-rtr, endpoints: [leaf6-e1-3, wan-rtr-gi1], mtu: 1500, link_role: uplink }
+
+layer2:
+  subinterfaces:
+    - { id: subif-leaf6-e1-3-100,  attaches_to: {interface: leaf6-e1-3},  vlan_id: 100, name: Ethernet1/3.100 }
+    - { id: subif-leaf6-e1-3-200,  attaches_to: {interface: leaf6-e1-3},  vlan_id: 200, name: Ethernet1/3.200 }
+    - { id: subif-wan-rtr-gi1-100, attaches_to: {interface: wan-rtr-gi1}, vlan_id: 100, name: GigabitEthernet1.100 }
+    - { id: subif-wan-rtr-gi1-200, attaches_to: {interface: wan-rtr-gi1}, vlan_id: 200, name: GigabitEthernet1.200 }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+    - { id: vrf-tenant-a, route_targets: {import: ["65000:50001"], export: ["65000:50001"]} }
+    - { id: vrf-tenant-b, route_targets: {import: ["65000:50002"], export: ["65000:50002"]} }
+  interfaces:
+    - { id: leaf6-lo,        node: leaf6,   name: loopback0,            ip: 10.1.0.16/32,  vrf: vrf-default }
+    - { id: leaf6-e1-3-100,  node: leaf6,   name: Ethernet1/3.100,      ip: 10.100.0.1/30, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-leaf6-e1-3-100} }
+    - { id: leaf6-e1-3-200,  node: leaf6,   name: Ethernet1/3.200,      ip: 10.100.0.5/30, vrf: vrf-tenant-b, attaches_to: {subinterface: subif-leaf6-e1-3-200} }
+    - { id: wan-rtr-gi1-100, node: wan-rtr, name: GigabitEthernet1.100, ip: 10.100.0.2/30, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-wan-rtr-gi1-100} }
+    - { id: wan-rtr-gi1-200, node: wan-rtr, name: GigabitEthernet1.200, ip: 10.100.0.6/30, vrf: vrf-tenant-b, attaches_to: {subinterface: subif-wan-rtr-gi1-200} }
+
+control_plane:
+  bgp:
+    # D8-a: VRF 単位。ここでは fabric 側の default VRF は外部接続と関係ないので省き、
+    # VRF-lite の 2 つのテナントインスタンスだけ記述する。
+    # D6「同一ノード・同一 VRF で local_as 一意」。leaf6 は tenant-a と tenant-b の両方に出てくるが
+    # 違う VRF なので同じ 65006 を 2 つ書くのは許される。
+    - id: bgp-tenant-a
+      vrf: vrf-tenant-a
+      nodes:
+        - { node: leaf6,   local_as: 65006 }
+        - { node: wan-rtr, local_as: 65100 }
+    - id: bgp-tenant-b
+      vrf: vrf-tenant-b
+      nodes:
+        - { node: leaf6,   local_as: 65006 }
+        - { node: wan-rtr, local_as: 65100 }
+
+  routing_neighbors:
+    # 同 type の BGP エントリが 2 つあるので instance: は必須 (D3・D6)
+    - id: bgp-peer-leaf6-wan-rtr-tenant-a
+      type: bgp
+      instance: bgp-tenant-a
+      from: { node: leaf6,   update_source: leaf6-e1-3-100 }
+      to:   { node: wan-rtr, update_source: wan-rtr-gi1-100 }
+      address_families: [ipv4_unicast]
+      attaches_to: { link: link-leaf6-wan-rtr }
+    - id: bgp-peer-leaf6-wan-rtr-tenant-b
+      type: bgp
+      instance: bgp-tenant-b
+      from: { node: leaf6,   update_source: leaf6-e1-3-200 }
+      to:   { node: wan-rtr, update_source: wan-rtr-gi1-200 }
+      address_families: [ipv4_unicast]
+      attaches_to: { link: link-leaf6-wan-rtr }

@@ -1,0 +1,74 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C5 (D8-a)  vPC ペア間の iBGP を Vlan3999 の SVI 上に張る
+#
+# examples/eveng-evpn-lab-extended.yaml の leaf3 / leaf4 (vPC domain 34、
+# AS 65034 共通) のバックアップ経路として、peer-link の上の Vlan3999 (10.3.0.0/31)
+# で iBGP を張っている構成。
+#
+# 検証したいこと:
+#   - update_source として SVI (= leaf3-vlan-3999) を指せるか (ADR-0001 D8 で L3 IF ID)
+#   - attaches_to の `{link:}` は物理リンク 1 本しか指せないので、2 本の peer-link の
+#     上に走る SVI セッションは `attaches_to` を書けないことをどう扱うか
+#   - 両端が同じ AS 65034 なので D4 で iBGP と導出されることが、ビューアーから分かるか
+# ============================================================================
+
+meta:
+  name: d8a-c5-ibgp-over-svi
+  description: vPC ペア間の iBGP バックアップセッション (Vlan3999 の SVI 上)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: leaf3, name: leaf3, implementation: vm, role: leaf, device_type: cisco_nxosv9300 }
+    - { id: leaf4, name: leaf4, implementation: vm, role: leaf, device_type: cisco_nxosv9300 }
+  interfaces:
+    - { id: leaf3-e1-5, node: leaf3, name: Ethernet1/5 }
+    - { id: leaf3-e1-6, node: leaf3, name: Ethernet1/6 }
+    - { id: leaf4-e1-5, node: leaf4, name: Ethernet1/5 }
+    - { id: leaf4-e1-6, node: leaf4, name: Ethernet1/6 }
+  links:
+    # peer-link (2 本の物理リンクを LAG にまとめる)
+    - { id: link-leaf3-leaf4-1, endpoints: [leaf3-e1-5, leaf4-e1-5], mtu: 9216, link_role: peer-link }
+    - { id: link-leaf3-leaf4-2, endpoints: [leaf3-e1-6, leaf4-e1-6], mtu: 9216, link_role: peer-link }
+  lag:
+    - { id: lag-leaf3-po1, type: lacp, node: leaf3, members: [leaf3-e1-5, leaf3-e1-6], lacp: {mode: active} }
+    - { id: lag-leaf4-po1, type: lacp, node: leaf4, members: [leaf4-e1-5, leaf4-e1-6], lacp: {mode: active} }
+
+layer2:
+  vlans:
+    - id: vlan-3999
+      vlan_id: 3999
+      name: vpc-backup
+      trunk_ports:
+        - { lag: lag-leaf3-po1 }
+        - { lag: lag-leaf4-po1 }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: leaf3-lo, node: leaf3, name: loopback0, ip: 10.1.0.13/32, vrf: vrf-default }
+    - { id: leaf4-lo, node: leaf4, name: loopback0, ip: 10.1.0.14/32, vrf: vrf-default }
+    - { id: leaf3-vlan-3999, node: leaf3, name: Vlan3999, attaches_to: {vlan: vlan-3999}, ip: 10.3.0.0/31, vrf: vrf-default }
+    - { id: leaf4-vlan-3999, node: leaf4, name: Vlan3999, attaches_to: {vlan: vlan-3999}, ip: 10.3.0.1/31, vrf: vrf-default }
+
+control_plane:
+  bgp:
+    # D8-a: default VRF の 1 インスタンス。両端 AS 65034 = iBGP (D4)。
+    - id: bgp-default
+      nodes:
+        - { node: leaf3, local_as: 65034, router_id: 10.1.0.13 }
+        - { node: leaf4, local_as: 65034, router_id: 10.1.0.14 }
+
+  routing_neighbors:
+    # SVI 上の iBGP。update_source は SVI (= L3 IF) を指す。
+    # peer-link は 2 本のリンクなので attaches_to: {link:} は書けない (= 省略)。
+    # 「どの LAG の上を流れるか」を指すキーがないのが悩み (feedback)。
+    - id: bgp-peer-leaf3-leaf4
+      type: bgp
+      from: { node: leaf3, update_source: leaf3-vlan-3999 }
+      to:   { node: leaf4, update_source: leaf4-vlan-3999 }
+      address_families: [ipv4_unicast]
+      # attaches_to: ???  — 1 LAG = 2 物理リンクのため指す先がない

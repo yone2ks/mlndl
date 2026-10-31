@@ -1,0 +1,60 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C2 (D8-b)  同じ構成を role 単位で書こうとしたバージョン (= 書けないことの実証)
+#
+# 実機は 1 本の eBGP unnumbered セッションで `ipv4_unicast` と `l2vpn_evpn` を
+# 両方 activate している。D8-b は「エントリの role = underlay / overlay」で
+# BGP インスタンスを分けるが、1 本のセッションが両方の役を同時に持つため、
+# role を "underlay" にも "overlay" にも決められない。
+#
+# 書き方の試行:
+#   (a) セッションを 2 本に分割 → 実機と対応しなくなる (physical セッションは 1 本)
+#   (b) どちらかの role に偏らせる → 残り AF の説明がつかなくなる
+#   (c) 新しい role (= "mixed") を増やす → 2 件目のエントリが同じ VRF にできない
+#
+# このファイルでは (c) を試しに書き、何が破綻するかをコメントで示す。
+# ============================================================================
+
+meta:
+  name: d8b-c2-unnumbered-multi-af
+  description: role 単位の BGP インスタンスで unnumbered 1 セッション + 2 AF を書けるか試す
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: spine1-swp1-l3, node: spine1, name: swp1,  ipv6: "fe80::1/64", vrf: vrf-default, attaches_to: {interface: spine1-swp1} }
+    - { id: leaf1-swp51-l3, node: leaf1,  name: swp51, ipv6: "fe80::1/64", vrf: vrf-default, attaches_to: {interface: leaf1-swp51} }
+
+control_plane:
+  bgp:
+    # D8-b で表現できない。(c) の試行:
+    #   新しい role "mixed" を増やしたが、「VRF ごとに BGP エントリは 1 つまで」の
+    #   D6 と衝突する。実機は 1 プロセスで両 AF を持つのに、D8-b はプロセスを
+    #   分割する前提になっているため、ここで原理的な矛盾が出る。
+    - id: bgp-fabric
+      role: mixed    # ← 推奨語彙 (underlay / overlay) から外れる
+      nodes:
+        - { node: spine1, local_as: 65000, router_id: 10.0.0.1 }
+        - { node: leaf1,  local_as: 65001, router_id: 10.0.0.11 }
+
+  routing_neighbors:
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      process: bgp-fabric
+      from: { node: spine1, update_source: spine1-swp1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-swp51-l3 }
+      address_families: [ipv4_unicast, l2vpn_evpn]
+      attaches_to: { link: link-spine1-leaf1 }

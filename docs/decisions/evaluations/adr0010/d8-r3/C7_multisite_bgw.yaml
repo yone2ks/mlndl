@@ -1,0 +1,67 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C7 (D8-a)  EVPN マルチサイト — DC をまたいだ BGW 間の overlay EVPN
+#
+# RFC 8365 / Cisco "EVPN Multi-Site" 構成:
+#   DC1 と DC2 の border gateway (bgw-dc1 / bgw-dc2) が WAN 越しに loopback 間で
+#   eBGP multihop の EVPN セッションを張る。各 DC 内の fabric overlay とは別の
+#   セッション (DC-internal は role=fabric、site-external は role=site)。
+#
+# 検証したいこと:
+#   - D8-a で「DC をまたいだ 1 セッション」が自然に書けるか
+#   - 両 BGW が別の AS (eBGP) で、同じ default VRF に属していて、site-external
+#     用の論理ゾーン分けをどう記述するか (= labels で表現できるか)
+#   - 下に 2 セッション (bgw-dc1 の fabric 側と site 側) が重なるケースで D7 の
+#     接尾辞規則がどう効くか
+# ============================================================================
+
+meta:
+  name: d8a-c7-multisite-bgw
+  description: EVPN マルチサイトで BGW 間に overlay EVPN を張る
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: bgw-dc1,  name: bgw-dc1,  implementation: vm, role: border, device_type: cisco_nxosv9300, labels: {site: dc1} }
+    - { id: bgw-dc2,  name: bgw-dc2,  implementation: vm, role: border, device_type: cisco_nxosv9300, labels: {site: dc2} }
+    # WAN は中継 (bgw-dc1 ↔ wan-core ↔ bgw-dc2)。中継の L3 詳細は省略
+    - { id: wan-core, name: WAN-Core, implementation: physical, role: core }
+  interfaces:
+    - { id: bgw-dc1-e1-1, node: bgw-dc1,  name: Ethernet1/1 }
+    - { id: bgw-dc2-e1-1, node: bgw-dc2,  name: Ethernet1/1 }
+    - { id: wan-core-g1,  node: wan-core, name: gi1 }
+    - { id: wan-core-g2,  node: wan-core, name: gi2 }
+  links:
+    - { id: link-bgw-dc1-wan, endpoints: [bgw-dc1-e1-1, wan-core-g1], mtu: 1500, link_role: uplink }
+    - { id: link-bgw-dc2-wan, endpoints: [bgw-dc2-e1-1, wan-core-g2], mtu: 1500, link_role: uplink }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: bgw-dc1-lo, node: bgw-dc1, name: loopback0, ip: 10.1.0.21/32, vrf: vrf-default }
+    - { id: bgw-dc2-lo, node: bgw-dc2, name: loopback0, ip: 10.2.0.21/32, vrf: vrf-default }
+    # WAN は IP だけ振るが、中継経路の表現は本 ADR のスコープ外 (ADR-0011 D11)
+    - { id: bgw-dc1-e1-1-l3, node: bgw-dc1, name: Ethernet1/1, ip: 198.51.100.1/30, vrf: vrf-default, attaches_to: {interface: bgw-dc1-e1-1} }
+    - { id: bgw-dc2-e1-1-l3, node: bgw-dc2, name: Ethernet1/1, ip: 198.51.100.5/30, vrf: vrf-default, attaches_to: {interface: bgw-dc2-e1-1} }
+
+control_plane:
+  bgp:
+    # D8-a: default VRF 1 つの BGP インスタンスに両サイトのノードを並べる。
+    # 両 BGW が別 AS だが default VRF には重複がないので D6 と矛盾しない。
+    - id: bgp-default
+      nodes:
+        - { node: bgw-dc1, local_as: 65001, router_id: 10.1.0.21 }
+        - { node: bgw-dc2, local_as: 65002, router_id: 10.2.0.21 }
+
+  routing_neighbors:
+    # BGW 間の eBGP multihop EVPN (ループバック間、WAN 越し)。
+    # 物理リンク 1 本に対応しないので attaches_to は書かない。
+    - id: bgp-peer-bgw-dc1-bgw-dc2
+      type: bgp
+      from: { node: bgw-dc1, update_source: bgw-dc1-lo }
+      to:   { node: bgw-dc2, update_source: bgw-dc2-lo }
+      address_families: [l2vpn_evpn]
+      # Multi-site 固有の「route-type 2 の next-hop を自分に書き換える」等の挙動を
+      # 示すフラグは mlndl のスコープ外 (ADR-0005 D3-2)。feedback に書く

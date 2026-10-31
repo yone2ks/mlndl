@@ -1,0 +1,92 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C3 (D8-a)  OSPF underlay + 全ノード同一 AS の iBGP EVPN overlay (spine = RR)
+#
+# 検証したいこと:
+#   - OSPF 隣接と BGP セッションを別 type で同居させられるか
+#   - D4 の「eBGP/iBGP は両端の local_as から導出」で全ノード 65000 = iBGP に
+#     なることを、ビューアーがセッション単位で復元できるか
+#   - D3 の `route_reflector_client: true` を leaf 側に立てることで RR 構造を
+#     表現できるか
+#   - OSPF の `area` を各セッションに書くのは冗長か (ADR-0010 未解決事項 4)
+# ============================================================================
+
+meta:
+  name: d8a-c3-ospf-ibgp-rr
+  description: OSPF underlay + 単一 AS iBGP EVPN overlay (spine が RR)
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: arista_veos }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: arista_veos }
+    - { id: leaf2,  name: Leaf-2,  implementation: vm, role: leaf,  device_type: arista_veos }
+  interfaces:
+    - { id: spine1-eth1, node: spine1, name: Ethernet1 }
+    - { id: spine1-eth2, node: spine1, name: Ethernet2 }
+    - { id: leaf1-eth1,  node: leaf1,  name: Ethernet1 }
+    - { id: leaf2-eth1,  node: leaf2,  name: Ethernet1 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-eth1, leaf1-eth1], mtu: 9216, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-eth2, leaf2-eth1], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: spine1-lo, node: spine1, name: Loopback0, ip: 10.0.0.1/32,  vrf: vrf-default }
+    - { id: leaf1-lo,  node: leaf1,  name: Loopback0, ip: 10.0.0.11/32, vrf: vrf-default }
+    - { id: leaf2-lo,  node: leaf2,  name: Loopback0, ip: 10.0.0.12/32, vrf: vrf-default }
+    - { id: spine1-eth1-l3, node: spine1, name: Ethernet1, ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-eth1} }
+    - { id: spine1-eth2-l3, node: spine1, name: Ethernet2, ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-eth2} }
+    - { id: leaf1-eth1-l3,  node: leaf1,  name: Ethernet1, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-eth1} }
+    - { id: leaf2-eth1-l3,  node: leaf2,  name: Ethernet1, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-eth1} }
+
+control_plane:
+  ospf:
+    # 1 エントリ = 1 OSPF ルーティングドメイン (D6)。
+    - id: ospf-underlay
+      nodes:
+        - { node: spine1, router_id: 10.0.0.1 }
+        - { node: leaf1,  router_id: 10.0.0.11 }
+        - { node: leaf2,  router_id: 10.0.0.12 }
+
+  bgp:
+    # D8-a: default VRF の 1 インスタンス。全ノード同一 AS = iBGP (D4)。
+    # route_reflector_cluster_id を持たせる場合はここに書く (D3 コメント参照)。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000, router_id: 10.0.0.1, route_reflector_cluster_id: 10.0.0.1 }
+        - { node: leaf1,  local_as: 65000, router_id: 10.0.0.11 }
+        - { node: leaf2,  local_as: 65000, router_id: 10.0.0.12 }
+
+  routing_neighbors:
+    # OSPF 隣接 (point-to-point、area 0.0.0.0)。
+    - id: ospf-adj-spine1-leaf1
+      type: ospf
+      from: { node: spine1, interface: spine1-eth1-l3 }
+      to:   { node: leaf1,  interface: leaf1-eth1-l3 }
+      area: 0.0.0.0
+      attaches_to: { link: link-spine1-leaf1 }
+
+    - id: ospf-adj-spine1-leaf2
+      type: ospf
+      from: { node: spine1, interface: spine1-eth2-l3 }
+      to:   { node: leaf2,  interface: leaf2-eth1-l3 }
+      area: 0.0.0.0
+      attaches_to: { link: link-spine1-leaf2 }
+
+    # iBGP EVPN。RR = spine1、client = leaf1 / leaf2 (RFC 4456)。
+    # D3: route_reflector_client は client 側の端点に立てる。両端が iBGP かは local_as から導出。
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo }
+      to:   { node: leaf1,  update_source: leaf1-lo, route_reflector_client: true }
+      address_families: [l2vpn_evpn]
+
+    - id: bgp-peer-spine1-leaf2
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo }
+      to:   { node: leaf2,  update_source: leaf2-lo, route_reflector_client: true }
+      address_families: [l2vpn_evpn]

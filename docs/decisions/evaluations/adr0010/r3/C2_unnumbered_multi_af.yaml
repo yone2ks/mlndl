@@ -1,0 +1,62 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C2 (r3)  FRR 定番の eBGP unnumbered。1 セッションで 2 AF を運ぶ
+#
+# r2 (および d8-r3) との違い:
+#   - unnumbered の表現が「update_source が loopback でない IF を指す」から
+#     「update_source が **アドレスを持たない L3 IF** を指す」に変わった (D3)。
+#   - r2 の試し書きでは link-local を形だけ `ipv6: fe80::1/64` と書いていたが、
+#     r3 ではその必要がない (= 書かない)。L3 IF には ip も ipv6 も無しで通す。
+#
+# 検証したいこと:
+#   - L3 IF に ip も ipv6 も無い状態が受理されるか (スキーマ側: 現状 vlan-3001 の
+#     transit SVI などで「アドレスなし L3 IF」はすでに受理されている)
+#   - update_source がアドレスを持たない L3 IF を指す形で unnumbered と判定できるか
+#   - ビューアーが「IF 名 + unnumbered」だけで表示できるか (IP は出さない)
+# ============================================================================
+
+meta:
+  name: r3-c2-unnumbered-multi-af
+  description: eBGP unnumbered 1 セッションで ipv4_unicast + l2vpn_evpn
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    # Unnumbered 用の物理 L3 IF: ip も ipv6 も書かない (= link-local を形だけ書かない)。
+    # 実機では IPv6 の link-local は自動生成されるが、トポロジーの記述としては何も書かない。
+    - { id: spine1-swp1-l3, node: spine1, name: swp1,  vrf: vrf-default, attaches_to: {interface: spine1-swp1} }
+    - { id: leaf1-swp51-l3, node: leaf1,  name: swp51, vrf: vrf-default, attaches_to: {interface: leaf1-swp51} }
+    - { id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.1/32,  vrf: vrf-default }
+    - { id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32, vrf: vrf-default }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+
+  routing_neighbors:
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      instance: bgp-default
+      # update_source は「アドレスを持たない L3 IF」を指す。これが r3 での unnumbered の表現。
+      from: { node: spine1, update_source: spine1-swp1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-swp51-l3 }
+      # D8 の典型: 1 本のセッションで ipv4_unicast と l2vpn_evpn を同時に運ぶ。
+      # underlay / overlay は構文に出さず AF から導く (D8)。
+      address_families: [ipv4_unicast, l2vpn_evpn]
+      attaches_to: { link: link-spine1-leaf1 }

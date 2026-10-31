@@ -1,0 +1,70 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C1 (D8-b)  同じ構成を「role 単位」(underlay / overlay) で書いた比較用。
+#
+# 検証したいこと:
+#   - D8-b で underlay と overlay をエントリとして分離できるか
+#   - D6 の「同一ノード・同一 VRF で BGP エントリの local_as が一意」の規則と
+#     ぶつからないか (spine1 は underlay / overlay のどちらでも 65000 を持つ)
+#   - process 参照の省略を許すか必須か
+# ============================================================================
+
+meta:
+  name: d8b-c1-split-underlay-overlay
+  description: spine1-leaf1, D8-b (role 単位)。underlay / overlay が別インスタンス
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: spine1, implementation: vm, role: spine, device_type: cisco_nxosv9300 }
+    - { id: leaf1,  name: leaf1,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300 }
+  interfaces:
+    - { id: spine1-e1-1, node: spine1, name: Ethernet1/1 }
+    - { id: leaf1-e1-1,  node: leaf1,  name: Ethernet1/1 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-e1-1, leaf1-e1-1], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: spine1-lo0, node: spine1, name: loopback0, ip: 10.1.0.1/32,  vrf: vrf-default }
+    - { id: leaf1-lo0,  node: leaf1,  name: loopback0, ip: 10.1.0.11/32, vrf: vrf-default }
+    - { id: spine1-e1-1-l3, node: spine1, name: Ethernet1/1, ip: 10.0.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-e1-1} }
+    - { id: leaf1-e1-1-l3,  node: leaf1,  name: Ethernet1/1, ip: 10.0.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-e1-1} }
+
+control_plane:
+  bgp:
+    # D8-b: role 単位。同じ default VRF にエントリが 2 つ並ぶ (D6 の「同一 VRF に 2 以上」規則と衝突)。
+    # 同じノードを両方のエントリに書くので local_as が重複する (D6「同一ノード・同一 VRF で local_as 一意」とも衝突)。
+    - id: bgp-underlay
+      role: underlay
+      # vrf: vrf-default (省略 = default)
+      nodes:
+        - { node: spine1, local_as: 65000, router_id: 10.1.0.1 }
+        - { node: leaf1,  local_as: 65001, router_id: 10.1.0.11 }
+
+    - id: bgp-evpn
+      role: overlay
+      # vrf: vrf-default   ← D6 の規則だと同じ VRF に 2 エントリ目は書けない
+      nodes:
+        - { node: spine1, local_as: 65000, router_id: 10.1.0.1 }  # 重複
+        - { node: leaf1,  local_as: 65001, router_id: 10.1.0.11 } # 重複
+
+  routing_neighbors:
+    # 同 type のエントリが 2 つあるため process の明示が必要 (D3 の規則)
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      process: bgp-underlay
+      from: { node: spine1, update_source: spine1-e1-1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-e1-1-l3 }
+      address_families: [ipv4_unicast]
+      attaches_to: { link: link-spine1-leaf1 }
+
+    - id: bgp-peer-evpn-spine1-leaf1
+      type: bgp
+      process: bgp-evpn
+      from: { node: spine1, update_source: spine1-lo0 }
+      to:   { node: leaf1,  update_source: leaf1-lo0 }
+      address_families: [l2vpn_evpn]

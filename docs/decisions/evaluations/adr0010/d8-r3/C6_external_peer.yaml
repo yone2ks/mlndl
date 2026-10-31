@@ -1,0 +1,61 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C6 (D8-a)  外部 (管理外) ピア — ISP など、相手側の機器名は分からず IP と AS しか
+#            知らないピア
+#
+# ADR-0010 r2 D4: 「管理外ピアも `layer1.nodes` に置き、BGP エントリの `nodes` に
+#                   `local_as` だけを書く」。
+#
+# 検証したいこと:
+#   - 本当に layer1.nodes に ISP ノードを置くだけで十分か
+#   - update_source として ISP 側の L3 IF を指す必要があるが、相手の IF 名が
+#     分からない場合に何を書くか (「ip だけ分かる」ケース)
+#   - attaches_to を書くと「ISP 側のリンクの先」を指すことになるが、ISP の
+#     物理 IF は実在しないので link の endpoints に ISP 側の擬似 IF を置くことになる
+# ============================================================================
+
+meta:
+  name: d8a-c6-external-peer
+  description: ISP など管理外ピア。IP と AS だけ分かる
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: border1, name: border1, implementation: vm, role: border, device_type: cisco_nxosv9300 }
+    # 管理外ピア。role は open-form。実装・device_type は推測で書くしかない
+    - { id: isp-pe1, name: ISP-PE1, implementation: physical, role: isp }
+  interfaces:
+    - { id: border1-e1-1, node: border1, name: Ethernet1/1 }
+    # ISP 側: 相手の IF 名は分からないが、endpoints に書くために擬似 IF を用意しないといけない (feedback)
+    - { id: isp-pe1-ext,  node: isp-pe1, name: external }
+  links:
+    - { id: link-border1-isp, endpoints: [border1-e1-1, isp-pe1-ext], mtu: 1500, link_role: uplink }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: border1-lo, node: border1, name: loopback0, ip: 10.1.0.21/32, vrf: vrf-default }
+    - { id: border1-e1-1-l3, node: border1, name: Ethernet1/1, ip: 203.0.113.1/30, vrf: vrf-default, attaches_to: {interface: border1-e1-1} }
+    # ISP 側の L3 IF。IP だけ分かる。name は実機の名前を知らないので placeholder
+    - { id: isp-pe1-ext-l3, node: isp-pe1, name: external, ip: 203.0.113.2/30, vrf: vrf-default, attaches_to: {interface: isp-pe1-ext} }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - { node: border1, local_as: 65006, router_id: 10.1.0.21 }
+        # 管理外ピアも local_as だけ書く。router_id は分からなければ省略
+        - { node: isp-pe1, local_as: 64500 }
+
+  routing_neighbors:
+    - id: bgp-peer-border1-isp-pe1
+      type: bgp
+      from: { node: border1, update_source: border1-e1-1-l3 }
+      # ISP 側 update_source を書く必要があるが、相手の実際の IF 名を知らない。
+      # 「IP だけ分かる」なら、擬似 L3 IF (isp-pe1-ext-l3) を立てて指すしかなく、
+      # これは実質「ISP 側の IP アドレスを間接的に表現している」だけ (feedback)。
+      to:   { node: isp-pe1, update_source: isp-pe1-ext-l3 }
+      address_families: [ipv4_unicast]
+      attaches_to: { link: link-border1-isp }

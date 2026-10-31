@@ -1,0 +1,67 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C6 (r3)  トポロジー外の ISP ピア (IP と AS だけ分かる場合)
+#
+# r2 (および d8-r3) との違い:
+#   - r2 は「管理外ピアも layer1.nodes に置き、擬似 IF と擬似 L3 IF を立てる」
+#     ことを要求し、d8-r3 で example-author がこれを書きにくさとして指摘した。
+#   - r3 では BGP の端点に `address` と `local_as` を直接書ける (D3・D4)。
+#     トポロジー外の ISP は layer1 に出さなくてよい。
+#   - これはトンネルの `destination_ip` と同じ形 (ADR-0011 D6)。
+#
+# 検証したいこと:
+#   - 擬似 ISP ノード / 擬似 IF を立てずに ISP との eBGP を書けるか
+#   - D6「node のない端は address と local_as が必須」「update_source は書けない」
+#     が自然な記述になるか
+#   - attaches_to は single-hop の物理リンク上に張るならば書ける (border1 側の L3 IF
+#     は update_source、相手は address のみ、attaches_to: {link:} でケーブルを指す)
+#   - ビューアーがこのセッションを「ノードのデータ」として扱えるか
+#     (辺にはしない、Consequences の指示通り)
+# ============================================================================
+
+meta:
+  name: r3-c6-external-peer
+  description: ISP など管理外ピア。address + local_as で端点を書く
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: border1, name: border1, implementation: vm, role: border, device_type: cisco_nxosv9300 }
+    # ISP の機器は layer1 に書かない。相手の IF 名も分からない前提。
+  interfaces:
+    - { id: border1-e1-1, node: border1, name: Ethernet1/1 }
+  links:
+    # ISP への物理ケーブルは「対向のノードが分からない」ため layer1.links にも書けない
+    # (endpoints の片側に書く L1 IF がない)。
+    # これは C6b (ケーブルを書く派) との明確な違い。feedback: 「ケーブルは書かずに
+    # セッションだけ書く」のときに link_role: external のようなラベルを border1-e1-1
+    # 側に残せないのが悩ましい。
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: border1-lo,      node: border1, name: loopback0,   ip: 10.1.0.21/32,  vrf: vrf-default }
+    - { id: border1-e1-1-l3, node: border1, name: Ethernet1/1, ip: 203.0.113.1/30, vrf: vrf-default, attaches_to: {interface: border1-e1-1} }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        # border1 だけがここに現れる。ISP のノードはトポロジー外なので nodes に書かない。
+        - { node: border1, local_as: 65006 }
+
+  routing_neighbors:
+    - id: bgp-peer-border1-isp
+      type: bgp
+      instance: bgp-default
+      from: { node: border1, update_source: border1-e1-1-l3 }
+      # トポロジー外の端は address と local_as だけ。update_source は書けない (D6)。
+      to:   { address: 203.0.113.2, local_as: 64500 }
+      address_families: [ipv4_unicast]
+      # attaches_to について: トポロジー外の相手でも single-hop のケーブルが
+      # layer1 に存在するなら {link:} を書ける (D3・D6「attaches_to のリンク / LAG の
+      # 端が、セッションの両端の機器か」)。ところが本ケースはケーブル自体を書いて
+      # いないので attaches_to は書かない (= 書けない)。
+      # → ndl-viz は「border1 のノードカードに ISP ピアの情報を載せる」表示になる。

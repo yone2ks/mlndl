@@ -1,0 +1,68 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C1 (D8-a)  underlay / overlay を 2 セッションに分離
+#
+# 検証したいこと:
+#   - 同じノード対 (spine1 / leaf1) に 2 本の BGP セッション (underlay は P2P /31
+#     の single-hop eBGP、overlay は loopback 間の eBGP multihop) を書けるか
+#   - D7 の接尾辞 (`-2`) で両者を区別できるか
+#   - D8-a (= VRF ごとのインスタンス) で、同じ default VRF の中に underlay と
+#     overlay を同居させられるか
+#   - ビューアーが「どのセッションがどの AF を運ぶか」をセッション単体で復元
+#     できるか (address_families だけで決まるか)
+#
+# 参照先の実データは examples/eveng-evpn-lab-extended.yaml の spine1 / leaf1 に
+# 合わせた (spine1=65000, leaf1=65001、spine1-e1-1-l3=10.0.0.0/31,
+# leaf1-e1-1-l3=10.0.0.1/31、spine1-lo0=10.1.0.1/32, leaf1-lo0=10.1.0.11/32)。
+# ============================================================================
+
+meta:
+  name: d8a-c1-split-underlay-overlay
+  description: spine1-leaf1, D8-a (VRF 単位の BGP インスタンス)。underlay と overlay を 2 セッション
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: spine1, implementation: vm, role: spine, device_type: cisco_nxosv9300 }
+    - { id: leaf1,  name: leaf1,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300 }
+  interfaces:
+    - { id: spine1-e1-1, node: spine1, name: Ethernet1/1 }
+    - { id: leaf1-e1-1,  node: leaf1,  name: Ethernet1/1 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-e1-1, leaf1-e1-1], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: spine1-lo0,   node: spine1, name: loopback0,   ip: 10.1.0.1/32,  vrf: vrf-default }
+    - { id: leaf1-lo0,    node: leaf1,  name: loopback0,   ip: 10.1.0.11/32, vrf: vrf-default }
+    - { id: spine1-e1-1-l3, node: spine1, name: Ethernet1/1, ip: 10.0.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-e1-1} }
+    - { id: leaf1-e1-1-l3,  node: leaf1,  name: Ethernet1/1, ip: 10.0.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-e1-1} }
+
+control_plane:
+  bgp:
+    # D8-a: 1 VRF = 1 インスタンス。default VRF の中で underlay と overlay が同居する。
+    # 下に 2 本のセッションを紐づけるため process の省略が許される (type ごとに 1 エントリ)。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000, router_id: 10.1.0.1 }
+        - { node: leaf1,  local_as: 65001, router_id: 10.1.0.11 }
+
+  routing_neighbors:
+    # Underlay (/31 single-hop eBGP。物理リンク 1 本の上に流れる)
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      from: { node: spine1, update_source: spine1-e1-1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-e1-1-l3 }
+      address_families: [ipv4_unicast]
+      attaches_to: { link: link-spine1-leaf1 }
+
+    # Overlay EVPN (loopback 間の eBGP multihop)。D7 の「同じノード対の 2 本目」規則で `-2` を付ける。
+    # 両 spine 経由の ECMP で流れるので attaches_to は書かない (ADR-0010 Consequences で既知の制約)。
+    - id: bgp-peer-spine1-leaf1-2
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo0 }
+      to:   { node: leaf1,  update_source: leaf1-lo0 }
+      address_families: [l2vpn_evpn]

@@ -1,0 +1,61 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C2 (D8-a)  FRR 定番の eBGP unnumbered。1 セッションで 2 AF を運ぶ
+#
+# Cumulus / FRR の最も一般的な EVPN 構成:
+#   underlay の P2P リンク上で IPv6 link-local の BGP unnumbered 1 本を張り、
+#   address-family ipv4-unicast と l2vpn evpn の両方を activate する。
+#
+# 検証したいこと:
+#   - D8-a なら 1 本のセッションに 2 AF を並べるだけで書ける
+#   - D3 末尾の「unnumbered = update_source が loopback 以外」の規則を適用して、
+#     update_source として物理 L3 IF (ipv6 link-local のみ) を指すとどう読めるか
+#   - ビューアーがセッションから「両端の IP (= link-local)・AS・eBGP・AF」を
+#     復元できるか
+# ============================================================================
+
+meta:
+  name: d8a-c2-unnumbered-multi-af
+  description: eBGP unnumbered 1 セッションで ipv4_unicast + l2vpn_evpn
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    # Unnumbered 用の物理 L3 IF: ipv4 は振らず ipv6 の link-local だけ。
+    # 現行スキーマは link-local 単独を書く手段を提供しておらず、ipv6 フィールドに
+    # fe80::/64 を書くのが唯一の選択肢になる (feedback 項目)。
+    - { id: spine1-swp1-l3, node: spine1, name: swp1,  ipv6: "fe80::1/64", vrf: vrf-default, attaches_to: {interface: spine1-swp1} }
+    - { id: leaf1-swp51-l3, node: leaf1,  name: swp51, ipv6: "fe80::1/64", vrf: vrf-default, attaches_to: {interface: leaf1-swp51} }
+    - { id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.1/32,  vrf: vrf-default }
+    - { id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32, vrf: vrf-default }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000, router_id: 10.0.0.1 }
+        - { node: leaf1,  local_as: 65001, router_id: 10.0.0.11 }
+
+  routing_neighbors:
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      # D3 末尾: update_source が loopback でない IF → unnumbered。
+      # ただし「loopback でない」の判定は IF の種別 (ADR-0011 D11) ではなく
+      # name / ip の有無で見ることになる (feedback)。
+      from: { node: spine1, update_source: spine1-swp1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-swp51-l3 }
+      address_families: [ipv4_unicast, l2vpn_evpn]
+      attaches_to: { link: link-spine1-leaf1 }

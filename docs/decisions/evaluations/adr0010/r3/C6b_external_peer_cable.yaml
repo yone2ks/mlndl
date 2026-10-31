@@ -1,0 +1,64 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# C6b (r3)  トポロジー外の ISP ピア — ケーブルを layer1 に書く形
+#
+# ADR-0010 r3 D3 の表「相手の機器はトポロジー内。相手の L3 IF を 1 つ書き、
+# {node, update_source} で指す」のケース。
+#
+# 使い分け:
+#   C6  = IP と AS しか分からない → address + local_as (ノードカード側に表示)
+#   C6b = ケーブルの物理経路まで分かる → ISP の PE を layer1 に 1 ノード置き、
+#         update_source で指す (辺として表示できる)
+#
+# 検証したいこと:
+#   - 「ISP の PE はトポロジー内」として扱うとき、BGP エントリの nodes に
+#     ISP の local_as を書くことで AS が自然に導出されるか (D4)
+#   - L1 IF と L3 IF は 1 つずつあれば足りるか (ADR-0010 r3 D3 の表の文言どおり)
+#   - attaches_to: {link:} が書けるようになり、辺としての描画が成立するか
+# ============================================================================
+
+meta:
+  name: r3-c6b-external-peer-cable
+  description: ISP PE までのケーブルを layer1 に書き、相手 L3 IF を 1 つ書く形
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: border1, name: border1, implementation: vm, role: border, device_type: cisco_nxosv9300 }
+    # ISP の PE はトポロジー内の機器として置く。role は open-form。
+    # device_type は分からないので省略する (CLAUDE.md は任意扱い)。
+    - { id: isp-pe1, name: ISP-PE1, implementation: physical, role: isp }
+  interfaces:
+    - { id: border1-e1-1, node: border1, name: Ethernet1/1 }
+    # ISP 側の L1 IF は 1 つ書く。name は実機の名前が分からないので placeholder。
+    - { id: isp-pe1-ext,  node: isp-pe1, name: external }
+  links:
+    - { id: link-border1-isp, endpoints: [border1-e1-1, isp-pe1-ext], mtu: 1500, link_role: uplink }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+  interfaces:
+    - { id: border1-lo,      node: border1, name: loopback0,   ip: 10.1.0.21/32,   vrf: vrf-default }
+    - { id: border1-e1-1-l3, node: border1, name: Ethernet1/1, ip: 203.0.113.1/30, vrf: vrf-default, attaches_to: {interface: border1-e1-1} }
+    # ISP 側の L3 IF を 1 つ書く。これが update_source の指す先になる (D3 の表)。
+    - { id: isp-pe1-ext-l3,  node: isp-pe1, name: external,    ip: 203.0.113.2/30, vrf: vrf-default, attaches_to: {interface: isp-pe1-ext} }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - { node: border1, local_as: 65006 }
+        # ISP の PE もトポロジー内に置いたので、nodes に local_as を書ける (D4)
+        - { node: isp-pe1, local_as: 64500 }
+
+  routing_neighbors:
+    - id: bgp-peer-border1-isp-pe1
+      type: bgp
+      instance: bgp-default
+      from: { node: border1, update_source: border1-e1-1-l3 }
+      # 両端ともトポロジー内なので {node, update_source} で指す
+      to:   { node: isp-pe1, update_source: isp-pe1-ext-l3 }
+      address_families: [ipv4_unicast]
+      attaches_to: { link: link-border1-isp }
