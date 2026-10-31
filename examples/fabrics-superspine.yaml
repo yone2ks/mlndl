@@ -1,0 +1,441 @@
+# 3 つの DC ファブリックの spine を 2 台の super-spine で束ねた例 (5 段 Clos)。
+# ndl-viz の配置（段・ファブリックの並べ方）を確かめるための L1 だけの例。リンクの書き順はわざと混ぜてある。
+ndl_version: '1.0'
+meta:
+  name: fabrics-superspine
+  network_types:
+  - l1-physical
+layer1:
+  nodes:
+  - id: dc1-spine1
+    name: dc1-spine1
+    implementation: vm
+    role: spine
+    device_type: cumulus_linux
+  - id: dc1-spine2
+    name: dc1-spine2
+    implementation: vm
+    role: spine
+    device_type: cumulus_linux
+  - id: dc1-leaf1
+    name: dc1-leaf1
+    implementation: vm
+    role: leaf
+    device_type: cumulus_linux
+  - id: dc1-leaf2
+    name: dc1-leaf2
+    implementation: vm
+    role: leaf
+    device_type: cumulus_linux
+  - id: dc1-host1
+    name: dc1-host1
+    implementation: vm
+    role: server
+    device_type: cumulus_linux
+  - id: dc1-host2
+    name: dc1-host2
+    implementation: vm
+    role: server
+    device_type: cumulus_linux
+  - id: dc2-spine1
+    name: dc2-spine1
+    implementation: vm
+    role: spine
+    device_type: cumulus_linux
+  - id: dc2-spine2
+    name: dc2-spine2
+    implementation: vm
+    role: spine
+    device_type: cumulus_linux
+  - id: dc2-leaf1
+    name: dc2-leaf1
+    implementation: vm
+    role: leaf
+    device_type: cumulus_linux
+  - id: dc2-leaf2
+    name: dc2-leaf2
+    implementation: vm
+    role: leaf
+    device_type: cumulus_linux
+  - id: dc2-host1
+    name: dc2-host1
+    implementation: vm
+    role: server
+    device_type: cumulus_linux
+  - id: dc2-host2
+    name: dc2-host2
+    implementation: vm
+    role: server
+    device_type: cumulus_linux
+  - id: dc3-spine1
+    name: dc3-spine1
+    implementation: vm
+    role: spine
+    device_type: cumulus_linux
+  - id: dc3-spine2
+    name: dc3-spine2
+    implementation: vm
+    role: spine
+    device_type: cumulus_linux
+  - id: dc3-leaf1
+    name: dc3-leaf1
+    implementation: vm
+    role: leaf
+    device_type: cumulus_linux
+  - id: dc3-leaf2
+    name: dc3-leaf2
+    implementation: vm
+    role: leaf
+    device_type: cumulus_linux
+  - id: dc3-host1
+    name: dc3-host1
+    implementation: vm
+    role: server
+    device_type: cumulus_linux
+  - id: dc3-host2
+    name: dc3-host2
+    implementation: vm
+    role: server
+    device_type: cumulus_linux
+  - id: super-spine1
+    name: super-spine1
+    implementation: vm
+    role: super-spine
+    device_type: cumulus_linux
+  - id: super-spine2
+    name: super-spine2
+    implementation: vm
+    role: super-spine
+    device_type: cumulus_linux
+  interfaces:
+  - id: dc1-spine1-swp1
+    node: dc1-spine1
+    name: swp1
+  - id: dc1-leaf1-swp1
+    node: dc1-leaf1
+    name: swp1
+  - id: dc1-spine1-swp2
+    node: dc1-spine1
+    name: swp2
+  - id: dc1-leaf2-swp1
+    node: dc1-leaf2
+    name: swp1
+  - id: dc1-spine2-swp1
+    node: dc1-spine2
+    name: swp1
+  - id: dc1-leaf1-swp2
+    node: dc1-leaf1
+    name: swp2
+  - id: dc1-spine2-swp2
+    node: dc1-spine2
+    name: swp2
+  - id: dc1-leaf2-swp2
+    node: dc1-leaf2
+    name: swp2
+  - id: dc1-host1-swp1
+    node: dc1-host1
+    name: swp1
+  - id: dc1-leaf1-swp3
+    node: dc1-leaf1
+    name: swp3
+  - id: dc1-host2-swp1
+    node: dc1-host2
+    name: swp1
+  - id: dc1-leaf2-swp3
+    node: dc1-leaf2
+    name: swp3
+  - id: dc2-spine1-swp1
+    node: dc2-spine1
+    name: swp1
+  - id: dc2-leaf1-swp1
+    node: dc2-leaf1
+    name: swp1
+  - id: dc2-spine1-swp2
+    node: dc2-spine1
+    name: swp2
+  - id: dc2-leaf2-swp1
+    node: dc2-leaf2
+    name: swp1
+  - id: dc2-spine2-swp1
+    node: dc2-spine2
+    name: swp1
+  - id: dc2-leaf1-swp2
+    node: dc2-leaf1
+    name: swp2
+  - id: dc2-spine2-swp2
+    node: dc2-spine2
+    name: swp2
+  - id: dc2-leaf2-swp2
+    node: dc2-leaf2
+    name: swp2
+  - id: dc2-host1-swp1
+    node: dc2-host1
+    name: swp1
+  - id: dc2-leaf1-swp3
+    node: dc2-leaf1
+    name: swp3
+  - id: dc2-host2-swp1
+    node: dc2-host2
+    name: swp1
+  - id: dc2-leaf2-swp3
+    node: dc2-leaf2
+    name: swp3
+  - id: dc3-spine1-swp1
+    node: dc3-spine1
+    name: swp1
+  - id: dc3-leaf1-swp1
+    node: dc3-leaf1
+    name: swp1
+  - id: dc3-spine1-swp2
+    node: dc3-spine1
+    name: swp2
+  - id: dc3-leaf2-swp1
+    node: dc3-leaf2
+    name: swp1
+  - id: dc3-spine2-swp1
+    node: dc3-spine2
+    name: swp1
+  - id: dc3-leaf1-swp2
+    node: dc3-leaf1
+    name: swp2
+  - id: dc3-spine2-swp2
+    node: dc3-spine2
+    name: swp2
+  - id: dc3-leaf2-swp2
+    node: dc3-leaf2
+    name: swp2
+  - id: dc3-host1-swp1
+    node: dc3-host1
+    name: swp1
+  - id: dc3-leaf1-swp3
+    node: dc3-leaf1
+    name: swp3
+  - id: dc3-host2-swp1
+    node: dc3-host2
+    name: swp1
+  - id: dc3-leaf2-swp3
+    node: dc3-leaf2
+    name: swp3
+  - id: dc1-spine1-swp3
+    node: dc1-spine1
+    name: swp3
+  - id: super-spine1-swp1
+    node: super-spine1
+    name: swp1
+  - id: dc1-spine2-swp3
+    node: dc1-spine2
+    name: swp3
+  - id: super-spine1-swp2
+    node: super-spine1
+    name: swp2
+  - id: dc2-spine1-swp3
+    node: dc2-spine1
+    name: swp3
+  - id: super-spine1-swp3
+    node: super-spine1
+    name: swp3
+  - id: dc2-spine2-swp3
+    node: dc2-spine2
+    name: swp3
+  - id: super-spine1-swp4
+    node: super-spine1
+    name: swp4
+  - id: dc3-spine1-swp3
+    node: dc3-spine1
+    name: swp3
+  - id: super-spine1-swp5
+    node: super-spine1
+    name: swp5
+  - id: dc3-spine2-swp3
+    node: dc3-spine2
+    name: swp3
+  - id: super-spine1-swp6
+    node: super-spine1
+    name: swp6
+  - id: dc1-spine1-swp4
+    node: dc1-spine1
+    name: swp4
+  - id: super-spine2-swp1
+    node: super-spine2
+    name: swp1
+  - id: dc1-spine2-swp4
+    node: dc1-spine2
+    name: swp4
+  - id: super-spine2-swp2
+    node: super-spine2
+    name: swp2
+  - id: dc2-spine1-swp4
+    node: dc2-spine1
+    name: swp4
+  - id: super-spine2-swp3
+    node: super-spine2
+    name: swp3
+  - id: dc2-spine2-swp4
+    node: dc2-spine2
+    name: swp4
+  - id: super-spine2-swp4
+    node: super-spine2
+    name: swp4
+  - id: dc3-spine1-swp4
+    node: dc3-spine1
+    name: swp4
+  - id: super-spine2-swp5
+    node: super-spine2
+    name: swp5
+  - id: dc3-spine2-swp4
+    node: dc3-spine2
+    name: swp4
+  - id: super-spine2-swp6
+    node: super-spine2
+    name: swp6
+  links:
+  - id: link-dc1-spine1-dc1-leaf1
+    endpoints:
+    - dc1-spine1-swp1
+    - dc1-leaf1-swp1
+    link_role: underlay
+  - id: link-dc1-spine1-dc1-leaf2
+    endpoints:
+    - dc1-leaf2-swp1
+    - dc1-spine1-swp2
+    link_role: underlay
+  - id: link-dc1-spine2-dc1-leaf1
+    endpoints:
+    - dc1-spine2-swp1
+    - dc1-leaf1-swp2
+    link_role: underlay
+  - id: link-dc1-spine2-dc1-leaf2
+    endpoints:
+    - dc1-leaf2-swp2
+    - dc1-spine2-swp2
+    link_role: underlay
+  - id: link-dc1-host1-dc1-leaf1
+    endpoints:
+    - dc1-leaf1-swp3
+    - dc1-host1-swp1
+    link_role: access
+  - id: link-dc1-host2-dc1-leaf2
+    endpoints:
+    - dc1-leaf2-swp3
+    - dc1-host2-swp1
+    link_role: access
+  - id: link-dc2-spine1-dc2-leaf1
+    endpoints:
+    - dc2-spine1-swp1
+    - dc2-leaf1-swp1
+    link_role: underlay
+  - id: link-dc2-spine1-dc2-leaf2
+    endpoints:
+    - dc2-leaf2-swp1
+    - dc2-spine1-swp2
+    link_role: underlay
+  - id: link-dc2-spine2-dc2-leaf1
+    endpoints:
+    - dc2-spine2-swp1
+    - dc2-leaf1-swp2
+    link_role: underlay
+  - id: link-dc2-spine2-dc2-leaf2
+    endpoints:
+    - dc2-leaf2-swp2
+    - dc2-spine2-swp2
+    link_role: underlay
+  - id: link-dc2-host1-dc2-leaf1
+    endpoints:
+    - dc2-leaf1-swp3
+    - dc2-host1-swp1
+    link_role: access
+  - id: link-dc2-host2-dc2-leaf2
+    endpoints:
+    - dc2-leaf2-swp3
+    - dc2-host2-swp1
+    link_role: access
+  - id: link-dc3-spine1-dc3-leaf1
+    endpoints:
+    - dc3-spine1-swp1
+    - dc3-leaf1-swp1
+    link_role: underlay
+  - id: link-dc3-spine1-dc3-leaf2
+    endpoints:
+    - dc3-leaf2-swp1
+    - dc3-spine1-swp2
+    link_role: underlay
+  - id: link-dc3-spine2-dc3-leaf1
+    endpoints:
+    - dc3-spine2-swp1
+    - dc3-leaf1-swp2
+    link_role: underlay
+  - id: link-dc3-spine2-dc3-leaf2
+    endpoints:
+    - dc3-leaf2-swp2
+    - dc3-spine2-swp2
+    link_role: underlay
+  - id: link-dc3-host1-dc3-leaf1
+    endpoints:
+    - dc3-leaf1-swp3
+    - dc3-host1-swp1
+    link_role: access
+  - id: link-dc3-host2-dc3-leaf2
+    endpoints:
+    - dc3-leaf2-swp3
+    - dc3-host2-swp1
+    link_role: access
+  - id: link-dc1-spine1-super-spine1
+    endpoints:
+    - dc1-spine1-swp3
+    - super-spine1-swp1
+    link_role: underlay
+  - id: link-dc1-spine2-super-spine1
+    endpoints:
+    - dc1-spine2-swp3
+    - super-spine1-swp2
+    link_role: underlay
+  - id: link-dc2-spine1-super-spine1
+    endpoints:
+    - dc2-spine1-swp3
+    - super-spine1-swp3
+    link_role: underlay
+  - id: link-dc2-spine2-super-spine1
+    endpoints:
+    - dc2-spine2-swp3
+    - super-spine1-swp4
+    link_role: underlay
+  - id: link-dc3-spine1-super-spine1
+    endpoints:
+    - dc3-spine1-swp3
+    - super-spine1-swp5
+    link_role: underlay
+  - id: link-dc3-spine2-super-spine1
+    endpoints:
+    - dc3-spine2-swp3
+    - super-spine1-swp6
+    link_role: underlay
+  - id: link-dc1-spine1-super-spine2
+    endpoints:
+    - dc1-spine1-swp4
+    - super-spine2-swp1
+    link_role: underlay
+  - id: link-dc1-spine2-super-spine2
+    endpoints:
+    - dc1-spine2-swp4
+    - super-spine2-swp2
+    link_role: underlay
+  - id: link-dc2-spine1-super-spine2
+    endpoints:
+    - dc2-spine1-swp4
+    - super-spine2-swp3
+    link_role: underlay
+  - id: link-dc2-spine2-super-spine2
+    endpoints:
+    - dc2-spine2-swp4
+    - super-spine2-swp4
+    link_role: underlay
+  - id: link-dc3-spine1-super-spine2
+    endpoints:
+    - dc3-spine1-swp4
+    - super-spine2-swp5
+    link_role: underlay
+  - id: link-dc3-spine2-super-spine2
+    endpoints:
+    - dc3-spine2-swp4
+    - super-spine2-swp6
+    link_role: underlay
