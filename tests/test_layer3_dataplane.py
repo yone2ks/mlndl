@@ -106,7 +106,7 @@ class TestSviReference:
         )
         assert "ADR-0001 D8" in _parse_error(body)
 
-    @pytest.mark.parametrize("key", ["node: leaf1", "link: link-x"])
+    @pytest.mark.parametrize("key", ["node: leaf1"])
     def test_l3_attach_keys(self, key):
         msg = _parse_error(_l3(f"    - {{id: s1, node: leaf1, name: x, attaches_to: {{{key}}}}}\n"))
         assert "ADR-0001 D8" in msg
@@ -410,7 +410,9 @@ class TestExport:
             "    - {id: leaf1-lo1, node: leaf1, name: loopback1, ip: 10.2.0.11/32}\n"     # VTEP 用 (先に書く)
             "    - {id: leaf1-lo0, node: leaf1, name: loopback0, ip: 10.1.0.11/32}\n"     # BGP の update_source
             "    - {id: leaf2-lo0, node: leaf2, name: loopback0, ip: 10.1.0.12/32}\n",
-            "  routing_adjacencies:\n"
+            "control_plane:\n"
+            "  bgp: [{id: bgp-default, nodes: [{node: leaf1, local_as: 65001}, {node: leaf2, local_as: 65002}]}]\n"
+            "  routing_neighbors:\n"
             "    - {id: bgp-peer-leaf1-leaf2, type: bgp, from: {node: leaf1, update_source: leaf1-lo0},"
             " to: {node: leaf2, update_source: leaf2-lo0}}\n",
         ).replace("layer2:\n  vlans:", "layer2:\n  vteps: [{id: vtep-leaf1, sources: [leaf1-lo1]}]\n  vlans:")
@@ -419,7 +421,7 @@ class TestExport:
         assert roles == {"leaf1-lo1": ["vtep_source"], "leaf1-lo0": ["update_source"]}
         assert leaf1["lo_ip"] == "10.1.0.11/32"
         # update_source がなければ、VTEP の source ではないものを選ぶ
-        no_adj = body[:body.index("  routing_adjacencies:")]
+        no_adj = body[:body.index("control_plane:")]
         assert self._leaf1(_topo(no_adj))["lo_ip"] == "10.1.0.11/32"
 
     def test_no_legacy_lo_ip_without_unattached(self):

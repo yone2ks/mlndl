@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from .layer1 import L1Layer
 from .layer2 import L2Layer
 from .layer3 import L3Layer
-from .protocols import Protocols
+from .control_plane import ControlPlane, legacy_control_plane_errors
 
 
 class Meta(BaseModel):
@@ -29,7 +29,7 @@ class MLNDLTopology(BaseModel):
     layer1: L1Layer | None = None
     layer2: L2Layer | None = None
     layer3: L3Layer | None = None
-    protocols: Protocols | None = None
+    control_plane: ControlPlane | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -46,6 +46,16 @@ class MLNDLTopology(BaseModel):
             raise ValueError(
                 f"サポートされていない MLNDL バージョン: {ver!r}。1.x が必要です"
             )
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_control_plane(cls, data: object) -> object:
+        """旧構造 (protocols / layer3.routing_adjacencies) には移動先を示すエラーを返す。読み替えはしない (ADR-0010 D12)"""
+        if isinstance(data, dict):
+            messages = legacy_control_plane_errors(data)
+            if messages:
+                raise ValueError("\n".join(messages))
         return data
 
     def index(self):

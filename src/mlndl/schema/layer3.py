@@ -1,4 +1,4 @@
-"""Layer 3 スキーマ定義 (VRF / L3Interface / GatewayRedundancy / TunnelInterface / RoutingAdjacency)
+"""Layer 3 スキーマ定義 (VRF / L3Interface / GatewayRedundancy / TunnelInterface)
 
 設計決定:
 - ADR-0011 D3: 機器上の名前は name、参照は attaches_to だけ。SVI は attaches_to: {vlan: <VLAN id>}。
@@ -6,7 +6,7 @@
 - ADR-0011 D4: fhrp → gateway_redundancy。mode を discriminator とする Tagged Union
 - ADR-0011 D5: ip は IPv4、ipv6 は IPv6。いずれも単数
 - ADR-0011 D6: トンネルは自己完結した TunnelInterface で表現する
-- RoutingAdjacency は ADR-0010 (保留中) の対象。本ファイルでは変更しない
+- ルーティングのセッションは control_plane.routing_neighbors に置く (ADR-0010。control_plane.py)
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from .layer1 import L1_ATTACH_KEYS, AttachesTo, AttachesToObj, restrict_attach_keys
+from .layer1 import AttachesTo, AttachesToObj, restrict_attach_keys
 from .refs import Ref
 
 # 旧形式 (ADR-0011 D10): `interface` がこの形で attaches_to がないものは、VLAN を指す短縮形だった
@@ -293,36 +293,6 @@ class TunnelInterface(BaseModel):
         return self
 
 
-# ---------------------------------------------------------------------------
-# RoutingAdjacency — ADR-0010 (保留中) の対象。変更しない
-# ---------------------------------------------------------------------------
-
-class RoutingAdjEndpoint(BaseModel):
-    """ルーティング隣接関係の片端"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    node: Annotated[str, Ref("layer1.nodes")]
-    update_source: Annotated[str | None, Ref("layer3.interfaces")] = None
-
-
-class RoutingAdjacency(BaseModel):
-    """ルーティング隣接関係（BGP / OSPF / IS-IS）"""
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    id: str
-    type: Literal["bgp", "ospf", "isis"]
-    from_: RoutingAdjEndpoint = Field(alias="from")  # Python 予約語回避
-    to: RoutingAdjEndpoint
-    attaches_to: AttachesTo | None = None
-
-    @field_validator("attaches_to")
-    @classmethod
-    def l1_attach_keys(cls, v: Any) -> Any:
-        return restrict_attach_keys(v, L1_ATTACH_KEYS, "layer3.routing_adjacencies")
-
-
 class L3Layer(BaseModel):
     """Layer 3 全体"""
 
@@ -331,4 +301,3 @@ class L3Layer(BaseModel):
     vrfs: list[VRF] = []
     interfaces: list[L3Interface] = []
     tunnel_interfaces: list[TunnelInterface] = []
-    routing_adjacencies: list[RoutingAdjacency] = []

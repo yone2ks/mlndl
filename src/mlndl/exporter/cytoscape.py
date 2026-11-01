@@ -2,7 +2,7 @@
 
 設計方針:
   - L1 が常時表示の基盤レイヤー
-  - L2 / L3 / BGP は L1 ノードに重ねるオーバーレイ
+  - L2 / L3 / 制御プレーン (BGP / OSPF / IS-IS) は L1 ノードに重ねるオーバーレイ
   - 全エッジの source/target は L1 ノード ID を直接参照（prefix なし）
   - ノードは L1 の `node` タイプのみ。L3 IP・VRF・VLAN 情報はデータに埋め込む
 """
@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from ..derive import l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints, vlan_svi_networks
+from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, l3_attachments, l3_roles,
+                      outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
+from ..schema.control_plane import BgpSession
 from ..schema.layer1 import LacpLag, MlagLag
 from ..schema.layer2 import L2VxLAN, L3VxLAN
 from ..schema.topology import MLNDLTopology
@@ -32,9 +34,8 @@ def export(topology: MLNDLTopology) -> dict:
     _export_nodes(topology, elements)
     _export_l1_edges(topology, if_to_node, if_to_name, elements)
     _export_l2_overlay(topology, if_to_name, elements)
-    _export_l3_overlay(topology, elements)
     _export_tunnels(topology, elements)
-    _export_bgp_overlay(topology, elements)
+    _export_routing_neighbors(topology, elements)
 
     return elements
 
@@ -209,20 +210,20 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
                     if vlan.id not in node_vlans[nid]:
                         node_vlans[nid].append(vlan.id)
 
-    # BGP AS 番号をノード別に集約（BGP overlay での AS 番号表示用）
-    # local_as が直接定義されているノード優先、次に neighbor の remote_as から逆引き
+    # BGP の AS 番号をノード別に (機器カードの表示用)。default VRF のインスタンスを優先し、なければ最初に出てくるもの
     node_local_as: dict[str, int] = {}
-    if topology.protocols:
-        for bgp in topology.protocols.bgp:
-            for bn in bgp.nodes:
-                if bn.local_as and bn.node not in node_local_as:
-                    node_local_as[bn.node] = bn.local_as
-        # neighbor の remote_as からも補完（leaf 等が nodes に未定義の場合）
-        for bgp in topology.protocols.bgp:
-            for bn in bgp.nodes:
-                for nb in bn.neighbors:
-                    if nb.remote_as and nb.node not in node_local_as:
-                        node_local_as[nb.node] = nb.remote_as
+    if topology.control_plane:
+        for inst in sorted(topology.control_plane.bgp, key=lambda b: b.vrf is not None):
+            for n in inst.nodes:
+                node_local_as.setdefault(n.node, n.local_as)
+
+    # BGP セッションをノード別に。相手がトポロジー外のセッションも含め、その機器のセッションをすべて入れる
+    # (トンネルの tunnels と同じ形。ADR-0010 D11)
+    node_bgp_sessions: dict[str, list[dict]] = defaultdict(list)
+    for v in bgp_session_views(topology):
+        for own, other in ((v.from_, v.to), (v.to, v.from_)):
+            if own.node is not None:
+                node_bgp_sessions[own.node].append({**_session_data(v), "local": _end_data(own), "peer": _end_data(other)})
 
     for node in topology.layer1.nodes:
         # 基本ラベル（hostname のみ。IP は overlay 有効時に CSS クラスで表示）
@@ -249,8 +250,9 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         # L2 VLAN データを埋め込む
         if node_vlans[node.id]:       data["vlans"]    = node_vlans[node.id]
 
-        # BGP AS 番号を埋め込む（BGP overlay での表示用）
-        if node_local_as.get(node.id): data["local_as"] = node_local_as[node.id]
+        # BGP (ADR-0010 D11)
+        if node.id in node_local_as:   data["local_as"]     = node_local_as[node.id]
+        if node_bgp_sessions[node.id]: data["bgp_sessions"] = node_bgp_sessions[node.id]
 
         elements["nodes"].append({"data": data})
 
@@ -482,25 +484,6 @@ def _vlan_endpoint_data(topology) -> dict[tuple[str, str], list[dict]]:
 
 
 # ---------------------------------------------------------------------------
-# L3 オーバーレイ（Routing Adjacency エッジ）
-# ---------------------------------------------------------------------------
-
-def _export_l3_overlay(topology, elements):
-    if not topology.layer3:
-        return
-
-    for adj in topology.layer3.routing_adjacencies:
-        elements["edges"].append({"data": {
-            "id":       f"l3-{adj.id}",
-            "source":   adj.from_.node,   # L1 ノード ID を直接参照
-            "target":   adj.to.node,
-            "layer":    "layer3",
-            "type":     "routing_adjacency",
-            "adj_type": adj.type,
-        }})
-
-
-# ---------------------------------------------------------------------------
 # トンネル (ADR-0011 D6)
 # ---------------------------------------------------------------------------
 
@@ -536,38 +519,85 @@ def _export_tunnels(topology, elements):
 
 
 # ---------------------------------------------------------------------------
-# BGP オーバーレイ（BGP セッション エッジ）
+# 制御プレーンのセッション (ADR-0010 D11)
 # ---------------------------------------------------------------------------
 
-def _export_bgp_overlay(topology, elements):
-    if not topology.protocols:
+def _end_data(end: SessionEnd) -> dict:
+    """セッションの片端。トポロジー外の相手は address と local_as だけ"""
+    data: dict = {}
+    if end.node is not None:    data["node"] = end.node
+    if end.address is not None: data["address"] = str(end.address)
+    iface = end.l3_interface
+    if iface is not None:
+        data["l3_interface"] = iface.id
+        data["interface_name"] = iface.name
+        if iface.ip:   data["ip"]   = str(iface.ip)
+        if iface.ipv6: data["ipv6"] = str(iface.ipv6)
+        if end.unnumbered: data["unnumbered"] = True
+    if end.local_as is not None:   data["local_as"] = end.local_as
+    if end.route_reflector_client: data["route_reflector_client"] = True
+    return data
+
+
+def _session_data(v: BgpSessionView) -> dict:
+    """BGP セッションの、端に依らない値。どれも参照をたどって決めた値 (derive.bgp_session_views)"""
+    data: dict = {"id": v.session.id}
+    if v.instance is not None: data["instance"] = v.instance.id
+    if v.vrf is not None:      data["vrf"] = v.vrf
+    if v.bgp_type is not None: data["bgp_type"] = v.bgp_type
+    data["address_families"] = list(v.session.address_families)
+    if v.transport is not None:
+        data["transport_link"] = {"link": v.transport.link} if v.transport.link else {"lag": list(v.transport.lags)}
+    data["bfd"] = v.session.bfd
+    return data
+
+
+def _export_routing_neighbors(topology, elements):
+    """セッションを辺として出力する。1 セッション = 1 辺。
+
+    BGP は両端がトポロジー内のセッションだけを辺にする (相手がトポロジー外のものは、ノードの data["bgp_sessions"] にだけ現れる)。
+    通り道 (transport_link) は YAML の attaches_to ではなく、update_source の L3 IF から導いた値 (ADR-0010 D7)。
+    """
+    if not topology.control_plane:
         return
+    for v in bgp_session_views(topology):
+        if v.from_.node is None or v.to.node is None:
+            continue
+        elements["edges"].append({"data": {
+            **_session_data(v),
+            "source":   v.from_.node,
+            "target":   v.to.node,
+            "layer":    "control_plane",
+            "type":     "routing_neighbor",
+            "protocol": "bgp",
+            "from":     _end_data(v.from_),
+            "to":       _end_data(v.to),
+        }})
 
-    seen: set[str] = set()
-    for bgp in topology.protocols.bgp:
-        for bn in bgp.nodes:
-            for nb in bn.neighbors:
-                key = f"{bn.node}-{nb.node}-{bgp.id}"
-                if key in seen:
-                    continue
-                seen.add(key)
-
-                as_label = ""
-                if bn.local_as and nb.remote_as:
-                    as_label = f"AS{bn.local_as}→{nb.remote_as}"
-
-                elements["edges"].append({"data": {
-                    "id":              f"bgp-{key}",
-                    "source":          bn.node,    # L1 ノード ID を直接参照
-                    "target":          nb.node,
-                    "layer":           "protocols",
-                    "type":            "bgp_session",
-                    "bgp_type":        nb.type or "unknown",
-                    "label":           as_label,
-                    "process":         bgp.id,
-                    "process_role":    bgp.role,
-                    "bfd":             nb.bfd,
-                    "local_as":        bn.local_as,
-                    "remote_as":       nb.remote_as,
-                    "address_families": nb.address_families,
-                }})
+    l3ifs = {i.id: i for i in topology.layer3.interfaces} if topology.layer3 else {}
+    l1ifs = {i.id: i for i in topology.layer1.interfaces} if topology.layer1 else {}
+    for nb in topology.control_plane.routing_neighbors:
+        if isinstance(nb, BgpSession):
+            continue
+        ifaces = l3ifs if nb.type == "ospf" else l1ifs
+        ends = []
+        for ep in (nb.from_, nb.to):
+            end = {"node": ep.node, "interface": ep.interface}
+            name = getattr(ifaces.get(ep.interface), "name", None)
+            if name: end["interface_name"] = name
+            ends.append(end)
+        data: dict = {
+            "id":       nb.id,
+            "source":   nb.from_.node,
+            "target":   nb.to.node,
+            "layer":    "control_plane",
+            "type":     "routing_neighbor",
+            "protocol": nb.type,
+            "from":     ends[0],
+            "to":       ends[1],
+            "bfd":      nb.bfd,
+        }
+        if nb.instance: data["instance"] = nb.instance
+        if nb.type == "ospf": data["area"] = nb.area
+        else:                 data["level"] = nb.level
+        elements["edges"].append({"data": data})

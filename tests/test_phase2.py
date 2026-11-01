@@ -1,4 +1,4 @@
-"""Phase 2 ユニットテスト (L2/L3/protocols スキーマ + validator 完全実装)"""
+"""Phase 2 ユニットテスト (L2/L3 スキーマ + validator。制御プレーンは tests/test_control_plane.py)"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class TestFullDCParse:
         assert t.layer1 is not None
         assert t.layer2 is not None
         assert t.layer3 is not None
-        assert t.protocols is not None
+        assert t.control_plane is not None
 
     def test_layer2_vlans(self):
         t = parse_file(FIXTURES / "valid_full_dc.yaml")
@@ -60,35 +60,12 @@ class TestFullDCParse:
         assert "spine1-lo" in iface_ids
         assert "leaf1-lo" in iface_ids
 
-    def test_layer3_routing_adjacencies(self):
+    def test_control_plane(self):
         t = parse_file(FIXTURES / "valid_full_dc.yaml")
-        assert len(t.layer3.routing_adjacencies) == 4  # spine1×2 + spine2×2
-        adj = t.layer3.routing_adjacencies[0]
-        assert adj.from_.node == "spine1"
-        assert adj.to.node == "leaf1"
-        assert adj.attaches_to is not None
-
-    def test_protocols_bfd(self):
-        t = parse_file(FIXTURES / "valid_full_dc.yaml")
-        assert len(t.protocols.bfd) == 1
-        bfd = t.protocols.bfd[0]
-        assert bfd.min_tx == 300
-        assert "spine1" in bfd.nodes
-
-    def test_protocols_bgp(self):
-        t = parse_file(FIXTURES / "valid_full_dc.yaml")
-        bgp_procs = {b.id: b for b in t.protocols.bgp}
-        assert "bgp-underlay" in bgp_procs
-        assert "bgp-evpn" in bgp_procs
-
-    def test_protocols_bgp_neighbors(self):
-        t = parse_file(FIXTURES / "valid_full_dc.yaml")
-        underlay = next(b for b in t.protocols.bgp if b.id == "bgp-underlay")
-        spine = underlay.nodes[0]
-        assert spine.local_as == 65000
-        nb = spine.neighbors[0]
-        assert nb.type == "ebgp"
-        assert nb.bfd is True
+        cp = t.control_plane
+        assert [b.id for b in cp.bgp] == ["bgp-default"]
+        assert len(cp.routing_neighbors) == 8   # underlay 4 + overlay 4
+        assert cp.bfd[0].min_tx == 300 and "spine1" in cp.bfd[0].nodes
 
 
 # ---------------------------------------------------------------------------
@@ -126,79 +103,6 @@ class TestValidatorMtu:
         paths = [e.path for e in errors]
         assert any("mtu" in p for p in paths)
         assert any("1550" in e.message for e in errors)
-
-
-# ---------------------------------------------------------------------------
-# バリデーター: BGP AS 番号
-# ---------------------------------------------------------------------------
-
-class TestValidatorBGPAS:
-    def test_ebgp_same_as_error(self):
-        yaml_str = b"""
-ndl_version: "1.0"
-layer1:
-  nodes:
-    - id: spine1
-    - id: leaf1
-protocols:
-  bgp:
-    - id: bgp-test
-      nodes:
-        - node: spine1
-          local_as: 65000
-          neighbors:
-            - node: leaf1
-              remote_as: 65000
-              type: ebgp
-"""
-        t = parse(yaml_str)
-        errors = validate(t)
-        assert any("eBGP" in e.message for e in errors)
-
-    def test_ibgp_different_as_error(self):
-        yaml_str = b"""
-ndl_version: "1.0"
-layer1:
-  nodes:
-    - id: spine1
-    - id: leaf1
-protocols:
-  bgp:
-    - id: bgp-test
-      nodes:
-        - node: spine1
-          local_as: 65000
-          neighbors:
-            - node: leaf1
-              remote_as: 65001
-              type: ibgp
-"""
-        t = parse(yaml_str)
-        errors = validate(t)
-        assert any("iBGP" in e.message for e in errors)
-
-    def test_ebgp_different_as_ok(self):
-        yaml_str = b"""
-ndl_version: "1.0"
-layer1:
-  nodes:
-    - id: spine1
-    - id: leaf1
-protocols:
-  bgp:
-    - id: bgp-test
-      nodes:
-        - node: spine1
-          local_as: 65000
-          neighbors:
-            - node: leaf1
-              remote_as: 65001
-              type: ebgp
-"""
-        t = parse(yaml_str)
-        errors = validate(t)
-        bgp_errors = [e for e in errors if "bgp" in e.path.lower()]
-        assert bgp_errors == []
 
 
 # ---------------------------------------------------------------------------

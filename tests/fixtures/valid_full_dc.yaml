@@ -247,6 +247,12 @@ layer3:
     - { id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32 }
     - { id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.12/32 }
 
+    # Spine ↔ Leaf P2P (spine 側)
+    - { id: spine1-swp1-l3, node: spine1, name: swp1, ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-swp1} }
+    - { id: spine1-swp2-l3, node: spine1, name: swp2, ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-swp2} }
+    - { id: spine2-swp1-l3, node: spine2, name: swp1, ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: spine2-swp1} }
+    - { id: spine2-swp2-l3, node: spine2, name: swp2, ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: {interface: spine2-swp2} }
+
     # Spine1 ↔ Leaf P2P
     - id: leaf1-swp51-l3
       node: leaf1
@@ -285,34 +291,17 @@ layer3:
       ip: 192.168.100.1/24
       vrf: vrf-tenant-a
 
-  routing_adjacencies:
-    # Spine1 BGP peering
-    - id: bgp-peer-spine1-leaf1
-      type: bgp
-      from: {node: spine1, update_source: spine1-lo}
-      to:   {node: leaf1,  update_source: leaf1-lo}
-      attaches_to: {link: link-spine1-leaf1}
+control_plane:
+  # 全 eBGP: spine は AS65000、leaf はそれぞれの AS。underlay は直結の /31 どうし、
+  # EVPN の overlay はループバックどうしの eBGP multihop と、2 本に分ける (ADR-0010 の EVPN の書き方の 2 つ目)
+  bgp:
+    - id: bgp-default                  # vrf 省略 = default VRF
+      nodes:
+        - {node: spine1, local_as: 65000}
+        - {node: spine2, local_as: 65000}
+        - {node: leaf1,  local_as: 65001}
+        - {node: leaf2,  local_as: 65002}
 
-    - id: bgp-peer-spine1-leaf2
-      type: bgp
-      from: {node: spine1, update_source: spine1-lo}
-      to:   {node: leaf2,  update_source: leaf2-lo}
-      attaches_to: {link: link-spine1-leaf2}
-
-    # Spine2 BGP peering
-    - id: bgp-peer-spine2-leaf1
-      type: bgp
-      from: {node: spine2, update_source: spine2-lo}
-      to:   {node: leaf1,  update_source: leaf1-lo}
-      attaches_to: {link: link-spine2-leaf1}
-
-    - id: bgp-peer-spine2-leaf2
-      type: bgp
-      from: {node: spine2, update_source: spine2-lo}
-      to:   {node: leaf2,  update_source: leaf2-lo}
-      attaches_to: {link: link-spine2-leaf2}
-
-protocols:
   bfd:
     - id: bfd-global
       min_tx: 300
@@ -320,61 +309,14 @@ protocols:
       multiplier: 3
       nodes: [spine1, spine2, leaf1, leaf2]
 
-  bgp:
-    - id: bgp-underlay
-      role: underlay
-      nodes:
-        - node: spine1
-          local_as: 65000
-          neighbors:
-            - node: leaf1
-              remote_as: 65001
-              type: ebgp
-              bfd: true
-            - node: leaf2
-              remote_as: 65002
-              type: ebgp
-              bfd: true
-        - node: spine2
-          local_as: 65000
-          neighbors:
-            - node: leaf1
-              remote_as: 65001
-              type: ebgp
-              bfd: true
-            - node: leaf2
-              remote_as: 65002
-              type: ebgp
-              bfd: true
-
-    - id: bgp-evpn
-      role: overlay
-      nodes:
-        - node: spine1
-          local_as: 65000
-          role: route_reflector
-          neighbors:
-            - node: leaf1
-              remote_as: 65000
-              type: ibgp
-              role: route_reflector_client
-              address_families: [l2vpn_evpn]
-            - node: leaf2
-              remote_as: 65000
-              type: ibgp
-              role: route_reflector_client
-              address_families: [l2vpn_evpn]
-        - node: spine2
-          local_as: 65000
-          role: route_reflector
-          neighbors:
-            - node: leaf1
-              remote_as: 65000
-              type: ibgp
-              role: route_reflector_client
-              address_families: [l2vpn_evpn]
-            - node: leaf2
-              remote_as: 65000
-              type: ibgp
-              role: route_reflector_client
-              address_families: [l2vpn_evpn]
+  routing_neighbors:
+    # underlay: 直結の /31 どうし (通り道は update_source の L3 IF から導く)
+    - {id: bgp-peer-spine1-leaf1, type: bgp, from: {node: spine1, update_source: spine1-swp1-l3}, to: {node: leaf1, update_source: leaf1-swp51-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-spine1-leaf2, type: bgp, from: {node: spine1, update_source: spine1-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp51-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-spine2-leaf1, type: bgp, from: {node: spine2, update_source: spine2-swp1-l3}, to: {node: leaf1, update_source: leaf1-swp52-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-spine2-leaf2, type: bgp, from: {node: spine2, update_source: spine2-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp52-l3}, address_families: [ipv4_unicast], bfd: true}
+    # overlay: ループバックどうし (multihop)
+    - {id: bgp-peer-spine1-leaf1-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf2-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2, update_source: leaf2-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine2-leaf1-overlay, type: bgp, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf1, update_source: leaf1-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine2-leaf2-overlay, type: bgp, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf2, update_source: leaf2-lo}, address_families: [l2vpn_evpn]}

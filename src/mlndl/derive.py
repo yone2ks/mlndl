@@ -4,6 +4,7 @@
   vlan_svi_networks(topology) VLAN の SVI のサブネット
   l3_attachments(topology)    L3 IF が何の上に載るか (ADR-0011 D11)
   l3_roles(topology)          L3 IF がほかから参照されている役割 (ADR-0011 D11)
+  bgp_session_views(topology) BGP セッションの両端・AS・eBGP / iBGP・通り道 (ADR-0010 D7・D11)
 
 エクスポーターと validator が同じ関数を使う。参照先が存在しない id は黙って飛ばす
 (存在の検査は validator の _check_refs が行う)。
@@ -13,9 +14,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from ipaddress import IPv4Network, IPv6Network
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from typing import Literal
 
+from .schema.control_plane import BgpInsideEndpoint, BgpInstance, BgpSession
 from .schema.layer3 import L3Interface
 from .schema.topology import MLNDLTopology
 
@@ -173,7 +175,7 @@ def l3_attachments(topology: MLNDLTopology) -> dict[str, Attachment]:
 def l3_roles(topology: MLNDLTopology) -> dict[str, list[Role]]:
     """L3 IF の id → ほかのエンティティから参照されている役割 (ADR-0011 D11)
 
-    update_source: routing_adjacencies の from / to の update_source が指している
+    update_source: control_plane.routing_neighbors の BGP セッションの update_source が指している (ADR-0010)
     vtep_source:   layer2.vteps の sources が指している (ADR-0014)
     """
     roles: dict[str, list[Role]] = defaultdict(list)
@@ -182,12 +184,173 @@ def l3_roles(topology: MLNDLTopology) -> dict[str, list[Role]]:
         if l3_id is not None and role not in roles[l3_id]:
             roles[l3_id].append(role)
 
-    if topology.layer3:
-        for adj in topology.layer3.routing_adjacencies:
-            add(adj.from_.update_source, "update_source")
-            add(adj.to.update_source, "update_source")
+    if topology.control_plane:
+        for session in topology.control_plane.routing_neighbors:
+            if isinstance(session, BgpSession):
+                for end in (session.from_, session.to):
+                    if isinstance(end, BgpInsideEndpoint):
+                        add(end.update_source, "update_source")
     if topology.layer2:
         for vtep in topology.layer2.vteps:
             for src in vtep.sources:
                 add(src, "vtep_source")
     return dict(roles)
+
+
+# ---------------------------------------------------------------------------
+# BGP セッション (ADR-0010)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SessionEnd:
+    """セッションの片端。トポロジー外の相手は node と l3_interface が None で、address を持つ"""
+
+    node: str | None
+    l3_interface: L3Interface | None
+    address: IPv4Address | IPv6Address | None
+    local_as: int | None
+    route_reflector_client: bool = False
+
+    @property
+    def unnumbered(self) -> bool:
+        """update_source が ip も ipv6 も持たない L3 IF を指す (ADR-0010 D4)"""
+        return self.l3_interface is not None and self.l3_interface.ip is None and self.l3_interface.ipv6 is None
+
+    @property
+    def transport_afs(self) -> set[int]:
+        """セッションを張る IP のアドレスファミリー (4 / 6)。unnumbered なら空"""
+        if self.address is not None:
+            return {self.address.version}
+        if self.l3_interface is None:
+            return set()
+        return {a.version for a in (self.l3_interface.ip, self.l3_interface.ipv6) if a is not None}
+
+
+@dataclass
+class TransportLink:
+    """single-hop のセッションが流れる L1 の通り道。リンク 1 本か、両端の LAG"""
+
+    link: str | None = None
+    lags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class BgpSessionView:
+    """参照をたどって決めた BGP セッションの値。validator とエクスポーターが共有する (ADR-0010 D11)
+
+    - instance: セッションが属するインスタンス (instance 省略時は、BGP のエントリがちょうど 1 つならそれ)
+    - bgp_type: 両端の AS が決まれば ebgp / ibgp
+    - transport: single-hop なら通り道。multihop・SVI・トポロジー外の相手なら None (D7)
+    - transport_mismatch: 両端の update_source から導いた通り道が食い違う
+    """
+
+    index: int
+    session: BgpSession
+    instance: BgpInstance | None
+    from_: SessionEnd
+    to: SessionEnd
+    bgp_type: Literal["ebgp", "ibgp"] | None
+    transport: TransportLink | None
+    transport_mismatch: bool
+
+    @property
+    def vrf(self) -> str | None:
+        """インスタンスの VRF。None は default VRF"""
+        return self.instance.vrf if self.instance else None
+
+
+def bgp_session_views(topology: MLNDLTopology) -> list[BgpSessionView]:
+    """control_plane.routing_neighbors の BGP セッションごとに、両端・AS・通り道を求める"""
+    cp = topology.control_plane
+    if cp is None:
+        return []
+    instances = {b.id: b for b in cp.bgp}
+    only = cp.bgp[0] if len(cp.bgp) == 1 else None
+    l3ifs = {i.id: i for i in topology.layer3.interfaces} if topology.layer3 else {}
+    basis = _l3_basis(topology)
+    peer, link_of = _l1_peers(topology)
+    lag_members = {g.id: set(g.members) for g in topology.layer1.lag} if topology.layer1 else {}
+
+    views: list[BgpSessionView] = []
+    for i, session in enumerate(cp.routing_neighbors):
+        if not isinstance(session, BgpSession):
+            continue
+        inst = instances.get(session.instance) if session.instance else only
+        as_of = {n.node: n.local_as for n in inst.nodes} if inst else {}
+
+        def end(ep) -> SessionEnd:
+            if isinstance(ep, BgpInsideEndpoint):
+                return SessionEnd(ep.node, l3ifs.get(ep.update_source), None, as_of.get(ep.node),
+                                  ep.route_reflector_client)
+            return SessionEnd(None, None, ep.address, ep.local_as)
+
+        a, b = end(session.from_), end(session.to)
+        bgp_type = None
+        if a.local_as is not None and b.local_as is not None:
+            bgp_type = "ibgp" if a.local_as == b.local_as else "ebgp"
+        transport, mismatch = None, False
+        if a.l3_interface is not None and b.l3_interface is not None:
+            transport, mismatch = _transport(basis.get(a.l3_interface.id), basis.get(b.l3_interface.id),
+                                             peer, link_of, lag_members)
+        views.append(BgpSessionView(i, session, inst, a, b, bgp_type, transport, mismatch))
+    return views
+
+
+# L3 IF の基盤: ("l1", L1 IF id, タグ) / ("lag", LAG id, タグ) / ("vlan", VLAN id, None)。タグはサブ IF の vlan_id
+_Basis = tuple[str, str, int | None]
+
+
+def _l3_basis(topology: MLNDLTopology) -> dict[str, _Basis]:
+    """L3 IF の id → 何の上に載るか。サブ IF はその基盤 (L1 IF / LAG) とタグに展開する"""
+    if not topology.layer3:
+        return {}
+    attachments = l3_attachments(topology)
+    subifs = {si.id: si for si in topology.layer2.subinterfaces} if topology.layer2 else {}
+    out: dict[str, _Basis] = {}
+    for iface in topology.layer3.interfaces:
+        ref = iface.attachment_ref()
+        kind = attachments.get(iface.id)
+        if ref is None or kind == "unattached":
+            continue
+        if kind == "subinterface" and ref in subifs:
+            base = subifs[ref].attaches_to
+            out[iface.id] = ("lag" if base.kind == "lag" else "l1", base.target, subifs[ref].vlan_id)
+        elif kind == "l1_interface":
+            out[iface.id] = ("l1", ref, None)
+        elif kind in ("lag", "vlan"):
+            out[iface.id] = (kind, ref, None)
+    return out
+
+
+def _l1_peers(topology: MLNDLTopology) -> tuple[dict[str, str], dict[frozenset[str], str]]:
+    """L1 IF id → リンクの対向の L1 IF id、L1 IF の組 → リンク id"""
+    peer: dict[str, str] = {}
+    link_of: dict[frozenset[str], str] = {}
+    if topology.layer1:
+        for link in topology.layer1.links:
+            x, y = link.endpoints
+            peer[x], peer[y] = y, x
+            link_of[frozenset((x, y))] = link.id
+    return peer, link_of
+
+
+def _transport(a: _Basis | None, b: _Basis | None, peer, link_of, lag_members) -> tuple[TransportLink | None, bool]:
+    """両端の L3 IF の基盤から通り道を導く (ADR-0010 D7)。戻り値は (通り道, 食い違い)
+
+    - どちらかが基盤なし (ループバック等): multihop。食い違いとはしない
+    - SVI: 通り道は決めない。両端とも SVI なら同じ VLAN でなければ食い違い (片方だけ SVI は、ルーテッド IF との接続として正当)
+    - 直結の IF / LAG / サブ IF: 両端が同じリンク (または LAG のメンバーどうし) でつながり、タグが一致すれば single-hop。そうでなければ食い違い
+    """
+    if a is None or b is None:
+        return None, False
+    if a[0] == "vlan" or b[0] == "vlan":
+        return None, a[0] == b[0] == "vlan" and a[1] != b[1]
+    if a[2] != b[2] or a[0] != b[0]:
+        return None, True
+    if a[0] == "l1":
+        link = link_of.get(frozenset((a[1], b[1]))) if peer.get(a[1]) == b[1] else None
+        return (TransportLink(link=link), False) if link else (None, True)
+    members_b = lag_members.get(b[1], set())
+    if any(peer.get(m) in members_b for m in lag_members.get(a[1], set())):
+        return TransportLink(lags=[a[1], b[1]]), False
+    return None, True

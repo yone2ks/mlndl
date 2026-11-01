@@ -8,7 +8,7 @@ from mlndl import parse, validate, validate_all
 from mlndl.schema.layer1 import L1Layer
 from mlndl.schema.layer2 import L2Layer
 from mlndl.schema.layer3 import L3Layer
-from mlndl.schema.protocols import Protocols
+from mlndl.schema.control_plane import ControlPlane
 
 
 def _grammar_errors(body: str) -> list:
@@ -97,11 +97,13 @@ layer3:
     - {id: r2-lo, node: r2, name: lo, ip: 10.0.0.2/32}
   tunnel_interfaces:
     - {id: Tunnel-r1, node: R1, type: gre, source: R1-lo, destination_interface: r2-lo}
-  routing_adjacencies:
-    - {id: Bgp-peer-r1-r2, type: bgp, from: {node: R1}, to: {node: r2}}
-protocols:
+control_plane:
+  bgp: [{id: Bgp-a, nodes: [{node: R1, local_as: 65001}, {node: r2, local_as: 65002}]}]
+  ospf: [{id: Ospf-a, nodes: [{node: R1}, {node: r2}]}]
+  isis: [{id: Isis-a, nodes: [{node: R1}, {node: r2}]}]
   bfd: [{id: Bfd-a, nodes: [R1]}]
-  bgp: [{id: Bgp-a}]
+  routing_neighbors:
+    - {id: Bgp-peer-r1-r2, type: bgp, from: {node: R1, update_source: R1-lo}, to: {node: r2, update_source: r2-lo}}
 """
 
 EXPECTED_PATHS = {
@@ -116,9 +118,11 @@ EXPECTED_PATHS = {
     "layer3.vrfs[0].id",
     "layer3.interfaces[0].id",
     "layer3.tunnel_interfaces[0].id",
-    "layer3.routing_adjacencies[0].id",
-    "protocols.bfd[0].id",
-    "protocols.bgp[0].id",
+    "control_plane.bgp[0].id",
+    "control_plane.ospf[0].id",
+    "control_plane.isis[0].id",
+    "control_plane.bfd[0].id",
+    "control_plane.routing_neighbors[0].id",
 }
 
 
@@ -137,7 +141,7 @@ def test_expected_paths_cover_schema():
     schema_lists = {
         f"{section}.{name}"
         for section, model in [("layer1", L1Layer), ("layer2", L2Layer),
-                               ("layer3", L3Layer), ("protocols", Protocols)]
+                               ("layer3", L3Layer), ("control_plane", ControlPlane)]
         for name in model.model_fields
     }
     assert schema_lists == {p.removesuffix("[0].id") for p in EXPECTED_PATHS}

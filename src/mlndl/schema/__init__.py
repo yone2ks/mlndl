@@ -19,11 +19,26 @@ from .layer3 import (
     GatewayRedundancy,
     L3Interface,
     TunnelInterface,
-    RoutingAdjEndpoint,
-    RoutingAdjacency,
     L3Layer,
 )
-from .protocols import BFDConfig, BGPNeighbor, BGPNode, BGPProcess, Protocols
+from .control_plane import (
+    BgpInstanceNode,
+    BgpInstance,
+    OspfInstanceNode,
+    OspfInstance,
+    IsisInstanceNode,
+    IsisInstance,
+    BFDConfig,
+    BgpInsideEndpoint,
+    BgpOutsideEndpoint,
+    OspfEndpoint,
+    IsisEndpoint,
+    BgpSession,
+    OspfAdjacency,
+    IsisAdjacency,
+    RoutingNeighbor,
+    ControlPlane,
+)
 from .topology import Meta, MLNDLTopology
 
 __all__ = [
@@ -35,10 +50,11 @@ __all__ = [
     # layer3
     "RouteTargets", "VRF",
     "VrrpGateway", "HsrpGateway", "AnycastGateway", "GatewayRedundancy",
-    "L3Interface", "TunnelInterface",
-    "RoutingAdjEndpoint", "RoutingAdjacency", "L3Layer",
-    # protocols
-    "BFDConfig", "BGPNeighbor", "BGPNode", "BGPProcess", "Protocols",
+    "L3Interface", "TunnelInterface", "L3Layer",
+    # control_plane (ADR-0010)
+    "BgpInstanceNode", "BgpInstance", "OspfInstanceNode", "OspfInstance", "IsisInstanceNode", "IsisInstance",
+    "BFDConfig", "BgpInsideEndpoint", "BgpOutsideEndpoint", "OspfEndpoint", "IsisEndpoint",
+    "BgpSession", "OspfAdjacency", "IsisAdjacency", "RoutingNeighbor", "ControlPlane",
     # topology
     "Meta", "MLNDLTopology",
 ]

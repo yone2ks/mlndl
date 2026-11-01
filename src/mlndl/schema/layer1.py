@@ -1,7 +1,8 @@
 """Layer 1 (物理トポロジー) スキーマ定義
 
 設計決定:
-- attaches_to: ADR-0001 — str | {node:} | {interface:} | {lag:} | {vlan:} | {subinterface:} | {link:}
+- attaches_to: ADR-0001 — str | {node:} | {interface:} | {lag:} | {vlan:} | {subinterface:}
+  ({link:} は ADR-0010 で削除。セッションの通り道は update_source から導く)
   参照先の種類はキーで示す (ADR-0001 D8)。どのキーを書けるかはエンティティごとに決まる
 - role: ADR-0003 C2 — 自由文字列、コアは値域チェックなし
 - implementation: ADR-0004 — vm | physical | container
@@ -24,7 +25,7 @@ from .refs import Ref
 # attaches_to (ADR-0001)
 # ---------------------------------------------------------------------------
 
-ATTACH_KEYS = ("node", "interface", "lag", "vlan", "subinterface", "link")
+ATTACH_KEYS = ("node", "interface", "lag", "vlan", "subinterface")
 
 
 class AttachesToObj(BaseModel):
@@ -32,7 +33,7 @@ class AttachesToObj(BaseModel):
 
     キー名が参照先の種類を示す (ADR-0001 D2・D8):
       node → layer1.nodes / interface → layer1.interfaces (L1 IF のみ) / lag → layer1.lag /
-      vlan → layer2.vlans / subinterface → layer2.subinterfaces / link → layer1.links
+      vlan → layer2.vlans / subinterface → layer2.subinterfaces
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -42,7 +43,16 @@ class AttachesToObj(BaseModel):
     lag: str | None = None
     vlan: str | None = None
     subinterface: str | None = None
-    link: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_link(cls, data: Any) -> Any:
+        """{link:} は ADR-0010 で削除した。移動先を示すエラーを返す"""
+        if isinstance(data, dict) and "link" in data:
+            raise ValueError(
+                "attaches_to の {link:} は廃止しました。セッションの通り道は update_source の L3 IF から導きます (ADR-0010 D7)"
+            )
+        return data
 
     @model_validator(mode="after")
     def exactly_one_key(self) -> "AttachesToObj":
@@ -66,8 +76,8 @@ class AttachesToObj(BaseModel):
 # 文字列形式（ノードID 糖衣構文）とオブジェクト形式の Union
 AttachesTo = str | AttachesToObj
 
-# ADR-0001 D1〜D7 で定めた従来のキー。L1 と routing_adjacencies はこれだけを書ける
-L1_ATTACH_KEYS = frozenset({"node", "interface", "link"})
+# L1 ノード・L1 IF が書けるキー (ADR-0001 D8。{link:} は ADR-0010 で削除)
+L1_ATTACH_KEYS = frozenset({"node", "interface"})
 
 
 def restrict_attach_keys(value: Any, allowed: frozenset[str], owner: str) -> Any:

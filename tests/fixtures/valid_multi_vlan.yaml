@@ -202,6 +202,20 @@ layer3:
     - { id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.12/32 }
     - { id: leaf3-lo,  node: leaf3,  name: lo, ip: 10.0.0.13/32 }
 
+    # unnumbered の L3 IF (ip も ipv6 も書かない。ADR-0010 D4)
+    - { id: spine1-swp1-l3, node: spine1, name: swp1, vrf: vrf-default, attaches_to: {interface: spine1-swp1} }
+    - { id: spine1-swp2-l3, node: spine1, name: swp2, vrf: vrf-default, attaches_to: {interface: spine1-swp2} }
+    - { id: spine1-swp3-l3, node: spine1, name: swp3, vrf: vrf-default, attaches_to: {interface: spine1-swp3} }
+    - { id: spine2-swp1-l3, node: spine2, name: swp1, vrf: vrf-default, attaches_to: {interface: spine2-swp1} }
+    - { id: spine2-swp2-l3, node: spine2, name: swp2, vrf: vrf-default, attaches_to: {interface: spine2-swp2} }
+    - { id: spine2-swp3-l3, node: spine2, name: swp3, vrf: vrf-default, attaches_to: {interface: spine2-swp3} }
+    - { id: leaf1-swp51-l3, node: leaf1, name: swp51, vrf: vrf-default, attaches_to: {interface: leaf1-swp51} }
+    - { id: leaf1-swp52-l3, node: leaf1, name: swp52, vrf: vrf-default, attaches_to: {interface: leaf1-swp52} }
+    - { id: leaf2-swp51-l3, node: leaf2, name: swp51, vrf: vrf-default, attaches_to: {interface: leaf2-swp51} }
+    - { id: leaf2-swp52-l3, node: leaf2, name: swp52, vrf: vrf-default, attaches_to: {interface: leaf2-swp52} }
+    - { id: leaf3-swp51-l3, node: leaf3, name: swp51, vrf: vrf-default, attaches_to: {interface: leaf3-swp51} }
+    - { id: leaf3-swp52-l3, node: leaf3, name: swp52, vrf: vrf-default, attaches_to: {interface: leaf3-swp52} }
+
     - id: leaf1-vlan100
       node: leaf1
       name: vlan-100
@@ -244,75 +258,22 @@ layer3:
       ip: 172.16.40.1/24
       vrf: vrf-default
 
-  routing_adjacencies:
-    - id: bgp-peer-spine1-leaf1
-      type: bgp
-      from: {node: spine1, update_source: spine1-lo}
-      to:   {node: leaf1,  update_source: leaf1-lo}
-      attaches_to: {link: link-spine1-leaf1}
-
-    - id: bgp-peer-spine1-leaf2
-      type: bgp
-      from: {node: spine1, update_source: spine1-lo}
-      to:   {node: leaf2,  update_source: leaf2-lo}
-      attaches_to: {link: link-spine1-leaf2}
-
-    - id: bgp-peer-spine1-leaf3
-      type: bgp
-      from: {node: spine1, update_source: spine1-lo}
-      to:   {node: leaf3,  update_source: leaf3-lo}
-      attaches_to: {link: link-spine1-leaf3}
-
-    - id: bgp-peer-spine2-leaf1
-      type: bgp
-      from: {node: spine2, update_source: spine2-lo}
-      to:   {node: leaf1,  update_source: leaf1-lo}
-      attaches_to: {link: link-spine2-leaf1}
-
-    - id: bgp-peer-spine2-leaf2
-      type: bgp
-      from: {node: spine2, update_source: spine2-lo}
-      to:   {node: leaf2,  update_source: leaf2-lo}
-      attaches_to: {link: link-spine2-leaf2}
-
-    - id: bgp-peer-spine2-leaf3
-      type: bgp
-      from: {node: spine2, update_source: spine2-lo}
-      to:   {node: leaf3,  update_source: leaf3-lo}
-      attaches_to: {link: link-spine2-leaf3}
-
-protocols:
+control_plane:
+  # 全 eBGP の unnumbered。1 本のセッションで ipv4_unicast と l2vpn_evpn を運ぶ (ADR-0010 の EVPN の書き方の 1 つ目)。
+  # leaf はそれぞれの AS (旧版は EVPN で leaf も AS65000 にしていた。ADR-0010 F4)
   bgp:
-    - id: bgp-underlay
-      role: underlay
+    - id: bgp-default
       nodes:
-        - node: spine1
-          local_as: 65000
-          neighbors:
-            - { node: leaf1, remote_as: 65001, type: ebgp }
-            - { node: leaf2, remote_as: 65002, type: ebgp }
-            - { node: leaf3, remote_as: 65003, type: ebgp }
-        - node: spine2
-          local_as: 65000
-          neighbors:
-            - { node: leaf1, remote_as: 65001, type: ebgp }
-            - { node: leaf2, remote_as: 65002, type: ebgp }
-            - { node: leaf3, remote_as: 65003, type: ebgp }
+        - {node: spine1, local_as: 65000}
+        - {node: spine2, local_as: 65000}
+        - {node: leaf1,  local_as: 65001}
+        - {node: leaf2,  local_as: 65002}
+        - {node: leaf3,  local_as: 65003}
 
-    - id: bgp-evpn
-      role: overlay
-      nodes:
-        - node: spine1
-          local_as: 65000
-          role: route_reflector
-          neighbors:
-            - { node: leaf1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn] }
-            - { node: leaf2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn] }
-            - { node: leaf3, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn] }
-        - node: spine2
-          local_as: 65000
-          role: route_reflector
-          neighbors:
-            - { node: leaf1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn] }
-            - { node: leaf2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn] }
-            - { node: leaf3, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn] }
+  routing_neighbors:
+    - {id: bgp-peer-spine1-leaf1, type: bgp, from: {node: spine1, update_source: spine1-swp1-l3}, to: {node: leaf1, update_source: leaf1-swp51-l3}, address_families: [ipv4_unicast, l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf2, type: bgp, from: {node: spine1, update_source: spine1-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp51-l3}, address_families: [ipv4_unicast, l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf3, type: bgp, from: {node: spine1, update_source: spine1-swp3-l3}, to: {node: leaf3, update_source: leaf3-swp51-l3}, address_families: [ipv4_unicast, l2vpn_evpn]}
+    - {id: bgp-peer-spine2-leaf1, type: bgp, from: {node: spine2, update_source: spine2-swp1-l3}, to: {node: leaf1, update_source: leaf1-swp52-l3}, address_families: [ipv4_unicast, l2vpn_evpn]}
+    - {id: bgp-peer-spine2-leaf2, type: bgp, from: {node: spine2, update_source: spine2-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp52-l3}, address_families: [ipv4_unicast, l2vpn_evpn]}
+    - {id: bgp-peer-spine2-leaf3, type: bgp, from: {node: spine2, update_source: spine2-swp3-l3}, to: {node: leaf3, update_source: leaf3-swp52-l3}, address_families: [ipv4_unicast, l2vpn_evpn]}

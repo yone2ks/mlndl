@@ -107,16 +107,28 @@ class TestPrefixWarnings:
         ("isis", "isis-adj-leaf1-leaf2", "adj-leaf1-leaf2"),
     ])
     def test_adjacency_prefix_depends_on_type(self, adj_type, good, bad):
+        ends = {
+            "bgp": "from: {node: leaf1, update_source: leaf1-lo}, to: {node: leaf2, update_source: leaf2-lo}",
+            "ospf": "from: {node: leaf1, interface: leaf1-lo}, to: {node: leaf2, interface: leaf2-lo}, area: 0",
+            "isis": "from: {node: leaf1, interface: leaf1-swp1}, to: {node: leaf2, interface: leaf2-swp1}, level: level-2",
+        }[adj_type]
         tmpl = L1_TWO_NODES + (
-            "layer3:\n  routing_adjacencies:\n"
-            "    - {id: %s, type: " + adj_type + ", from: {node: leaf1}, to: {node: leaf2}}\n"
+            "layer3:\n  interfaces:\n"
+            "    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}\n"
+            "    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}\n"
+            "control_plane:\n"
+            f"  {adj_type}: [{{id: x, nodes: [{{node: leaf1}}, {{node: leaf2}}]}}]\n".replace(
+                "{node: leaf1}, {node: leaf2}",
+                "{node: leaf1, local_as: 65001}, {node: leaf2, local_as: 65002}" if adj_type == "bgp" else "{node: leaf1}, {node: leaf2}")
+            + "  routing_neighbors:\n"
+            "    - {id: %s, type: " + adj_type + ", " + ends + "}\n"
         )
         assert self._warn_paths(_topo(tmpl % good)) == []
-        assert self._warn_paths(_topo(tmpl % bad)) == ["layer3.routing_adjacencies[0].id"]
+        assert self._warn_paths(_topo(tmpl % bad)) == ["control_plane.routing_neighbors[0].id"]
 
     def test_bfd_prefix(self):
-        ng = _topo("protocols:\n  bfd:\n    - {id: timers-default}\n")
-        assert self._warn_paths(ng) == ["protocols.bfd[0].id"]
+        ng = _topo("control_plane:\n  bfd:\n    - {id: timers-default}\n")
+        assert self._warn_paths(ng) == ["control_plane.bfd[0].id"]
 
     @pytest.mark.parametrize("lag_id,warns", [
         ("lag-leaf1-bond0", False),

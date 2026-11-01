@@ -327,6 +327,24 @@ layer3:
     - { id: cm-core1-lo, node: cm-core1, name: lo, ip: 10.0.1.1/32 }
     - { id: cm-core2-lo, node: cm-core2, name: lo, ip: 10.0.1.2/32 }
 
+    # DC の underlay (OSPF ポイントツーポイント) の /31
+    - { id: dc-spine1-swp1-l3, node: dc-spine1, name: swp1, ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: dc-spine1-swp1} }
+    - { id: dc-leaf1-swp51-l3, node: dc-leaf1, name: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: dc-leaf1-swp51} }
+    - { id: dc-spine1-swp2-l3, node: dc-spine1, name: swp2, ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: dc-spine1-swp2} }
+    - { id: dc-leaf2-swp51-l3, node: dc-leaf2, name: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: dc-leaf2-swp51} }
+    - { id: dc-spine1-swp3-l3, node: dc-spine1, name: swp3, ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: dc-spine1-swp3} }
+    - { id: dc-border1-swp51-l3, node: dc-border1, name: swp51, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: dc-border1-swp51} }
+    - { id: dc-spine1-swp4-l3, node: dc-spine1, name: swp4, ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: {interface: dc-spine1-swp4} }
+    - { id: dc-border2-swp51-l3, node: dc-border2, name: swp51, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: dc-border2-swp51} }
+    - { id: dc-spine2-swp1-l3, node: dc-spine2, name: swp1, ip: 10.1.0.8/31, vrf: vrf-default, attaches_to: {interface: dc-spine2-swp1} }
+    - { id: dc-leaf1-swp52-l3, node: dc-leaf1, name: swp52, ip: 10.1.0.9/31, vrf: vrf-default, attaches_to: {interface: dc-leaf1-swp52} }
+    - { id: dc-spine2-swp2-l3, node: dc-spine2, name: swp2, ip: 10.1.0.10/31, vrf: vrf-default, attaches_to: {interface: dc-spine2-swp2} }
+    - { id: dc-leaf2-swp52-l3, node: dc-leaf2, name: swp52, ip: 10.1.0.11/31, vrf: vrf-default, attaches_to: {interface: dc-leaf2-swp52} }
+    - { id: dc-spine2-swp3-l3, node: dc-spine2, name: swp3, ip: 10.1.0.12/31, vrf: vrf-default, attaches_to: {interface: dc-spine2-swp3} }
+    - { id: dc-border1-swp52-l3, node: dc-border1, name: swp52, ip: 10.1.0.13/31, vrf: vrf-default, attaches_to: {interface: dc-border1-swp52} }
+    - { id: dc-spine2-swp4-l3, node: dc-spine2, name: swp4, ip: 10.1.0.14/31, vrf: vrf-default, attaches_to: {interface: dc-spine2-swp4} }
+    - { id: dc-border2-swp52-l3, node: dc-border2, name: swp52, ip: 10.1.0.15/31, vrf: vrf-default, attaches_to: {interface: dc-border2-swp52} }
+
     # ── DC SVI (anycast GW for VLAN100) ────────────────────────────────
     - id: dc-leaf1-vlan100
       node: dc-leaf1
@@ -417,22 +435,31 @@ layer3:
       vrf: vrf-default
       attaches_to: {interface: cm-core2-te1-1}
 
-  routing_adjacencies:
-    # ── DC underlay BGP (Spine <-> Leaf/Border) ─────────────────────────
-    - { id: bgp-peer-dc-spine1-leaf1,   type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf1,   update_source: dc-leaf1-lo},   attaches_to: {link: link-dc-spine1-leaf1} }
-    - { id: bgp-peer-dc-spine1-leaf2,   type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf2,   update_source: dc-leaf2-lo},   attaches_to: {link: link-dc-spine1-leaf2} }
-    - { id: bgp-peer-dc-spine1-border1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border1, update_source: dc-border1-lo}, attaches_to: {link: link-dc-spine1-border1} }
-    - { id: bgp-peer-dc-spine1-border2, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border2, update_source: dc-border2-lo}, attaches_to: {link: link-dc-spine1-border2} }
-    - { id: bgp-peer-dc-spine2-leaf1,   type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf1,   update_source: dc-leaf1-lo},   attaches_to: {link: link-dc-spine2-leaf1} }
-    - { id: bgp-peer-dc-spine2-leaf2,   type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf2,   update_source: dc-leaf2-lo},   attaches_to: {link: link-dc-spine2-leaf2} }
-    - { id: bgp-peer-dc-spine2-border1, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border1, update_source: dc-border1-lo}, attaches_to: {link: link-dc-spine2-border1} }
-    - { id: bgp-peer-dc-spine2-border2, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border2, update_source: dc-border2-lo}, attaches_to: {link: link-dc-spine2-border2} }
+control_plane:
+  # DC: underlay は OSPF、EVPN は iBGP (spine が RR) — ADR-0010 の EVPN の書き方の 3 つ目。
+  # DC と Campus は eBGP (直結の /31)。Campus の core はトポロジー外の ISP とも eBGP で張る
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: dc-spine1,  local_as: 65000}
+        - {node: dc-spine2,  local_as: 65000}
+        - {node: dc-leaf1,   local_as: 65000}
+        - {node: dc-leaf2,   local_as: 65000}
+        - {node: dc-border1, local_as: 65000}
+        - {node: dc-border2, local_as: 65000}
+        - {node: cm-core1,   local_as: 65100}
+        - {node: cm-core2,   local_as: 65100}
 
-    # ── WAN eBGP (DC Border <-> Campus Core) ────────────────────────────
-    - { id: bgp-peer-wan-border1-core1, type: bgp, from: {node: dc-border1, update_source: dc-border1-lo}, to: {node: cm-core1, update_source: cm-core1-lo}, attaches_to: {link: link-wan-border1-core1} }
-    - { id: bgp-peer-wan-border2-core2, type: bgp, from: {node: dc-border2, update_source: dc-border2-lo}, to: {node: cm-core2, update_source: cm-core2-lo}, attaches_to: {link: link-wan-border2-core2} }
+  ospf:
+    - id: ospf-dc
+      nodes:
+        - {node: dc-spine1}
+        - {node: dc-spine2}
+        - {node: dc-leaf1}
+        - {node: dc-leaf2}
+        - {node: dc-border1}
+        - {node: dc-border2}
 
-protocols:
   bfd:
     - id: bfd-global
       min_tx: 300
@@ -440,54 +467,30 @@ protocols:
       multiplier: 3
       nodes: [dc-spine1, dc-spine2, dc-leaf1, dc-leaf2, dc-border1, dc-border2, cm-core1, cm-core2]
 
-  bgp:
-    - id: bgp-dc-underlay
-      role: underlay
-      nodes:
-        - node: dc-spine1
-          local_as: 65000
-          neighbors:
-            - {node: dc-leaf1,   remote_as: 65001, type: ebgp, bfd: true}
-            - {node: dc-leaf2,   remote_as: 65002, type: ebgp, bfd: true}
-            - {node: dc-border1, remote_as: 65011, type: ebgp, bfd: true}
-            - {node: dc-border2, remote_as: 65012, type: ebgp, bfd: true}
-        - node: dc-spine2
-          local_as: 65000
-          neighbors:
-            - {node: dc-leaf1,   remote_as: 65001, type: ebgp, bfd: true}
-            - {node: dc-leaf2,   remote_as: 65002, type: ebgp, bfd: true}
-            - {node: dc-border1, remote_as: 65011, type: ebgp, bfd: true}
-            - {node: dc-border2, remote_as: 65012, type: ebgp, bfd: true}
+  routing_neighbors:
+    # DC の underlay (OSPF)
+    - {id: ospf-adj-dc-spine1-leaf1, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp1-l3}, to: {node: dc-leaf1, interface: dc-leaf1-swp51-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine1-leaf2, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp2-l3}, to: {node: dc-leaf2, interface: dc-leaf2-swp51-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine1-border1, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp3-l3}, to: {node: dc-border1, interface: dc-border1-swp51-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine1-border2, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp4-l3}, to: {node: dc-border2, interface: dc-border2-swp51-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine2-leaf1, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp1-l3}, to: {node: dc-leaf1, interface: dc-leaf1-swp52-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine2-leaf2, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp2-l3}, to: {node: dc-leaf2, interface: dc-leaf2-swp52-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine2-border1, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp3-l3}, to: {node: dc-border1, interface: dc-border1-swp52-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine2-border2, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp4-l3}, to: {node: dc-border2, interface: dc-border2-swp52-l3}, area: 0, bfd: true}
 
-    - id: bgp-dc-evpn
-      role: overlay
-      nodes:
-        - node: dc-spine1
-          local_as: 65000
-          role: route_reflector
-          neighbors:
-            - {node: dc-leaf1,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
-            - {node: dc-leaf2,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
-            - {node: dc-border1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
-            - {node: dc-border2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
-        - node: dc-spine2
-          local_as: 65000
-          role: route_reflector
-          neighbors:
-            - {node: dc-leaf1,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
-            - {node: dc-leaf2,   remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
-            - {node: dc-border1, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
-            - {node: dc-border2, remote_as: 65000, type: ibgp, role: route_reflector_client, address_families: [l2vpn_evpn]}
+    # DC の EVPN (iBGP。spine が RR、相手はクライアント)
+    - {id: bgp-peer-dc-spine1-leaf1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf1, update_source: dc-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine1-leaf2, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf2, update_source: dc-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine1-border1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border1, update_source: dc-border1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine1-border2, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border2, update_source: dc-border2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-leaf1, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf1, update_source: dc-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-leaf2, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf2, update_source: dc-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-border1, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border1, update_source: dc-border1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-border2, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border2, update_source: dc-border2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
 
-    # ── WAN eBGP between sites ──────────────────────────────────────────
-    - id: bgp-wan
-      role: underlay
-      nodes:
-        - node: dc-border1
-          local_as: 65011
-          neighbors:
-            - {node: cm-core1, remote_as: 65100, type: ebgp, bfd: true, address_families: [ipv4_unicast]}
-        - node: dc-border2
-          local_as: 65012
-          neighbors:
-            - {node: cm-core2, remote_as: 65100, type: ebgp, bfd: true, address_families: [ipv4_unicast]}
+    # DC ↔ Campus (eBGP、直結の /31)
+    - {id: bgp-peer-dc-border1-cm-core1, type: bgp, from: {node: dc-border1, update_source: dc-border1-swp1-l3}, to: {node: cm-core1, update_source: cm-core1-te1-1-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-dc-border2-cm-core2, type: bgp, from: {node: dc-border2, update_source: dc-border2-swp1-l3}, to: {node: cm-core2, update_source: cm-core2-te1-1-l3}, address_families: [ipv4_unicast], bfd: true}
+
+    # トポロジー外の ISP (IP と AS しか分からない相手)
+    - {id: bgp-peer-cm-core1-isp, type: bgp, from: {node: cm-core1, update_source: cm-core1-lo}, to: {address: 203.0.113.1, local_as: 64500}, address_families: [ipv4_unicast]}

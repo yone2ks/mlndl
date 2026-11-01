@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 # id を持つエンティティのリストを探すセクション。リストはスキーマから列挙するので、
 # エンティティを足しても索引から漏れない
-SECTIONS = ("layer1", "layer2", "layer3", "protocols")
+SECTIONS = ("layer1", "layer2", "layer3", "control_plane")
 
 
 class IdIndex:

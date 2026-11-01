@@ -16,7 +16,9 @@
      - L3: VRF ↔ L3VNI の双方向一致、RD / RT の形式、L3 IF の (node, name) 重複と参照先のノード所属、
        gateway_redundancy (VIP のサブネット・group_id 重複)、anycast gateway の一致、
        トンネル (source のノード、自己トンネル、外側の AF、片側だけのトンネル)
-     - protocols: 1 ノードに複数の local_as、eBGP / iBGP の AS 矛盾
+     - control_plane (ADR-0010 D10): インスタンスの省略、端の機器とインスタンス・update_source の機器と VRF、
+       両端から導いた通り道の食い違い、トランスポートのアドレスファミリー、セッションの重複、RR は iBGP、
+       同一ノード・同一 VRF の AS、同一 VRF の BGP エントリ、default 以外の VRF の EVPN / VPN (warning)、BFD のタイマー
      - MTU: VTEP を終端するノードどうしの underlay リンクが 1550 以上か
      - 規約 (warning): 推奨プレフィックス (ADR-0002 D7)、SVI らしい名前で attaches_to なし、labels のキー
      - 旧形式 (warning): ADR-0011 D10・ADR-0013 D2・ADR-0014 D4
@@ -39,7 +41,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .derive import outside_svi_subnet, vlan_endpoints, vlan_svi_networks
+from .derive import bgp_session_views, outside_svi_subnet, vlan_endpoints, vlan_svi_networks
+from .schema.control_plane import BgpInsideEndpoint, BgpSession, OspfAdjacency
 from .schema.layer1 import AttachesToObj, LacpLag, MlagLag
 from .schema.layer2 import L2VxLAN, L3VxLAN
 from .schema.topology import MLNDLTopology
@@ -54,7 +57,7 @@ _ID_MAX_LEN = 63    # DNS ラベルの上限を継承 (ADR-0002 D1)
 
 # ID を持つエンティティのリストを探すセクション。リストの列挙はスキーマから行うので、
 # エンティティを追加しても文法チェックの対象から漏れない
-_ID_SECTIONS = ("layer1", "layer2", "layer3", "protocols")
+_ID_SECTIONS = ("layer1", "layer2", "layer3", "control_plane")
 
 # ADR-0002 D7 推奨プレフィックス（隣接関係は type ごとに異なる）
 _ADJ_PREFIX = {"bgp": "bgp-peer-", "ospf": "ospf-adj-", "isis": "isis-adj-"}
@@ -117,7 +120,6 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # ── ID レジストリを収集 ──────────────────────────────────────────────
     node_ids: set[str] = set()
     interface_ids: set[str] = set()
-    link_ids: set[str] = set()
     lag_ids: set[str] = set()
     vlan_ids: set[str] = set()
     l3vni_ids: set[str] = set()
@@ -134,7 +136,6 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         l1 = topology.layer1
         node_ids = {n.id for n in l1.nodes}
         interface_ids = {i.id for i in l1.interfaces}
-        link_ids = {lk.id for lk in l1.links}
         lag_ids = {lag.id for lag in l1.lag}
         iface_node = {i.id: i.node for i in l1.interfaces}
         lag_nodes = {
@@ -177,7 +178,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # attaches_to / VLAN のポートのキーが指す ID 空間 (ADR-0001 D8)
     spaces = {
         "node": node_ids, "interface": interface_ids, "lag": lag_ids,
-        "vlan": vlan_ids, "subinterface": subif_ids, "link": link_ids,
+        "vlan": vlan_ids, "subinterface": subif_ids,
     }
 
     # ── ID 空間の重複 (ADR-0002 D5) ─────────────────────────────────────
@@ -216,9 +217,9 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # ── VLAN の端点 (ADR-0013 D7) ─────────────────────────────────────────
     _check_vlan_endpoints(topology, errors)
 
-    # ── Protocols ────────────────────────────────────────────────────────
-    if topology.protocols:
-        _validate_protocols(topology.protocols, node_ids, errors)
+    # ── 制御プレーン (ADR-0010) ──────────────────────────────────────────
+    if topology.control_plane:
+        _validate_control_plane(topology, errors)
 
     # ── MTU 整合性 ───────────────────────────────────────────────────────
     _validate_mtu(topology, errors)
@@ -714,49 +715,139 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
                 "info",
             ))
 
-    # Routing Adjacencies
-    for i, adj in enumerate(l3.routing_adjacencies):
-        if adj.attaches_to is not None:
-            _check_attaches_to(adj.attaches_to, f"layer3.routing_adjacencies[{i}].attaches_to", spaces, errors)
 
 
 # ---------------------------------------------------------------------------
-# Protocols
+# 制御プレーン (ADR-0010 D10)
 # ---------------------------------------------------------------------------
 
-def _validate_protocols(protocols, node_ids, errors):
-    # 同一ノードが複数 BGP プロセスで異なる local_as を持つ矛盾を検出
-    # (1 台の機器は通常 1 つの BGP AS。VRF 分離/confederation は別途明示が必要)
-    node_local_as: dict[str, set[int]] = {}
-    for bgp in protocols.bgp:
-        for bn in bgp.nodes:
-            if bn.local_as is not None:
-                node_local_as.setdefault(bn.node, set()).add(bn.local_as)
-    for nid, as_set in node_local_as.items():
-        if len(as_set) > 1:
+# default 以外の VRF のセッションが運ぶのは珍しい AF (RFC 4364 / RFC 7432)
+_DEFAULT_VRF_AFS = ("l2vpn_evpn", "vpnv4", "vpnv6")
+
+
+def _validate_control_plane(topology: MLNDLTopology, errors: list[ValidationError]) -> None:
+    cp = topology.control_plane
+    l3ifs = {i.id: i for i in topology.layer3.interfaces} if topology.layer3 else {}
+    l1if_node = {i.id: i.node for i in topology.layer1.interfaces} if topology.layer1 else {}
+    instances = {"bgp": cp.bgp, "ospf": cp.ospf, "isis": cp.isis}
+    members = {(t, inst.id): {n.node for n in inst.nodes} for t, lst in instances.items() for inst in lst}
+
+    # インスタンス: 同一 VRF に BGP エントリは 1 つ、同一ノード・同一 VRF で AS は 1 つ (F4)
+    by_vrf: dict[str | None, list[int]] = {}
+    for i, inst in enumerate(cp.bgp):
+        by_vrf.setdefault(inst.vrf, []).append(i)
+        seen_as: dict[str, int] = {}
+        for j, n in enumerate(inst.nodes):
+            if n.node in seen_as and seen_as[n.node] != n.local_as:
+                errors.append(ValidationError(
+                    f"control_plane.bgp[{i}].nodes[{j}]",
+                    f"ノード '{n.node}' が同じインスタンスに異なる local_as ({seen_as[n.node]} と {n.local_as}) で書かれています"
+                    f"。1 台の BGP スピーカーは 1 つの VRF で 1 つの AS を持ちます (ADR-0010 D5)",
+                ))
+            seen_as.setdefault(n.node, n.local_as)
+    for vrf, idx in by_vrf.items():
+        for i in idx[1:]:
             errors.append(ValidationError(
-                f"protocols.bgp (node={nid})",
-                f"ノード '{nid}' が複数の異なる local_as {sorted(as_set)} を持っています"
-                f"（VRF 分離/confederation の意図なら設計を明示してください）",
+                f"control_plane.bgp[{i}]",
+                f"{vrf or 'default'} VRF の BGP インスタンスが 2 つ以上あります ('{cp.bgp[idx[0]].id}' と '{cp.bgp[i].id}')。"
+                f"BGP のエントリは VRF ごとに 1 つです。underlay / overlay でエントリを分けず、セッションの address_families で書き分けます (ADR-0010 D5)",
             ))
+    instance_vrfs = {inst.vrf for inst in cp.bgp if inst.vrf is not None}
 
-    # BGP
-    for i, bgp in enumerate(protocols.bgp):
-        for j, bn in enumerate(bgp.nodes):
-            for k, nb in enumerate(bn.neighbors):
-                # AS 番号整合性チェック
-                if nb.type == "ebgp" and bn.local_as is not None and nb.remote_as is not None:
-                    if bn.local_as == nb.remote_as:
-                        errors.append(ValidationError(
-                            f"protocols.bgp[{i}].nodes[{j}].neighbors[{k}]",
-                            f"eBGP ピアで同一 AS ({bn.local_as}) が設定されています",
-                        ))
-                if nb.type == "ibgp" and bn.local_as is not None and nb.remote_as is not None:
-                    if bn.local_as != nb.remote_as:
-                        errors.append(ValidationError(
-                            f"protocols.bgp[{i}].nodes[{j}].neighbors[{k}]",
-                            f"iBGP ピアで異なる AS ({bn.local_as} vs {nb.remote_as}) が設定されています",
-                        ))
+    # セッション: インスタンスの省略と、端の機器がインスタンスに参加しているか
+    for i, nb in enumerate(cp.routing_neighbors):
+        path = f"control_plane.routing_neighbors[{i}]"
+        entries = instances[nb.type]
+        if nb.instance is None and len(entries) != 1:
+            errors.append(ValidationError(
+                f"{path}.instance",
+                f"control_plane.{nb.type} のエントリが {len(entries)} つあるので、instance でどれに属するかを指定してください (ADR-0010 D3)",
+            ))
+            continue
+        inst_id = nb.instance or entries[0].id
+        for side, ep in (("from", nb.from_), ("to", nb.to)):
+            node = getattr(ep, "node", None)
+            if node is None:
+                continue
+            if (nb.type, inst_id) in members and node not in members[(nb.type, inst_id)]:
+                errors.append(ValidationError(
+                    f"{path}.{side}.node",
+                    f"ノード '{node}' がインスタンス '{inst_id}' の nodes にありません (ADR-0010 D5)",
+                ))
+            # update_source / interface の機器が端の機器と一致するか
+            if isinstance(nb, BgpSession):
+                ref, owner = ep.update_source, getattr(l3ifs.get(ep.update_source), "node", None)
+                field_name = "update_source"
+            elif isinstance(nb, OspfAdjacency):
+                ref, owner, field_name = ep.interface, getattr(l3ifs.get(ep.interface), "node", None), "interface"
+            else:
+                ref, owner, field_name = ep.interface, l1if_node.get(ep.interface), "interface"
+            if owner is not None and owner != node:
+                errors.append(ValidationError(
+                    f"{path}.{side}.{field_name}",
+                    f"'{ref}' はノード '{owner}' のインターフェースです。この端のノードは '{node}' です (ADR-0010 D3)",
+                ))
+
+    # BGP セッション: 導いた値 (derive.bgp_session_views) を検査する
+    bfd_nodes = {n for b in cp.bfd for n in b.nodes}
+    seen_pairs: dict[tuple, int] = {}
+    for v in bgp_session_views(topology):
+        path = f"control_plane.routing_neighbors[{v.index}]"
+        s = v.session
+        # update_source の VRF とインスタンスの VRF
+        for side, end in (("from", v.from_), ("to", v.to)):
+            iface = end.l3_interface
+            if iface is None or v.instance is None:
+                continue
+            if v.vrf is not None and iface.vrf != v.vrf or v.vrf is None and iface.vrf in instance_vrfs:
+                errors.append(ValidationError(
+                    f"{path}.{side}.update_source",
+                    f"'{iface.id}' は VRF '{iface.vrf or 'default'}' の L3 インターフェースですが、"
+                    f"インスタンス '{v.instance.id}' は {v.vrf or 'default'} VRF です (ADR-0010 D10)",
+                ))
+        if v.transport_mismatch:
+            errors.append(ValidationError(
+                path,
+                f"両端の update_source ('{v.from_.l3_interface.id}' と '{v.to.l3_interface.id}') が同じリンク / LAG / VLAN の上にありません"
+                f"。直結のインターフェースどうしで張るなら、同じリンクの両端を指してください (ADR-0010 D7)",
+            ))
+        afs_a, afs_b = v.from_.transport_afs, v.to.transport_afs
+        if afs_a and afs_b and not afs_a & afs_b:
+            errors.append(ValidationError(
+                path,
+                f"セッションを張るアドレスのアドレスファミリーが一致しません ({_af_names(afs_a)} と {_af_names(afs_b)})"
+                f"。トランスポートは同じアドレスファミリーで張ります (ADR-0010 D10)",
+            ))
+        key = (v.instance.id if v.instance else None,
+               frozenset(str(e.l3_interface.id if e.l3_interface else e.address) for e in (v.from_, v.to)))
+        if key in seen_pairs:
+            errors.append(ValidationError(
+                path,
+                f"routing_neighbors[{seen_pairs[key]}] と同じ両端 (同じ update_source の組) のセッションです (ADR-0010 D10)",
+            ))
+        seen_pairs.setdefault(key, v.index)
+        rr = any(isinstance(ep, BgpInsideEndpoint) and ep.route_reflector_client for ep in (s.from_, s.to))
+        if rr and v.bgp_type == "ebgp":
+            errors.append(ValidationError(
+                path,
+                f"route_reflector_client は iBGP のセッションにしか付けられません (両端の AS は {v.from_.local_as} と {v.to.local_as})。"
+                f"ルートリフレクションは iBGP の仕組みです (RFC 4456。ADR-0010 D10)",
+            ))
+        if v.vrf is not None:
+            odd = [af for af in s.address_families if af in _DEFAULT_VRF_AFS]
+            if odd:
+                errors.append(ValidationError(
+                    f"{path}.address_families",
+                    f"{v.vrf} のセッションが {', '.join(odd)} を運んでいます。これらの経路は default VRF のセッションで運ぶのが通常です (ADR-0010 D10)",
+                    "warning",
+                ))
+        if s.bfd:
+            missing = [e.node for e in (v.from_, v.to) if e.node is not None and e.node not in bfd_nodes]
+            if missing:
+                errors.append(ValidationError(
+                    f"{path}.bfd",
+                    f"bfd: true ですが、{', '.join(missing)} はどの control_plane.bfd の nodes にもありません (ADR-0010 D10)",
+                ))
 
 
 # ---------------------------------------------------------------------------
@@ -812,7 +903,7 @@ def _ja(label: str) -> str:
 
 _KIND_LABEL = {
     "node": "ノード", "interface": "L1 インターフェース", "lag": "LAG", "vlan": "VLAN",
-    "subinterface": "サブインターフェース", "link": "リンク",
+    "subinterface": "サブインターフェース",
 }
 
 
@@ -842,7 +933,7 @@ def _resolve_ref(kind, target, spaces, path, errors, *, legacy_kinds=()) -> str 
 
 
 def _check_attaches_to(attaches_to, path, spaces, errors):
-    """L1 と routing_adjacencies の attaches_to を検証する (書けるキーはスキーマで制限済み)"""
+    """L1 ノード・L1 IF の attaches_to を検証する (書けるキーはスキーマで制限済み)"""
     if isinstance(attaches_to, str):
         if attaches_to not in spaces["node"]:
             errors.append(ValidationError(
@@ -1073,10 +1164,10 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
                     f"attaches_to: {{vlan: <VLAN id>}} を指定してください (ADR-0011 D3)",
                     "warning",
                 ))
-        for i, adj in enumerate(topology.layer3.routing_adjacencies):
-            _warn_prefix(errors, f"layer3.routing_adjacencies[{i}].id", adj.id,
-                         _ADJ_PREFIX[adj.type], f"{adj.type.upper()} 隣接")
 
-    if topology.protocols:
-        for i, bfd in enumerate(topology.protocols.bfd):
-            _warn_prefix(errors, f"protocols.bfd[{i}].id", bfd.id, "bfd-", "BFD")
+    if topology.control_plane:
+        for i, nb in enumerate(topology.control_plane.routing_neighbors):
+            _warn_prefix(errors, f"control_plane.routing_neighbors[{i}].id", nb.id,
+                         _ADJ_PREFIX[nb.type], "BGP セッション" if nb.type == "bgp" else f"{nb.type.upper()} 隣接")
+        for i, bfd in enumerate(topology.control_plane.bfd):
+            _warn_prefix(errors, f"control_plane.bfd[{i}].id", bfd.id, "bfd-", "BFD")

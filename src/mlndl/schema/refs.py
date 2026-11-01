@@ -52,4 +52,8 @@ COLLECTION_LABELS = {
     "layer3.vrfs": "VRF",
     "layer3.interfaces": "L3 インターフェース",
     "layer3.tunnel_interfaces": "トンネル",
+    "control_plane.bgp": "BGP インスタンス",
+    "control_plane.ospf": "OSPF インスタンス",
+    "control_plane.isis": "IS-IS インスタンス",
+    "control_plane.routing_neighbors": "セッション",
 }

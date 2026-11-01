@@ -12,7 +12,7 @@ from pydantic import BaseModel
 import mlndl.schema.layer1 as layer1
 import mlndl.schema.layer2 as layer2
 import mlndl.schema.layer3 as layer3
-import mlndl.schema.protocols as protocols
+import mlndl.schema.control_plane as control_plane
 import mlndl.schema.topology as topology_mod
 from mlndl import IdIndex, Ref, parse, parse_file, validate
 from mlndl.index import SECTIONS
@@ -22,7 +22,7 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-SCHEMA_MODULES = (layer1, layer2, layer3, protocols, topology_mod)
+SCHEMA_MODULES = (layer1, layer2, layer3, control_plane, topology_mod)
 
 # 参照ではない文字列フィールド。新しい文字列フィールドを足したら、参照なら Ref を付け、
 # 参照でなければここに足す (どちらもしないと test_every_string_field_is_classified が落ちる)
@@ -30,14 +30,16 @@ NOT_REFERENCES = {
     "id", "name", "description", "role", "device_type", "rd", "link_speed", "link_role",
     "peer_link_interface", "system_mac", "anycast_mac", "import_", "export",
     "address_families", "network_types", "ndl_version",
+    "net", "area", "level",          # 制御プレーン (ADR-0010): IS-IS の NET、OSPF の area、IS-IS の level
 }
 
 # 参照先の種類をキーで選ぶ参照 (ADR-0001 D8 / ADR-0013 D1)。_resolve_ref が検査する
 KEYED_REFERENCES = {
-    ("AttachesToObj", name) for name in ("node", "interface", "lag", "vlan", "subinterface", "link")
+    ("AttachesToObj", name) for name in ("node", "interface", "lag", "vlan", "subinterface")
 } | {("PortRef", "interface"), ("PortRef", "lag")} | {
     # attaches_to は文字列 (ノード id の糖衣構文) か AttachesToObj。_check_attaches_to が検査する
-    (model, "attaches_to") for model in ("L1Node", "L1Interface", "RoutingAdjacency")
+    # (セッションは attaches_to を持たない。ADR-0010 D7)
+    (model, "attaches_to") for model in ("L1Node", "L1Interface")
 }
 
 
@@ -171,8 +173,10 @@ def test_list_reference_path_has_index():
 
 def test_alias_is_used_in_path():
     """from は Python の予約語なので from_ だが、パスは YAML どおり from"""
-    body = BASE + "  routing_adjacencies:\n    - {id: bgp-peer-a, type: bgp, from: {node: nope}, to: {node: r2}}\n"
-    assert [e.path for e in _errors(body)] == ["layer3.routing_adjacencies[0].from.node"]
+    body = BASE + ("control_plane:\n  bgp: [{id: bgp-default, nodes: [{node: r1, local_as: 65001}]}]\n"
+                   "  routing_neighbors:\n    - {id: bgp-peer-a, type: bgp, from: {node: nope, update_source: r1-lo},"
+                   " to: {address: 192.0.2.1, local_as: 65002}}\n")
+    assert [e.path for e in _errors(body)][0] == "control_plane.routing_neighbors[0].from.node"
 
 
 # ---------------------------------------------------------------------------

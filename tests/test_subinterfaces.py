@@ -74,7 +74,7 @@ class TestSchema:
         msg = _parse_error(_subifs("    - {id: subif-x, attaches_to: r1, vlan_id: 10}\n"))
         assert "{interface:" in msg
 
-    @pytest.mark.parametrize("key", ["node: r1", "link: link-x", "vlan: vlan-10", "subinterface: subif-y"])
+    @pytest.mark.parametrize("key", ["node: r1", "vlan: vlan-10", "subinterface: subif-y"])
     def test_only_interface_or_lag_key(self, key):
         """サブ IF の基盤は L1 IF か LAG だけ (ADR-0001 D8 / ADR-0012 D4)"""
         msg = _parse_error(_subifs(f"    - {{id: subif-x, attaches_to: {{{key}}}, vlan_id: 10}}\n"))
