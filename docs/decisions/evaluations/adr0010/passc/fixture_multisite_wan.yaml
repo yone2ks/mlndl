@@ -1,0 +1,146 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# Pass C 書き直し: tests/fixtures/valid_multisite_wan.yaml の制御プレーン部分
+#
+# 元ファイルの F4:
+#   - bgp-dc-underlay で dc-border1 = 65011、bgp-dc-evpn で dc-border1 = 65000
+#   - bgp-wan        で dc-border1 = 65011 (ここは一致)
+#
+# Pass C 方針: DC 内は Full eBGP (full_dc と同じ)。WAN は eBGP (元の構成を維持)。
+# cm-core1 / cm-core2 はトポロジー内のノードなので `{node, update_source}` で書く。
+#
+# 「管理外ピア」の扱い:
+#   元ファイルの WAN 先 (cm-core1 / cm-core2) は Campus サイトの機器で、L1 ノードとして
+#   トポロジーに書かれている → `{node, update_source}` で指す (ADR-0010 r3 の
+#   「C6b 系」= トポロジー内扱い)。
+#   もし Campus サイト全体を書かず「ISP の PE だけが先にある」場合は
+#   `{address: 203.0.113.2, local_as: 64500}` で書く (C6 系) が、本例では省略。
+#
+# 検証したいこと:
+#   - サイト間 WAN セッションも「同じ control_plane に平坦に並ぶ」こと
+#   - 元の `bgp-wan` インスタンスが default VRF の bgp-default に吸収され、
+#     インスタンスを 2 つ用意する必要が無いこと (= default VRF の AS は
+#     サイト単位ではなく機器単位)
+# ============================================================================
+
+control_plane:
+  bgp:
+    # DC 全体 + WAN + Campus Core を同じ default VRF インスタンスで扱う。
+    # 1 ノード 1 AS が構造的に保証される (D6)。
+    - id: bgp-default
+      nodes:
+        # DC 側
+        - { node: dc-spine1,  local_as: 65000 }
+        - { node: dc-spine2,  local_as: 65000 }
+        - { node: dc-leaf1,   local_as: 65001 }
+        - { node: dc-leaf2,   local_as: 65002 }
+        - { node: dc-border1, local_as: 65011 }
+        - { node: dc-border2, local_as: 65012 }
+        # Campus 側
+        - { node: cm-core1, local_as: 65100 }
+        - { node: cm-core2, local_as: 65100 }
+
+  routing_neighbors:
+    # ── DC underlay eBGP (Spine ↔ Leaf/Border、/31 single-hop ipv4_unicast)
+    - { id: bgp-peer-dc-spine1-leaf1,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine1, update_source: dc-spine1-swp1-l3 },
+        to:   { node: dc-leaf1,  update_source: dc-leaf1-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-dc-spine1-leaf2,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine1, update_source: dc-spine1-swp2-l3 },
+        to:   { node: dc-leaf2,  update_source: dc-leaf2-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-dc-spine1-border1, type: bgp, instance: bgp-default,
+        from: { node: dc-spine1,  update_source: dc-spine1-swp3-l3 },
+        to:   { node: dc-border1, update_source: dc-border1-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-dc-spine1-border2, type: bgp, instance: bgp-default,
+        from: { node: dc-spine1,  update_source: dc-spine1-swp4-l3 },
+        to:   { node: dc-border2, update_source: dc-border2-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-dc-spine2-leaf1,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine2, update_source: dc-spine2-swp1-l3 },
+        to:   { node: dc-leaf1,  update_source: dc-leaf1-swp52-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-dc-spine2-leaf2,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine2, update_source: dc-spine2-swp2-l3 },
+        to:   { node: dc-leaf2,  update_source: dc-leaf2-swp52-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-dc-spine2-border1, type: bgp, instance: bgp-default,
+        from: { node: dc-spine2,  update_source: dc-spine2-swp3-l3 },
+        to:   { node: dc-border1, update_source: dc-border1-swp52-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-dc-spine2-border2, type: bgp, instance: bgp-default,
+        from: { node: dc-spine2,  update_source: dc-spine2-swp4-l3 },
+        to:   { node: dc-border2, update_source: dc-border2-swp52-l3 },
+        address_families: [ipv4_unicast] }
+
+    # ── DC overlay EVPN (loopback 間 eBGP multihop、l2vpn_evpn)
+    - { id: bgp-peer-dc-spine1-leaf1-evpn,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine1, update_source: dc-spine1-lo, role: route_server },
+        to:   { node: dc-leaf1,  update_source: dc-leaf1-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-dc-spine1-leaf2-evpn,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine1, update_source: dc-spine1-lo, role: route_server },
+        to:   { node: dc-leaf2,  update_source: dc-leaf2-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-dc-spine1-border1-evpn, type: bgp, instance: bgp-default,
+        from: { node: dc-spine1,  update_source: dc-spine1-lo,  role: route_server },
+        to:   { node: dc-border1, update_source: dc-border1-lo, role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-dc-spine1-border2-evpn, type: bgp, instance: bgp-default,
+        from: { node: dc-spine1,  update_source: dc-spine1-lo,  role: route_server },
+        to:   { node: dc-border2, update_source: dc-border2-lo, role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-dc-spine2-leaf1-evpn,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine2, update_source: dc-spine2-lo, role: route_server },
+        to:   { node: dc-leaf1,  update_source: dc-leaf1-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-dc-spine2-leaf2-evpn,   type: bgp, instance: bgp-default,
+        from: { node: dc-spine2, update_source: dc-spine2-lo, role: route_server },
+        to:   { node: dc-leaf2,  update_source: dc-leaf2-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-dc-spine2-border1-evpn, type: bgp, instance: bgp-default,
+        from: { node: dc-spine2,  update_source: dc-spine2-lo,  role: route_server },
+        to:   { node: dc-border1, update_source: dc-border1-lo, role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-dc-spine2-border2-evpn, type: bgp, instance: bgp-default,
+        from: { node: dc-spine2,  update_source: dc-spine2-lo,  role: route_server },
+        to:   { node: dc-border2, update_source: dc-border2-lo, role: route_server_client },
+        address_families: [l2vpn_evpn] }
+
+    # ── WAN eBGP (DC Border ↔ Campus Core、物理ケーブル上の /31 single-hop)
+    # cm-core1 / cm-core2 はトポロジー内なので `{node, update_source}` で書く。
+    # 両端が別組織の管理下だが MLNDL の記述モデルは「書けるならトポロジー内」
+    # を優先する (C6b 系)。update_source は WAN リンク上の /31 L3 IF。
+    - { id: bgp-peer-wan-border1-core1, type: bgp, instance: bgp-default,
+        from: { node: dc-border1, update_source: dc-border1-swp1-l3 },
+        to:   { node: cm-core1,   update_source: cm-core1-te1-1-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-wan-border2-core2, type: bgp, instance: bgp-default,
+        from: { node: dc-border2, update_source: dc-border2-swp1-l3 },
+        to:   { node: cm-core2,   update_source: cm-core2-te1-1-l3 },
+        address_families: [ipv4_unicast] }
+
+  bfd:
+    - id: bfd-global
+      min_tx: 300
+      min_rx: 300
+      multiplier: 3
+      nodes: [dc-spine1, dc-spine2, dc-leaf1, dc-leaf2, dc-border1, dc-border2, cm-core1, cm-core2]
+
+# ----- 補足: トポロジー外ピアを書きたい場合 (ISP 直結のときの別案) -----
+# 仮に Campus 側がトポロジーに無く「ISP の AS 65100 とだけ eBGP」なら、
+# 次のように書く。update_source は書けない (D6)。
+#
+#   - { id: bgp-peer-wan-border1-isp, type: bgp, instance: bgp-default,
+#       from: { node: dc-border1, update_source: dc-border1-swp1-l3 },
+#       to:   { address: 203.0.113.2, local_as: 65100 },
+#       address_families: [ipv4_unicast] }
+#
+# このときの通り道の導出:
+#   from.update_source → attaches_to {interface: dc-border1-swp1} → L1 IF
+#   → 対向の L1 IF が無い (ケーブルの先がトポロジー外) → path = 不明
+# ndl-viz はこのセッションを辺にせず、dc-border1 のノードカードに表示する
+# (ADR-0010 r3 §3-H 「トポロジー外の相手はノードのデータに」)。

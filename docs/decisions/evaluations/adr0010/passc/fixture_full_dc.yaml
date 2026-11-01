@@ -1,0 +1,123 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# Pass C 書き直し: tests/fixtures/valid_full_dc.yaml の制御プレーン部分
+#
+# F4 (AS の矛盾) の解消方針: **Full eBGP パターン** (Dinesh Dutt / Cumulus Linux
+# の推奨。RFC 7432 §15、Arista EOS / NX-OS でも紹介)。
+#   - underlay (/31 single-hop)       → ipv4_unicast
+#   - overlay  (loopback 間 multihop)  → l2vpn_evpn
+# いずれも eBGP で張る。spine は AS 65000、leaf は 65001 / 65002。
+# 1 ノード 1 VRF = 1 AS が構造的に保証される (多重宣言できない)。
+#
+# r3 → Pass C の差分 (本ファイルで反映している決定):
+#   - routing_neighbors には `attaches_to` を書かない (通り道は update_source
+#     の L3 IF からたどる)
+#   - `router_id` は書かない (ADR-0016 に委ねる)
+#   - BGP エントリは VRF ごとに 1 つ。`role: underlay/overlay` は書かない
+#     (AF から導く)
+#   - トップレベル `protocols:` は書かない (`control_plane:` に移動)
+#   - F4 元ネタの F5 (重複セッション) も自然に消える: spine1→leaf1 は 2 本
+#     (ipv4 と evpn) で、ID の末尾で区別する (D7)
+#
+# 通り道の導出 (§3-B の手順):
+#   - underlay セッション: update_source = ノードの直結 /31 L3 IF
+#     → attaches_to {interface: ...} → L1 IF → 同じ L1 リンクに乗る対向の L1 IF
+#     → 対向側の update_source → 同じ L1 リンクに戻る → path = link-spine1-leaf1
+#   - overlay (loopback 間): update_source = loopback (attaches_to なし)
+#     → 対応する物理リンクが決まらない → path = multihop (エクスポーターは
+#     attaches_to を出さない。ndl-viz では overlay 辺を「仮想」線として描く)
+#
+# エクスポーターの辺に載る値 (全部参照だけで決まる):
+#   両端 IP = update_source → ip
+#   両端 AS = bgp-default.nodes[].local_as
+#   eBGP/iBGP = AS 比較
+#   AF   = session.address_families
+#   VRF  = instance.vrf (ここでは default)
+#   path = L3 IF の attaches_to からたどった L1 (overlay は null)
+# ============================================================================
+
+# ----- layer1 / layer3 の該当エンティティ (参照整合性のために抜粋) -----
+# 元ファイルの L1 ノード・L1 IF・L1 リンク・L3 ループバック・/31 L3 IF の id を
+# そのまま使う前提。ここでは制御プレーンだけを示す。
+
+control_plane:
+  bgp:
+    # default VRF の 1 インスタンス。
+    # D6: 1 ノード 1 VRF = 1 local_as。構造的に F4 を排除。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: spine2, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+        - { node: leaf2,  local_as: 65002 }
+        - { node: leaf3,  local_as: 65003 }
+
+  routing_neighbors:
+    # ── Underlay eBGP (/31 single-hop、ipv4_unicast)
+    - { id: bgp-peer-spine1-leaf1, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-swp1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine1-leaf2, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-swp2-l3 },
+        to:   { node: leaf2,  update_source: leaf2-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine1-leaf3, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-swp3-l3 },
+        to:   { node: leaf3,  update_source: leaf3-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf1, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-swp1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-swp52-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf2, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-swp2-l3 },
+        to:   { node: leaf2,  update_source: leaf2-swp52-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf3, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-swp3-l3 },
+        to:   { node: leaf3,  update_source: leaf3-swp52-l3 },
+        address_families: [ipv4_unicast] }
+
+    # ── Overlay EVPN (loopback 間 eBGP multihop、l2vpn_evpn)。
+    # D7: 同じノード対の 2 本目は意味の分かる語を末尾に (`-evpn`)。
+    # 両端が loopback なので update_source → attaches_to が無く、通り道は決まらない
+    # (= multihop)。これは Pass C の記述モデルでは「attaches_to を書かない」で表す。
+    - { id: bgp-peer-spine1-leaf1-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo },
+        to:   { node: leaf1,  update_source: leaf1-lo },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine1-leaf2-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo },
+        to:   { node: leaf2,  update_source: leaf2-lo },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf1-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-lo },
+        to:   { node: leaf1,  update_source: leaf1-lo },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf2-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-lo },
+        to:   { node: leaf2,  update_source: leaf2-lo },
+        address_families: [l2vpn_evpn] }
+
+  # BFD はセッションに付随する機能だが、構造的には別エンティティ。
+  # 旧 protocols.bfd と同じ形で残す (本 ADR のスコープ外)。
+  bfd:
+    - id: bfd-global
+      min_tx: 300
+      min_rx: 300
+      multiplier: 3
+      nodes: [spine1, spine2, leaf1, leaf2]
+
+# ----- 元ファイルで必要だった L3 IF の追補 (参照整合性のため) -----
+# 元の valid_full_dc.yaml には /31 側の leaf 側 L3 IF だけがあり、
+# spine 側の /31 L3 IF が無かった (F2)。Pass C で underlay セッションの
+# `update_source` に spine 側の L3 IF を指すためには、以下の 6 本を
+# layer3.interfaces に追加する必要がある:
+#   - spine1-swp1-l3 (ip: 10.1.0.0/31, attaches_to: {interface: spine1-swp1})
+#   - spine1-swp2-l3 (ip: 10.1.0.2/31, ...)
+#   - spine1-swp3-l3 (ip: 10.1.0.?/31, ...)
+#   - spine2-swp{1,2,3}-l3 (ip: 10.1.0.{4,6,...}/31)
+# これは Pass C に書き直す副作用で、元ファイルの F2 (spine 側 /31 の欠落) が
+# 顕在化した例である。

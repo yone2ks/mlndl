@@ -1,0 +1,186 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# Pass C 検査 (§3-F) で捕まえるべき誤りの実例集。
+# それぞれの誤りを 1 箇所に閉じ込めた最小の routing_neighbors エントリで
+# 示す。各エントリに
+#   # EXPECT: <severity> — <検査名>
+# の形で期待する判定を書く。
+#
+# 本ファイルは Pass C のバリデータ設計 (§3-F) の網羅性を確かめるためのものであり、
+# `tests/fixtures/` に置くことは想定していない。
+# ============================================================================
+
+# ----- 参照先のための最小 L1 / L3 -----
+# すべての誤りで共用する「正しい」側のエンティティ群。
+layer1:
+  nodes:
+    - { id: spine1, name: spine1, implementation: vm, role: spine, device_type: cisco_nxosv9300 }
+    - { id: spine2, name: spine2, implementation: vm, role: spine, device_type: cisco_nxosv9300 }
+    - { id: leaf1,  name: leaf1,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300 }
+    - { id: leaf2,  name: leaf2,  implementation: vm, role: leaf,  device_type: cisco_nxosv9300 }
+  interfaces:
+    - { id: spine1-e1-1, node: spine1, name: Ethernet1/1 }
+    - { id: spine2-e1-1, node: spine2, name: Ethernet1/1 }
+    - { id: leaf1-e1-1,  node: leaf1,  name: Ethernet1/1 }
+    - { id: leaf1-e1-2,  node: leaf1,  name: Ethernet1/2 }
+    - { id: leaf2-e1-1,  node: leaf2,  name: Ethernet1/1 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-e1-1, leaf1-e1-1], mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-e1-1, leaf1-e1-2], mtu: 9216, link_role: underlay }
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+    - { id: vrf-tenant-a }
+  interfaces:
+    - { id: spine1-lo0,     node: spine1, name: loopback0,   ip: 10.1.0.1/32,  vrf: vrf-default }
+    - { id: spine2-lo0,     node: spine2, name: loopback0,   ip: 10.1.0.2/32,  vrf: vrf-default }
+    - { id: leaf1-lo0,      node: leaf1,  name: loopback0,   ip: 10.1.0.11/32, vrf: vrf-default }
+    - { id: leaf2-lo0,      node: leaf2,  name: loopback0,   ip: 10.1.0.12/32, vrf: vrf-default }
+    - { id: spine1-e1-1-l3, node: spine1, name: Ethernet1/1, ip: 10.0.0.0/31,  vrf: vrf-default, attaches_to: {interface: spine1-e1-1} }
+    - { id: spine2-e1-1-l3, node: spine2, name: Ethernet1/1, ip: 10.0.0.4/31,  vrf: vrf-default, attaches_to: {interface: spine2-e1-1} }
+    - { id: leaf1-e1-1-l3,  node: leaf1,  name: Ethernet1/1, ip: 10.0.0.1/31,  vrf: vrf-default, attaches_to: {interface: leaf1-e1-1} }
+    - { id: leaf1-e1-2-l3,  node: leaf1,  name: Ethernet1/2, ip: 10.0.0.5/31,  vrf: vrf-default, attaches_to: {interface: leaf1-e1-2} }
+    - { id: leaf2-e1-1-l3,  node: leaf2,  name: Ethernet1/1, ip: 10.0.0.3/31,  vrf: vrf-default, attaches_to: {interface: leaf2-e1-1} }
+    # vrf-tenant-a に属する L3 IF (M3 用)
+    - { id: leaf1-vlan100,  node: leaf1,  name: Vlan100,     ip: 192.168.100.1/24, vrf: vrf-tenant-a }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: spine2, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+        - { node: leaf2,  local_as: 65001 }   # わざと同じ (M4 の iBGP で使う)
+    - id: bgp-tenant-a
+      vrf: vrf-tenant-a
+      nodes:
+        - { node: leaf1, local_as: 65001 }
+        - { node: leaf2, local_as: 65001 }
+
+  routing_neighbors:
+    # ----------------------------------------------------------------------
+    # M1: update_source の L3 IF が、endpoint の node とは別のノードに属する
+    # EXPECT: error — update_source の機器と端の機器の一致 (§3-F)
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m1-wrong-node, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: leaf1-e1-1-l3 },   # ← spine1 なのに leaf1 の IF
+        to:   { node: leaf1,  update_source: leaf1-e1-1-l3 },
+        address_families: [ipv4_unicast] }
+
+    # ----------------------------------------------------------------------
+    # M2: update_source の VRF がインスタンスの VRF と食い違う
+    # インスタンス bgp-tenant-a (vrf-tenant-a) に対し spine1-lo0 は vrf-default
+    # EXPECT: error — update_source の VRF とインスタンスの VRF の一致 (§3-F)
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m2-vrf-mismatch, type: bgp, instance: bgp-tenant-a,
+        from: { node: leaf1, update_source: leaf1-lo0 },        # ← vrf-default の IF
+        to:   { node: leaf2, update_source: leaf1-vlan100 },    # これは vrf-tenant-a (ついでに後述 M7 と重複する node 不一致も含む)
+        address_families: [ipv4_unicast] }
+
+    # ----------------------------------------------------------------------
+    # M3: default 以外の VRF で l2vpn_evpn を運ぶ
+    # EVPN は fabric-wide (default VRF の transport) で運ぶのが通常。
+    # EXPECT: warning — default 以外の VRF に l2vpn_evpn / vpnv4 / vpnv6 (§3-F)
+    #                   `--strict` モードで error に昇格
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m3-evpn-in-tenant, type: bgp, instance: bgp-tenant-a,
+        from: { node: leaf1, update_source: leaf1-vlan100 },
+        to:   { node: leaf2, update_source: leaf1-vlan100 },    # (M7 の node 不一致を兼ねる)
+        address_families: [l2vpn_evpn] }
+
+    # ----------------------------------------------------------------------
+    # M4: route_reflector_client の endpoint が eBGP セッション
+    # bgp-default で spine1=65000、leaf1=65001 なので eBGP。にもかかわらず
+    # leaf1 側に route_reflector_client を書いている。
+    # EXPECT: error — RR クライアントは iBGP (§3-F)
+    # 補足: route_server_client を書けば OK (eBGP でも使える)。
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m4-rr-client-on-ebgp, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo0, role: route_reflector },
+        to:   { node: leaf1,  update_source: leaf1-lo0,  role: route_reflector_client },
+        address_families: [l2vpn_evpn] }
+
+    # ----------------------------------------------------------------------
+    # M5: 同じ L3 IF 対で 2 本のセッション (重複)。
+    # bgp-peer-m5-first と bgp-peer-m5-second が同じ (spine1-e1-1-l3, leaf1-e1-1-l3)
+    # ペアで、同じ AF を運ぶ。
+    # EXPECT: error — セッションの重複を L3 IF の id の組で判定 (§3-F)
+    # 補足: AF が異なれば別セッションとして正当 (同じ IF 対で 2 セッションは普通)。
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m5-first, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-e1-1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-e1-1-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-m5-second, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-e1-1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-e1-1-l3 },
+        address_families: [ipv4_unicast] }
+
+    # ----------------------------------------------------------------------
+    # M6: 両端 update_source から導いた通り道が食い違う。
+    # spine1-e1-1-l3 (link-spine1-leaf1 側) と leaf2-e1-1-l3
+    # (link-spine1-leaf2 側 — ただしリンクが未定義なので leaf2-e1-1 は孤立)。
+    # どちらを辿っても共通の L1 リンクが見つからず single-hop が成立しない。
+    # EXPECT: error — 両端から導いた通り道の食い違い (§3-F)
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m6-path-mismatch, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-e1-1-l3 },   # → link-spine1-leaf1
+        to:   { node: leaf2,  update_source: leaf2-e1-1-l3 },    # 孤立 (リンク未定義)
+        address_families: [ipv4_unicast] }
+
+    # ----------------------------------------------------------------------
+    # M7: endpoint の node と update_source の node が食い違う (再掲)。
+    # M1 と似ているが、`to` 側で起こす。
+    # EXPECT: error — update_source の機器と端の機器の一致 (§3-F)
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m7-to-node-mismatch, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-e1-1-l3 },
+        to:   { node: leaf2,  update_source: leaf1-e1-1-l3 },   # ← leaf2 なのに leaf1 の IF
+        address_families: [ipv4_unicast] }
+
+    # ----------------------------------------------------------------------
+    # M8: トポロジー外ピアの transport と反対側のアドレスファミリーの不一致。
+    # 外側 to は IPv4 address、こちら側 from.update_source は IPv6 のみを持つ IF
+    # (ここでは spine2-e1-1-l3 を強引に ipv6 だけに読み替えた仮想ケース)。
+    # 本ファイルの L3 IF は全部 IPv4 のみで作ってあるため、
+    # ここは *構文上の例* として address の形で書く。
+    # EXPECT: error — トポロジー外の端と反対側のトランスポートのアドレスファミリーの一致 (§3-F)
+    # ----------------------------------------------------------------------
+    - { id: bgp-peer-m8-af-mismatch-external, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo0 },      # IPv4 /32
+        to:   { address: "2001:db8::1", local_as: 64500 },      # ← IPv6 host address
+        address_families: [ipv4_unicast] }
+
+    # 追加 M9 (型レベル): endpoint が {node, update_source, address} を同時に持つ
+    # EXPECT: error — endpoint は in-topo 形か out-of-topo 形のどちらかちょうど一方
+    #                (型レベル。pydantic model_validator)
+    # 下の例では `to` に node と address の両方が書かれている。
+    - { id: bgp-peer-m9-endpoint-form, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-e1-1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-e1-1-l3, address: 10.0.0.99 },
+        address_families: [ipv4_unicast] }
+
+# ============================================================================
+# 検査の網羅性に関するメモ
+#
+# 捕まえられる (§3-F の対応表):
+#   - M1 / M7  →  update_source の機器と端の機器の一致
+#   - M2       →  update_source の VRF とインスタンスの VRF の一致
+#   - M3       →  default 以外の VRF に l2vpn_evpn (warning / --strict error)
+#   - M4       →  RR クライアントは iBGP
+#   - M5       →  セッションの重複を L3 IF の id の組で判定
+#   - M6       →  両端から導いた通り道の食い違い
+#   - M8       →  トポロジー外の端と反対側のトランスポートの AF の一致
+#   - M9       →  endpoint 型の排他性 (pydantic 側)
+#
+# 現行 §3-F では**捕まえにくい**例 (feedback 候補):
+#   - route_server_client を書いた側が iBGP だった場合は検査しない (RS は eBGP でも
+#     iBGP でも許されるため)。しかし「iBGP で route_server 相当の retain RT all が
+#     要るのは RR の属性と重複する」ので、情報的に warn してもよいかもしれない。
+#   - update_source が指す L3 IF が完全に孤立 (attaches_to も無く、loopback でもない)
+#     な場合、M6 的な通り道の矛盾ではなく「導けないだけ」なので、エラーにはならない
+#     (= multihop と区別できない)。これは意図的な仕様 (§3-B)。
+# ============================================================================

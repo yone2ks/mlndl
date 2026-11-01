@@ -1,0 +1,84 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# Pass C 書き直し: examples/eveng-evpn-lab.yaml の制御プレーン部分
+#
+# 元ファイルは NX-OSv の実機設定由来で、
+#   - underlay は 2 spine ↔ 2 leaf の P2P eBGP (ipv4_unicast)
+#   - overlay は 2 spine ↔ 2 leaf の loopback 間 eBGP (l2vpn_evpn、ebgp-multihop 3)
+#   - spine は "route server" (next-hop unchanged / retain route-target all)
+# という典型の Full-eBGP EVPN 設計。
+#
+# 元ファイルには F4 (AS の矛盾) は無い (もともと spine=65000、leaf=65001/65002 で
+# underlay と overlay で同じ AS を使っている)。したがって Pass C の書き直しは
+# 主に以下の 2 点:
+#   1. protocols.bgp と layer3.routing_adjacencies を control_plane に統合
+#   2. route_server / route_server_client を endpoint の `role:` で表現
+#
+# route_server の扱い (§3-I で未決だったもの):
+#   - RR 系と同じく「endpoint の属性」として `role:` に書く
+#   - 検査は「route_reflector_client なら iBGP でなければ error」のみ (RS は検査しない)
+#   - route_server と route_server_client はいずれも eBGP 推奨。情報的注釈にとどめる
+#
+# 検証したいこと:
+#   - 元の 2 本立て (protocols.bgp + routing_adjacencies) で 92 行の制御プレーン部分が
+#     Pass C でどれくらいになるか (概ね半減が目安)
+#   - 元の `role: route_server` が意味を失わずに移行できるか
+# ============================================================================
+
+control_plane:
+  bgp:
+    # 元 protocols.bgp に 2 つあった underlay / overlay は、同じ default VRF の
+    # 単一インスタンスに統合。AF は routing_neighbors 側に分散する。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: spine2, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+        - { node: leaf2,  local_as: 65002 }
+
+  routing_neighbors:
+    # ── Underlay eBGP (/31 single-hop、ipv4_unicast)
+    # update_source は NX-OSv の /31 L3 IF (元ファイルの spine1-e1-1-l3 等)
+    # 通り道: update_source → attaches_to {interface: spine1-e1-1} → L1 IF
+    # → link-spine1-leaf1 → leaf1-e1-1 → leaf1-e1-1-l3 (= 両端一致、OK)
+    - { id: bgp-peer-spine1-leaf1, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-e1-1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-e1-1-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine1-leaf2, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-e1-2-l3 },
+        to:   { node: leaf2,  update_source: leaf2-e1-1-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf1, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-e1-1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-e1-2-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf2, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-e1-2-l3 },
+        to:   { node: leaf2,  update_source: leaf2-e1-2-l3 },
+        address_families: [ipv4_unicast] }
+
+    # ── Overlay EVPN (loopback 間 eBGP multihop、l2vpn_evpn)
+    # 元 role: route_server は endpoint 側の role: に移す
+    - { id: bgp-peer-spine1-leaf1-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo0, role: route_server },
+        to:   { node: leaf1,  update_source: leaf1-lo0,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine1-leaf2-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo0, role: route_server },
+        to:   { node: leaf2,  update_source: leaf2-lo0,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf1-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-lo0, role: route_server },
+        to:   { node: leaf1,  update_source: leaf1-lo0,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf2-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-lo0, role: route_server },
+        to:   { node: leaf2,  update_source: leaf2-lo0,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+
+# ----- 行数の目安 -----
+# 元: layer3.routing_adjacencies (約 50 行) + protocols.bgp (約 50 行) = 約 100 行
+# Pass C: control_plane (本ファイル中の bgp + routing_neighbors) ≒ 約 45 行
+# → 半減 (-55%)。重複表現 (同じ組を 2 箇所に書く) が消え、F4 を書く余地が無くなる。

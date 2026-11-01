@@ -1,0 +1,107 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# Pass C 書き直し: tests/fixtures/valid_multi_vlan.yaml の制御プレーン部分
+#
+# F4 の内訳: 元ファイルでは
+#   - bgp-underlay で leaf1 = 65001, leaf2 = 65002, leaf3 = 65003
+#   - bgp-evpn     で leaf1 = 65000, leaf2 = 65000, leaf3 = 65000 (iBGP RR 構成)
+# 同じ default VRF の中で leaf1 が 65001 と 65000 の両方を持ってしまう。
+#
+# Pass C 方針: full_dc と同じ **Full eBGP** に揃える (D6 で 1 ノード 1 VRF 1 AS)。
+#   - spine1/spine2 = 65000
+#   - leaf1 / leaf2 / leaf3 = 65001 / 65002 / 65003
+#   - 元の RR 構成 (spine が RR、leaf が client) は失われる。
+#   - 代わりに spine 側は route_server (next-hop unchanged + retain RT all) として
+#     働く。role は endpoint 側に書く (下記)。
+#
+# 検証したいこと:
+#   - RR / RS の役割を endpoint の `role:` で書けるか
+#   - full eBGP に揃えると underlay / overlay で同じ AS 設計を使い回せること
+#   - 通り道が underlay は update_source → /31 L3 IF → L1 IF → L1 リンクでたどれ、
+#     overlay は update_source = loopback で attaches_to が無く multihop になること
+# ============================================================================
+
+control_plane:
+  bgp:
+    # 1 VRF = 1 インスタンス。
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: spine2, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+        - { node: leaf2,  local_as: 65002 }
+        - { node: leaf3,  local_as: 65003 }
+
+  routing_neighbors:
+    # ── Underlay (/31 single-hop、ipv4_unicast)。update_source は /31 L3 IF
+    # 元の valid_multi_vlan.yaml には /31 L3 IF が無く loopback で張っていた
+    # (= 直結の L3 IF が無いまま loopback-to-loopback で single-hop は成立しない)。
+    # Pass C ではこれを強く意識するため update_source に /31 L3 IF を指す。
+    # (下記「追補」参照)
+    - { id: bgp-peer-spine1-leaf1, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-swp1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine1-leaf2, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-swp2-l3 },
+        to:   { node: leaf2,  update_source: leaf2-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine1-leaf3, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-swp3-l3 },
+        to:   { node: leaf3,  update_source: leaf3-swp51-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf1, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-swp1-l3 },
+        to:   { node: leaf1,  update_source: leaf1-swp52-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf2, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-swp2-l3 },
+        to:   { node: leaf2,  update_source: leaf2-swp52-l3 },
+        address_families: [ipv4_unicast] }
+    - { id: bgp-peer-spine2-leaf3, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-swp3-l3 },
+        to:   { node: leaf3,  update_source: leaf3-swp52-l3 },
+        address_families: [ipv4_unicast] }
+
+    # ── Overlay EVPN (loopback 間 eBGP multihop)
+    # spine 側に `role: route_server`、leaf 側に `role: route_server_client` を書く
+    # (情報的注釈。next-hop unchanged + retain route-target all を期待する側の表明)。
+    # §3-F: role は RR / RS 系の役割を endpoint に表明するためのフィールドで、
+    # 検査は「route_reflector_client は iBGP でなければ error」の 1 件だけ。
+    # route_server_client は eBGP でも OK (推奨は eBGP)。
+    - { id: bgp-peer-spine1-leaf1-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo, role: route_server },
+        to:   { node: leaf1,  update_source: leaf1-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine1-leaf2-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo, role: route_server },
+        to:   { node: leaf2,  update_source: leaf2-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine1-leaf3-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine1, update_source: spine1-lo, role: route_server },
+        to:   { node: leaf3,  update_source: leaf3-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf1-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-lo, role: route_server },
+        to:   { node: leaf1,  update_source: leaf1-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf2-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-lo, role: route_server },
+        to:   { node: leaf2,  update_source: leaf2-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf3-evpn, type: bgp, instance: bgp-default,
+        from: { node: spine2, update_source: spine2-lo, role: route_server },
+        to:   { node: leaf3,  update_source: leaf3-lo,  role: route_server_client },
+        address_families: [l2vpn_evpn] }
+
+# ----- L3 IF 追補 (参照整合性) -----
+# 元ファイルは /31 L3 IF を持たず loopback 対 loopback で underlay を張っていた。
+# Pass C で正しく「通り道を導く」には、物理リンク上に /31 L3 IF が無いと
+# 導出に失敗する。元ファイルに次の 12 本の追加が必要:
+#   spine1-swp{1,2,3}-l3 (10.1.0.0/31, 10.1.0.2/31, 10.1.0.4/31)
+#   spine2-swp{1,2,3}-l3 (10.1.0.6/31, 10.1.0.8/31, 10.1.0.10/31)
+#   leaf1-swp5{1,2}-l3  (10.1.0.1/31, 10.1.0.7/31)
+#   leaf2-swp5{1,2}-l3  (10.1.0.3/31, 10.1.0.9/31)
+#   leaf3-swp5{1,2}-l3  (10.1.0.5/31, 10.1.0.11/31)
+# これは元ファイルの潜在的な F2 (/31 L3 IF の欠落) が Pass C で顕在化した例。

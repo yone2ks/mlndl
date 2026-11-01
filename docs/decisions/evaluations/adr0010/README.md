@@ -1,6 +1,6 @@
 # ADR-0010 実証 YAML
 
-[ADR-0010 (Draft)](../../drafts/0010-control-plane-separation.md) の検討で作成した試し書き。
+[ADR-0010](../../0010-control-plane-separation.md) (Accepted、Pass A は [drafts/0010](../../drafts/0010-control-plane-separation.md)) の検討で作成した試し書き。
 **いずれも `tests/fixtures/` の対象外**であり、pytest からは読まれない。
 
 ## `layering/` — 構造案の比較 (2026-09-18)
@@ -41,3 +41,9 @@ r3 で `process` → `instance`、トポロジー外の端点 (`address` + `loca
 r4 でセッションの `attaches_to` を廃止した (通り道は `update_source` の L3 IF から導く) ため、`attaches_to` を書いたケース (C1・C5 等) はその部分だけ r4 に一致しない。
 `R_extended_control_plane.yaml` は `examples/eveng-evpn-lab-extended.yaml` の制御プレーン部分の書き直し (159 行 → 約 55 行)。
 ケースの一覧は [`r3/README.md`](r3/README.md)。
+
+## `passc/` — Pass C の試し書き (2026-11-01)
+
+Pass C の構文で、fixture 3 本 (`valid_full_dc` / `valid_multi_vlan` / `valid_multisite_wan`) と `examples/eveng-evpn-lab.yaml` の制御プレーン部分を移行し、
+検査で見つかるべき誤りを混ぜた例 (`mistakes.yaml`) を書いた。確定版 (ADR-0010) と違う点: route server を端点の `role` で書いているが、確定版は振る舞いの設定として範囲外にした。
+ID の接尾辞は `-evpn` で書いているが、確定版の推奨は用途の語 (`-overlay` 等)。ケースの一覧は [`passc/README.md`](passc/README.md)。
