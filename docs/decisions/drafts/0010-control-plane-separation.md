@@ -1,6 +1,6 @@
 # ADR-0010: control plane と data plane の分離 — `control_plane` と `routing_neighbors`
 
-- **Status**: Draft — r4。D8 はユーザー決定済み (2026-11-01)。r3 の Pass B を反映済み。**Pass C 待ち**
+- **Status**: Superseded by [0010](../0010-control-plane-separation.md) (ラウンド3 Pass C, 2026-11-01)。以下は Pass A (r1〜r4) の記録として残す。 元の Status: Draft — r4。D8 はユーザー決定済み (2026-11-01)。r3 の Pass B を反映済み
 - **Date**: 2026-09-19 (r1・r2) / 2026-11-01 (r3・r4)
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: B 済み r4 (r3 = D8 の決定と、保留中に Accepted になった ADR との整合を反映。r4 = r3 の Pass B を反映。差分は末尾「r3 からの変更」「r2 からの変更」)

@@ -7,6 +7,7 @@
 - **Supersedes**: drafts/0001-attaches-to.md
 - **Amended by**: ラウンド4 Pass C (2026-10-15) — D8 を追加。参照先の種類をキーで示し、`{interface:}` を L1 IF 専用に戻した
   ([round4-evaluation](evaluations/round4-evaluation.md) 論点 A、ユーザー判断)
+  / [ADR-0010](0010-control-plane-separation.md) (2026-11-01) — `{link:}` キーを削除 (D8 の改訂)
 
 ## Context
 
@@ -51,6 +52,7 @@ attaches_to:
   interface: leaf1-swp51
 
 # リンク参照 (例: BGP セッションが物理リンク上を流れる)
+# → ADR-0010 D7 (2026-11-01) で削除。セッションの通り道は update_source の L3 IF から導く (D8 の改訂を参照)
 attaches_to:
   link: link-spine1-leaf1
 ```
@@ -157,13 +159,13 @@ D2 のキーに `lag` / `vlan` / `subinterface` を加え、**`interface` は L1
 | `lag` | `layer1.lag` |
 | `vlan` | `layer2.vlans` |
 | `subinterface` | `layer2.subinterfaces` |
-| `link` | `layer1.links` |
+| ~~`link`~~ | ~~`layer1.links`~~ — ADR-0010 で削除 (下記) |
 
 どのキーを書けるかはエンティティごとに決め、**スキーマ (型) で制限する**。書けないキーはパース段階で error になる。
 
 | `attaches_to` を持つエンティティ | 書けるキー |
 |---|---|
-| `layer1.nodes` / `layer1.interfaces` / `layer3.routing_adjacencies` | 文字列 (ノード) / `node` / `interface` / `link` (D1〜D7 のまま) |
+| `layer1.nodes` / `layer1.interfaces` | 文字列 (ノード) / `node` / `interface` (D1〜D7 のまま。`link` は ADR-0010 で削除) |
 | `layer2.subinterfaces` | `interface` / `lag` |
 | `layer3.interfaces` | `interface` / `lag` / `vlan` / `subinterface` |
 
@@ -180,6 +182,11 @@ validator が X の種類を引き、`{lag: X}` などに書き換えるよう *
 この読み替えは ID のグローバル一意性 (ADR-0002 D5) に頼るので、L1 IF / LAG / VLAN / サブ IF の ID 重複は引き続き error。
 
 キーと ID の種類が食い違う参照 (例: `{lag: vlan-100}`) は未定義の参照として error にし、正しいキーをメッセージで示す。
+
+**改訂 (ADR-0010, 2026-11-01)**: `{link:}` キーを削除する。使い道は BGP セッション (`layer3.routing_adjacencies[].attaches_to`) だけだったが、
+ADR-0010 D7 でセッションの通り道は `update_source` の L3 IF の `attaches_to` から導くことにし、セッションの `attaches_to` を廃止した
+(書くと同じ事実を 2 か所に書くことになり、ループバックで張りながら直結のリンクを指す食い違いも通っていた)。
+L1 ノード・L1 IF がリンクの上で実現される場面はないので、キーごと削除する。必要になれば加算的に戻す。実装は ADR-0010 の実装と同時に行う。
 
 ## Consequences
 

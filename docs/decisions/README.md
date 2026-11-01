@@ -72,18 +72,21 @@ Pass A のドラフトは Pass C 完了後も削除しない（変更履歴と�
 **難航の原因が語彙不足ではなく構造の誤り** (階層ネストと多軸分類を 1 構成子で表そうとしていた)
 と判明し、2 構成子への分離で決着した。却下語の全リストは ADR-0009 の Alternatives Considered を参照。
 
-### ラウンド3: 制御プレーンの分離 (2026-09-18〜、**保留中**)
+### ラウンド3: 制御プレーンの分離 (2026-09-18〜2026-11-01)
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [drafts/0010](drafts/0010-control-plane-separation.md) | control plane と data plane の分離 (`control_plane` / `routing_neighbors`) | Draft (**保留**) | A r2 |
+| [0010](0010-control-plane-separation.md) | control plane と data plane の分離 (`control_plane` / `routing_neighbors`) (実装は未着手) | **Accepted** | C |
+| [drafts/0010](drafts/0010-control-plane-separation.md) | 同上 Pass A ドラフト (r1〜r4) | Superseded by 0010 | A r4 |
+| [evaluations/round3](evaluations/round3-evaluation.md) | ラウンド3 横断評価メモ (Pass B) と Pass C の結果 | — | — |
 | [evaluations/adr0010](evaluations/adr0010/README.md) | ADR-0010 実証 YAML | — | — |
 
-**保留の経緯**: 「BGP は Layer 的にどこに入るか」という問いから、`layer1/2/3` が OSI 層番号ではなく
-RFC 8345 のデータプレーン層であること、BGP 隣接が `layer3.routing_adjacencies` と `protocols.bgp` に
-二重に書けて fixture が矛盾を含んだまま valid になっていることが判明した。`control_plane` 新設と
-`routing_neighbors` への改名はユーザー決定済み。BGP エントリの単位 (D8) が未決のまま、
-layer3 までのデータプレーンの表現力を先に確定させるため 2026-09-20 に中断した。
+「BGP は Layer 的にどこに入るか」という問いから、`layer1/2/3` が OSI 層番号ではなく RFC 8345 のデータプレーン層であること、
+BGP 隣接が `layer3.routing_adjacencies` と `protocols.bgp` に二重に書けて fixture が矛盾を含んだまま valid になっていることが判明した。
+2026-09-20 に BGP エントリの単位 (D8) を決めないまま中断し、layer3 までを先に確定させた (ラウンド4)。
+2026-11-01 に ndl-viz の表示 (1 組に最大 6 本の線) をきっかけに再開し、「線 1 本 = セッション 1 本」を推定なしで描ける形として、
+VRF ごとの BGP インスタンス、1 エントリ 1 セッション、セッションの通り道は `update_source` から導く (ADR-0001 の `{link:}` キーは削除)、
+underlay / overlay は構文に入れず AF と VRF から導く、に決めた。
 
 ### ラウンド4: layer3 データプレーンの確定 (2026-09-20〜2026-10-15)
 

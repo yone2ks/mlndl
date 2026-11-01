@@ -4,7 +4,7 @@
 - **Date**: 2026-10-29
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A (初回策定)
-- **関連**: [ADR-0011](../0011-layer3-data-plane.md) D9・D11、[drafts/0010](0010-control-plane-separation.md) D5・D6・D8 (保留中)、
+- **関連**: [ADR-0011](../0011-layer3-data-plane.md) D9・D11、[ADR-0010](../0010-control-plane-separation.md) D5・D9 (2026-11-01 に Accepted、実装は未着手)、
   ADR-0005 (D3-1 (b)・D4・D4 補則 問い 4)、ADR-0009 (labels は非参照)、[drafts/0015](0015-declarative-references.md) (Ref)、
   [docs/exporter-cytoscape.md](../../exporter-cytoscape.md)
 
@@ -40,7 +40,7 @@ network-tech-reviewer と example-author は、今は「書かれていない」
 ### スコープ
 
 router-id は ADR-0005 D3-1 (b) の「L3 アドレッシング」行と `protocols.ospf` 行で、すでにスコープ内とされている。
-ADR-0010 D5 は、置き場所 (インスタンスエントリのノード) と形式 (リテラル) まで決めている。ただし ADR-0010 は保留中で、実装はない。
+ADR-0010 は保留中に D5 で置き場所と形式まで決めていたが、2026-11-01 の Accepted 版 (D9) で router-id の形式と検査は本 ADR に委ね、置き場所を `control_plane` のノードエントリとした。ADR-0010 の実装はまだない。
 
 管理アドレスはこれまでどの ADR にも出てこない。
 
@@ -69,8 +69,9 @@ protocols:
           neighbors: [...]
 ```
 
-- **置き場所**: `protocols.bgp[].nodes[].router_id` (`BGPNode`)。ADR-0010 D5 の**先行実装**とする。
-  ADR-0010 が再開して `protocols` → `control_plane` の改名 (D2) を実装するとき、`router_id` は意味を変えずに一緒に移る
+- **置き場所**: `protocols.bgp[].nodes[].router_id` (`BGPNode`)。ADR-0010 の**先行実装**とする。
+  **ADR-0010 (Accepted, 2026-11-01) D9 により、ADR-0010 の実装時に `control_plane.bgp[].nodes[].router_id` へ移る** (意味は変えない。
+  OSPF は `control_plane.ospf[].nodes[].router_id`)。ADR-0010 の実装が本 ADR より先なら、最初から `control_plane` に置く
 - **形式**: ドット区切り 4 オクテット、非ゼロ。IPv6 アドレスは不可 (RFC 6286 §2.1。OSPFv3 も 32 bit。RFC 5340 §2.2)
 - **リテラルであり、参照ではない**。L3 IF の IP との一致も要求しない (RFC 6286 §2.1)。理由:
   - BGP unnumbered や IPv6 だけのファブリックには、参照できる IPv4 の L3 IF がない
@@ -78,8 +79,7 @@ protocols:
   - OpenConfig / RFC 8349 も全ベンダーの CLI も、router-id を 32 bit の値として持つ。MLNDL と機器の設定が同じ字面になる
 - **OSPF / IS-IS には今は置かない**。OSPF のスキーマがまだない (ADR-0010 の範囲)。IS-IS の識別子は NET の system-id で、
   router-id とは別の語彙 (ADR-0010 D5)
-- **VRF ごとの router-id は今は書けない**。`BGPNode` に `vrf` を足すかどうかは BGP エントリの単位 (ADR-0010 D8) そのものなので、
-  本 ADR では決めない (未決 3)
+- **VRF ごとの router-id**: ADR-0010 D5 で BGP のエントリが VRF ごとのインスタンスになったので、`control_plane` に移った後はエントリごとに書ける (未決 3 は解消)
 
 ### D3. `management_interface` は L1 ノードから L3 IF を 1 つ指す
 
@@ -226,20 +226,19 @@ Accepted にするとき、D11 に次の後注だけを足す: 「router-id と�
    移行が少ない (linguist は単数 → 複数を破壊的変更と見る)。単数のフィールドは「主たる管理の宛先」と読める
 2. **`router_id` をリテラルだけにするか** (R1 と R1' のどちらか)。推奨はリテラルだけ。二重記述を嫌うなら、
    別名のフィールドで参照を足す余地はある (同名で型を切り替えることはしない)
-3. **VRF ごとの router-id** (NX-OS の `vrf context` / `router bgp` 配下の `vrf`)。`BGPNode` に `vrf` を足すかどうかは
-   ADR-0010 D8 (BGP エントリの単位) と一緒に決める
-4. **同じノードが 2 つの BGP エントリで別の `router_id` を書いたとき**。今の書き方 (underlay / overlay でエントリを分ける。D8-b に近い) では
-   機器上は同じ BGP インスタンスなので矛盾だが、D8-a (VRF ごとのエントリ) では正当でありうる。D8 が決まるまで検査しない
+3. ~~VRF ごとの router-id~~ → **解消** (2026-11-01)。ADR-0010 D5 で BGP のエントリが VRF ごとのインスタンスになり、エントリごとに書ける
+4. **同じノードが 2 つの BGP エントリで別の `router_id` を書いたとき** → ADR-0010 D5 (VRF ごとのエントリ、同一 VRF に 1 エントリ) により、
+   別の VRF なら正当、同じ VRF には 2 エントリ書けない (ADR-0010 D10 の error)。本 ADR の一意性の検査はこの前提で書き直す
 5. **フィールド名の確認** (Pass B で linguist に):
    - `management_interface` は L3 IF を指す。`attaches_to` の `{interface:}` は L1 IF 専用 (ADR-0001 D8) なので、
      `_interface` という語尾が参照先を L1 IF と誤読させないか。トンネルの `destination_interface` (L3 IF を指す) という前例はある
    - `layer1.nodes[].role: management` (OOB 管理専用の機器。docs/role-vocabulary.md) と `management_interface` (このノードへの管理の宛先) が
      同じノードに並ぶ。意味の違いを docs/role-vocabulary.md に一言添えるか
-6. **OSPF の router-id**。OSPF のスキーマを足すとき (ADR-0010) に、D2 と同じ形 (ノードエントリにリテラル) で足す。一意性の範囲は OSPF ドメイン
+6. **OSPF の router-id**。ADR-0010 の実装で OSPF のスキーマを足すときに、D2 と同じ形 (`control_plane.ospf[].nodes[].router_id` にリテラル) で足す。一意性の範囲は OSPF ドメイン
 
 ## References
 
-- 関連 ADR: ADR-0001 (D8)、ADR-0002 (D1)、ADR-0005 (D1・D3-1・D4・D4 補則)、ADR-0009、ADR-0011 (D9・D11)、drafts/0010 (D5・D6・D8)、drafts/0015
+- 関連 ADR: ADR-0001 (D8)、ADR-0002 (D1)、ADR-0005 (D1・D3-1・D4・D4 補則)、ADR-0009、ADR-0011 (D9・D11)、ADR-0010 (D5・D9・D10)、drafts/0015
 - 試し書き (5 エージェント評価時、リポジトリ外): BGP unnumbered、OSPF / IS-IS だけの underlay、インバンド管理、Linux ホスト、
   router-id が IF の IP と異なる設計、`examples/eveng-evpn-lab.yaml` の書き直し
 - RFC 6286 (BGP Identifier: 4 オクテット・非ゼロ・AS 内で一意。IF の IP との一致は要求しない)

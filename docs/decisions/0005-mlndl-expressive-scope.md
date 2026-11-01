@@ -8,6 +8,7 @@
 - **Amended by**: [ADR-0011](0011-layer3-data-plane.md) (2026-10-04、Pass C で確定 2026-10-15)、[ADR-0012](0012-subinterfaces.md) (2026-10-05)、
   [ADR-0013](0013-vlan-ports-on-lag.md)、ラウンド4 Pass C (2026-10-15) — 表現の指針 (D4 補則)、`node` の持ち方 (D6)、
   SVI 規範の改訂、スコープ表の実装同期。[drafts/0014](drafts/0014-vteps.md) (2026-10-20) — D4 補則に問い 4 (方式中立) を追加。
+  [ADR-0010](0010-control-plane-separation.md) (2026-11-01) — 制御プレーンを `control_plane` に分離 (D1・D3-1 の制御プレーンの行、P6、BGP unnumbered の規則)。
   改訂箇所には注記を入れ、元の記述は履歴として残す。一覧は末尾の「実装同期メモ」を参照
 
 ## Context
@@ -65,6 +66,9 @@ mlndl の表現対象を、ユーザー発話に基づき以下の **三側面 (
 そのため本 ADR は「**三側面**」(three aspects) を採用する。(a)(b) は記述対象の二つの層、(c) は両者を結ぶ**操作的分類** (operational classification) として定義する。`attaches_to` を独立した一級概念として議論できるよう (c) を独立側面に立てるが、純粋 MECE ではないことを明示する。
 
 略号 (a)/(b)/(c) は本 ADR 全体で参照のために維持する。
+
+> **改訂 (ADR-0010 D1, 2026-11-01)**: (b) 論理構成図の内部を、データプレーン (`layer2` / `layer3`) と制御プレーン (`control_plane`) に分ける。
+> `layerN` は RFC 8345 のデータプレーンのネットワーク層に番号を振ったもので、OSI の層番号ではない。BGP / OSPF / IS-IS / BFD はどの `layerN` にも属さず、`control_plane` に置く。
 
 ### D2. 三側面の境界規則
 
@@ -262,10 +266,16 @@ layer3:
 > | `layer2.vxlan`: vtep_source (旧書式 `{layer: layer3, interface_id: ...}`) | `vtep_source: <L3 IF id>`。`layer` キーは ADR-0001 D2 で廃止済み |
 > | `layer2.subinterfaces` | ADR-0012 で実装: id, attaches_to (L1 IF または LAG), vlan_id, name, description。`node` と VLAN 参照は持たない |
 >
-> `layer3.routing_adjacencies` と `protocols.*` は [drafts/0010](drafts/0010-control-plane-separation.md) (保留中) で
-> `control_plane` へ移す方針が決まっているが、未実装のため本表の記述をそのまま残す。
+> **改訂 (ADR-0010, 2026-11-01)**: 上表の制御プレーンの行は次のように置き換える (ADR-0010 は Accepted、実装は未着手)。
+>
+> | 上表の記述 | ADR-0010 |
+> |---|---|
+> | `layer3.routing_adjacencies`: id, type, from, to, attaches_to | `control_plane.routing_neighbors`: 1 エントリ = 1 セッション。BGP の端点は `{node, update_source}` か `{address, local_as}`。`attaches_to` は持たない (D3・D7) |
+> | `protocols.bgp`: role, address_families, remote_as (P6), route_reflector role | `control_plane.bgp`: VRF ごとのインスタンス `{id, vrf, nodes: [{node, local_as}]}`。`role` (underlay / overlay) と `remote_as` は廃止。AF はセッションに、RR はセッションの端点の `route_reflector_client` に (D3・D5・D6) |
+> | `protocols.ospf` / `protocols.isis` / `protocols.bfd` | `control_plane.ospf` / `isis` / `bfd` (D8) |
+> | (c) `routing_adjacencies[].attaches_to: {link: ...}` | 削除。セッションの通り道は `update_source` の L3 IF から導く (D7) |
 
-**BGP unnumbered の表現規則 (P6 採用)**:
+**BGP unnumbered の表現規則 (P6 採用)** — **ADR-0010 D4・D5 で置き換え (2026-11-01)**: unnumbered は「`update_source` が `ip` も `ipv6` も持たない L3 IF を指す」で表す。`remote_as` は廃止し、eBGP / iBGP は両端の AS から導く。以下は履歴として残す。
 
 `routing_adjacencies` での unnumbered 隣接表現: `mode: unnumbered` フラグを指定するか、または `update_source` が loopback でない物理 IF を指す場合に unnumbered と解釈する。`remote_as` には ASN 番号のほか `external` (Cumulus FRR / FRRouting の `remote-as external` 相当) / `internal` を許容する。
 
@@ -502,8 +512,7 @@ VLAN のポートの `node` は、ADR-0013 (Pass A) では「任意 (書けば�
 | D2-2 ケース B / D2-3 | SVI は `attaches_to: {vlan:}`、機器上の名前は `name`。短縮形 `interface: vlan-N` は廃止 (1.x の間は warning で受け付ける)。`{interface:}` は L1 IF 専用 | ADR-0001 D8、ADR-0011 D3 (Pass C) |
 | D3-2 | ポリシールーティングと VRF 間のスタティックリークをスコープ外に追加 | ラウンド4 Pass C |
 | D4 補則 | 問い 4 (方式中立。型を分けるのはフィールドの形が違うときだけ) を追加 | drafts/0014 D1 |
-
-**未反映**: `layer3.routing_adjacencies` / `protocols.*` の `control_plane` への移動 (drafts/0010、保留中)。
+| D1・D3-1 (制御プレーンの行・(c) の routing_adjacencies 行)・P6・BGP unnumbered の規則 | `control_plane` への分離。VRF ごとの BGP インスタンス、セッションの通り道は導く、unnumbered はアドレスのない L3 IF | ADR-0010 (2026-11-01。Accepted、実装は未着手) |
 
 ## References
 
