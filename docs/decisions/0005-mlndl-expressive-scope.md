@@ -266,7 +266,7 @@ layer3:
 > | `layer2.vxlan`: vtep_source (旧書式 `{layer: layer3, interface_id: ...}`) | `vtep_source: <L3 IF id>`。`layer` キーは ADR-0001 D2 で廃止済み |
 > | `layer2.subinterfaces` | ADR-0012 で実装: id, attaches_to (L1 IF または LAG), vlan_id, name, description。`node` と VLAN 参照は持たない |
 >
-> **改訂 (ADR-0010, 2026-11-01)**: 上表の制御プレーンの行は次のように置き換える (ADR-0010 は Accepted、実装は未着手)。
+> **改訂 (ADR-0010, 2026-11-01)**: 上表の制御プレーンの行は次のように置き換える (ADR-0010 は Accepted・実装済み)。
 >
 > | 上表の記述 | ADR-0010 |
 > |---|---|
@@ -512,7 +512,7 @@ VLAN のポートの `node` は、ADR-0013 (Pass A) では「任意 (書けば�
 | D2-2 ケース B / D2-3 | SVI は `attaches_to: {vlan:}`、機器上の名前は `name`。短縮形 `interface: vlan-N` は廃止 (1.x の間は warning で受け付ける)。`{interface:}` は L1 IF 専用 | ADR-0001 D8、ADR-0011 D3 (Pass C) |
 | D3-2 | ポリシールーティングと VRF 間のスタティックリークをスコープ外に追加 | ラウンド4 Pass C |
 | D4 補則 | 問い 4 (方式中立。型を分けるのはフィールドの形が違うときだけ) を追加 | drafts/0014 D1 |
-| D1・D3-1 (制御プレーンの行・(c) の routing_adjacencies 行)・P6・BGP unnumbered の規則 | `control_plane` への分離。VRF ごとの BGP インスタンス、セッションの通り道は導く、unnumbered はアドレスのない L3 IF | ADR-0010 (2026-11-01。Accepted、実装は未着手) |
+| D1・D3-1 (制御プレーンの行・(c) の routing_adjacencies 行)・P6・BGP unnumbered の規則 | `control_plane` への分離。VRF ごとの BGP インスタンス、セッションの通り道は導く、unnumbered はアドレスのない L3 IF | ADR-0010 (2026-11-01。Accepted・実装済み) |
 
 ## References
 

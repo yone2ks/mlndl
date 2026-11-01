@@ -57,21 +57,20 @@ RFC8345 の "supporting" 関係（下位層が上位層の物理基盤となる�
 | LAG | `attaches_to: {lag: lag-border1-po1}` | routed LAG / LAG 上のサブ IF | supporting-termination-point |
 | VLAN | `attaches_to: {vlan: vlan-100}` | SVI | supporting-termination-point |
 | サブ IF | `attaches_to: {subinterface: subif-br1-eth0-10}` | サブ IF に載る L3 IF | supporting-termination-point |
-| リンク（BGP等） | `attaches_to: {link: link-xxx}` | このセッションはこの物理リンク上を流れる | supporting-link |
 | リンク（LAG） | `lag.members: [...]` | members が意味的に自然なのでそのまま | supporting-link |
 
-pydantic での型定義: `attaches_to: str | AttachesTo`（文字列ならノードID糖衣構文、オブジェクトは `{node:}` / `{interface:}` / `{lag:}` / `{vlan:}` / `{subinterface:}` / `{link:}` のいずれか 1 キー）
+pydantic での型定義: `attaches_to: str | AttachesTo`（文字列ならノードID糖衣構文、オブジェクトは `{node:}` / `{interface:}` / `{lag:}` / `{vlan:}` / `{subinterface:}` のいずれか 1 キー）
 
 **キー名が参照先の種類を示す**（ADR-0001 D8、ラウンド4 Pass C）。`{interface:}` は L1 IF 専用。どのキーを書けるかはエンティティごとにスキーマで制限する:
-L1 ノード / L1 IF / routing_adjacencies は `node` / `interface` / `link`、`layer2.subinterfaces` は `interface` / `lag`、`layer3.interfaces` は `interface` / `lag` / `vlan` / `subinterface`。
+L1 ノード / L1 IF は `node` / `interface`、`layer2.subinterfaces` は `interface` / `lag`、`layer3.interfaces` は `interface` / `lag` / `vlan` / `subinterface`。
 旧形式 `{interface: <LAG / VLAN / サブ IF の id>}` は ndl_version 1.x の間だけ warning 付きで受け付ける。
 
-> **ADR-0010（Accepted・未実装）による変更予定**: `layer3.routing_adjacencies` は `control_plane.routing_neighbors` に移り、セッションには `attaches_to` を書かない
-> （通り道は `update_source` の L3 IF から導く）。上の表の「リンク（BGP等）」行と `{link:}` キーは、ADR-0010 の実装と同時に削除する。
+BGP 等のセッション（`control_plane.routing_neighbors`）は `attaches_to` を持たない。通り道は `update_source` の L3 IF の `attaches_to` から導く
+（ADR-0010 D7。`{link:}` キーは ADR-0010 で削除し、書くと移動先を示すエラーになる）。
 
 旧形式（使わない）:
 - `{layer: layer1, interface: swp51}` — `layer` フィールドは廃止（グローバル一意 ID なので不要）
-- `supporting_interface`、`routing_adjacencies[].supporting`
+- `supporting_interface`、`routing_adjacencies[].supporting`、`{link:}`（ADR-0010）
 
 ### 2. `implementation` フィールド
 
@@ -413,43 +412,41 @@ layer3:
       transport_vrf: vrf-default # 外側パケットが流れる VRF
       mtu: 1476
 
-  routing_adjacencies:
-    - id: bgp-peer-spine1-leaf1  # ADR-0002: bgp-peer-* 形式（bgp-adj-* は廃止）
+control_plane:                   # ADR-0010。書かなくてもよい（データプレーンだけの記述も valid）
+  bgp:                           # 1 エントリ = 1 つの VRF の BGP インスタンス（全ノード分）
+    - id: bgp-default            # vrf 省略 = default VRF
+      nodes:
+        - {node: spine1, local_as: 65000}
+        - {node: leaf1,  local_as: 65001}
+    - id: bgp-tenant-a           # VRF-lite 等はテナントの VRF ごとのインスタンスに
+      vrf: vrf-tenant-a
+      nodes: [{node: border1, local_as: 65021}]
+
+  bfd:                           # タイマー。BFD を張るかはセッションの bfd で決める
+    - {id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3, nodes: [spine1, leaf1]}
+
+  routing_neighbors:             # 1 エントリ = 1 セッション（BGP / OSPF / IS-IS）
+    - id: bgp-peer-spine1-leaf1  # ADR-0002: bgp-peer-* 形式
       type: bgp
-      from: {node: spine1, update_source: spine1-lo}
-      to: {node: leaf1, update_source: leaf1-lo}
-      attaches_to:               # このBGPセッションが使う物理リンク
-        link: link-spine1-leaf1 # layer フィールドは不要
-
-protocols:
-  bfd:
-    - id: bfd-global
-      min_tx: 300
-      min_rx: 300
-      multiplier: 3
-      nodes: [spine1, leaf1, leaf2]
-
-  bgp:
-    - id: bgp-underlay
-      role: underlay             # underlay/overlay を明示
-      nodes:
-        - node: spine1
-          local_as: 65000
-          neighbors:
-            - node: leaf1
-              remote_as: 65001
-              type: ebgp
-              bfd: true
-    - id: bgp-evpn
-      role: overlay
-      nodes:
-        - node: spine1
-          role: route_reflector
-          neighbors:
-            - node: leaf1
-              type: ibgp
-              role: route_reflector_client
-              address_families: [l2vpn_evpn]
+      instance: bgp-default      # BGP のエントリが 1 つなら省略できる
+      from: {node: spine1, update_source: spine1-swp1-l3}   # update_source は必須（L3 IF の id）
+      to:   {node: leaf1,  update_source: leaf1-swp51-l3}
+      address_families: [ipv4_unicast]   # 1 本で複数運べる（[ipv4_unicast, l2vpn_evpn]）
+      bfd: true
+      # attaches_to は書かない。通り道は update_source の L3 IF から導く（直結の /31 → link-spine1-leaf1）
+    - id: bgp-peer-spine1-leaf1-overlay   # 同じ組の 2 本目は用途の語を末尾に
+      type: bgp
+      from: {node: spine1, update_source: spine1-lo}   # ループバックどうし = multihop
+      to:   {node: leaf1,  update_source: leaf1-lo}
+      address_families: [l2vpn_evpn]
+    - id: bgp-peer-border1-isp
+      type: bgp
+      instance: bgp-default
+      from: {node: border1, update_source: border1-lo}
+      to: {address: 203.0.113.1, local_as: 64500}       # トポロジー外の相手は address + local_as
+    # unnumbered: update_source が ip も ipv6 も持たない L3 IF を指す（ADR-0010 D4）
+    # RR: クライアント側の端点に route_reflector_client: true（iBGP のみ）
+    # eBGP / iBGP は両端の local_as から導く。underlay / overlay は書かず AF と VRF から導く（ADR-0010 D6）
 ```
 
 ---
@@ -464,12 +461,12 @@ mlndl/
 │       ├── schema/
 │       │   ├── layer1.py       # L1Node, L1Interface, L1Link, LacpLag, MlagLag
 │       │   ├── layer2.py       # VLAN, VxLAN (l2vni/l3vni), Subinterface
-│       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface, RoutingAdjacency
-│       │   ├── protocols.py    # BFD, OSPF, BGP
+│       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface
+│       │   ├── control_plane.py # BGP / OSPF / IS-IS のインスタンス、BFD、routing_neighbors（ADR-0010）
 │       │   ├── refs.py         # Ref（参照先の宣言。ADR-0015）
 │       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
 │       ├── index.py            # IdIndex（id → エンティティの索引）
-│       ├── derive.py           # 参照をたどって求める関係（VLAN の端点。ADR-0013 D7）
+│       ├── derive.py           # 参照をたどって求める関係（VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
 │       ├── validator.py        # 整合性チェック
 │       └── exporter/
@@ -499,7 +496,9 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | カテゴリ | チェック内容 | Severity |
 |---------|------------|---------|
 | 参照整合性 | スキーマで `Ref` を宣言したフィールドが、参照先に実在する id を指しているか（汎用の検査。ADR-0015）。別の種類の id を指したら何であるかを添える | error |
-| AS 番号 | eBGP ペアで同一 AS / iBGP ペアで異なる AS の矛盾 | error |
+| 制御プレーン | `instance` の省略は同じ type のエントリが 1 つのときだけ。端の機器がインスタンスの `nodes` にあるか。`update_source`（OSPF / IS-IS は `interface`）の機器が端の機器と一致するか。`update_source` の VRF がインスタンスの VRF と一致するか。両端から導いた通り道が食い違わないか。トランスポートのアドレスファミリーが一致するか。同じ両端のセッションの重複。`route_reflector_client` は iBGP だけ。同一ノード・同一 VRF で AS は 1 つ、同一 VRF に BGP エントリは 1 つ。`bfd: true` の両端がタイマーの `nodes` にあるか。端点の形・両端ともトポロジー外は型で弾く（ADR-0010 D10） | error |
+| 制御プレーンの注意 | default 以外の VRF のセッションに `l2vpn_evpn` / `vpnv4` / `vpnv6` | warning |
+| 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12） | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
 | VTEP | `sources` が L3 IF に存在するか。同じ L3 IF を 2 つの VTEP / 1 つの VTEP に 2 回書いていないか。1 つの VTEP に同じノードの L3 IF を 2 つ書いていないか。共有（`sources` が複数）なら `address` 必須（型）。アドレスが決まらない / VTEP 間で重複していないか。L2VNI の `vteps` が定義済みか（ADR-0014） | error |
@@ -522,10 +521,10 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。MLAG に載せた VLAN は両ノードで数える） | error |
-| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7） | warning |
+| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
 | SVI の紐づけ忘れ | `name` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
-| ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0016 の一意性チェックに置き換え予定（ADR-0010 D9 で委譲） |
+| ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0016 の一意性チェックに置き換え予定（ADR-0010 D9 で委譲。router_id は control_plane.bgp[].nodes[] に置く） |
 
 ---
 
@@ -559,7 +558,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0006](docs/decisions/0006-endpoints.md) | L1 リンク端点表現 | C | `from`/`to` 廃止 → `endpoints: [a, b]`（無向リスト）。Cytoscape/RFC8345 出力のみ source/target にマップ |
 | [ADR-0009](docs/decisions/0009-membership-orthogonality.md) | メンバーシップ構成子の直交性 | C 相当 | `attaches_to`（Realization）/ `parent`（Containment）/ `labels`（Classification）の 3 軸に分離。`scope`・`pod`・`tags` 等 20 語以上を却下 |
 | [ADR-0008](docs/decisions/drafts/0008-cloud-networks-scope-location.md) | クラウドネットワークの表現 | C (Draft) | 箱もノード（`role: vpc`）。`location` 軸。所属は `parent` + `labels` |
-| [ADR-0010](docs/decisions/0010-control-plane-separation.md) | control plane と data plane の分離 | **C**（**未実装**） | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（1 エントリ = 1 セッション）。BGP エントリは VRF ごとのインスタンス、underlay / overlay は構文に入れず AF と VRF から導く。セッションは `instance` で所属を指し、トポロジー内の端点は `update_source` 必須、トポロジー外の相手は `address` + `local_as`。セッションに `attaches_to` は書かず通り道は `update_source` から導く（ADR-0001 の `{link:}` キーは削除）。RR は端点の `route_reflector_client`。エクスポーターは機器の `bgp_sessions` とセッションの辺 |
+| [ADR-0010](docs/decisions/0010-control-plane-separation.md) | control plane と data plane の分離 | **C**（2026-11-01 実装） | `protocols` → `control_plane`、`layer3.routing_adjacencies` → `control_plane.routing_neighbors`（1 エントリ = 1 セッション）。BGP エントリは VRF ごとのインスタンス、underlay / overlay は構文に入れず AF と VRF から導く。セッションは `instance` で所属を指し、トポロジー内の端点は `update_source` 必須、トポロジー外の相手は `address` + `local_as`。セッションに `attaches_to` は書かず通り道は `update_source` から導く（ADR-0001 の `{link:}` キーは削除）。RR は端点の `route_reflector_client`。エクスポーターは機器の `bgp_sessions` とセッションの辺 |
 | [ADR-0011](docs/decisions/0011-layer3-data-plane.md) | layer3 データプレーン | **C**（D11 を追記） | 表現の指針（スタティックルート等はスコープ外）。L3 IF は `name`（機器上の名前）+ `attaches_to`（`{interface}` / `{lag}` / `{vlan}` / `{subinterface}`）。SVI 短縮形は廃止。`gateway_redundancy`（anycast は全ノード一致を検証）。`ip` / `ipv6`。トンネル。旧形式は 1.x の間 warning（D10）。D11: L3 IF の分類は `attaches_to` のキーで決まり `name` では決めない（`l1_interface` / `lag` / `vlan` / `subinterface` / `unattached`。`unattached` はループバックとみなさない）。ノードの代表アドレスは言語として定義しない。エクスポーター出力の語彙は `docs/exporter-cytoscape.md` |
 | [ADR-0012](docs/decisions/0012-subinterfaces.md) | 802.1Q サブインターフェース | **C** | `layer2.subinterfaces`。`node` を持たない。`vlan_id` はリンク上のタグ番号（VLAN への参照ではなく照合もしない）。基盤は `{interface:}` か `{lag:}` |
 | [ADR-0013](docs/decisions/0013-vlan-ports-on-lag.md) | VLAN のポート | **C**（D7 を追記） | `trunk_ports` / `access_ports` は `{interface:}` か `{lag:}`。`node` は書かない。MLAG は 1 エントリで両ノード。LAG とメンバーの併記は error、メンバーだけは warning。D7: VLAN の端点（ポートの対向の IF と IP）を参照をたどって導く。1 ホップ、`name` では引かない。tagged trunk のタグ一致は推定 |

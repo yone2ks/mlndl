@@ -23,7 +23,8 @@
 | `vteps` | このノードが終端する VTEP: `{id, source, address?, address_v6?, shared_with?}`。`source` は L3 IF の name、`shared_with` は共有相手のノード (ADR-0014) |
 | `subinterfaces` | このノードのサブ IF: `{id, parent, vlan_id, name?}` (MLAG 上は両ノード。ADR-0012) |
 | `tunnels` | このノードのトンネル IF (ADR-0011 D6) |
-| `local_as` | BGP の AS 番号 |
+| `local_as` | BGP の AS 番号 (default VRF のインスタンスのもの。なければ最初に出てくるインスタンス) |
+| `bgp_sessions` | このノードの BGP セッションすべて (相手がトポロジー外のものを含む。トンネルの `tunnels` と同じ形)。下の「BGP セッション」に `local` (この機器の端) と `peer` (相手の端) を足したもの (ADR-0010 D11) |
 | `lo_ip` / `lo_ipv6` | **旧キー (推定)**。下の「旧キー `lo_ip` / `lo_ipv6`」 |
 
 #### L3 IF (`l3_interfaces[]`)
@@ -79,9 +80,30 @@ D11 で `unattached` をループバックとみなさないと決めたので�
 | `lag_bundle` | LAG のメンバーリンクを束ねたもの |
 | `attaches_to` | L1 ノードの `attaches_to` (ノードがどこで動くか。ADR-0001) |
 | `vlan_member` | VLAN → ポートのあるノード。`tagged_on` / `untagged_on` はポートの name か LAG の id。`endpoints` は下の「VLAN の端点」 |
-| `routing_adjacency` | `layer3.routing_adjacencies`。`adj_type` |
-| `bgp_session` | `protocols.bgp` の隣接。`process_role` (underlay / overlay)、`local_as` / `remote_as`、`address_families` |
+| `routing_neighbor` | `control_plane.routing_neighbors` の 1 セッション = 1 辺。`protocol` (bgp / ospf / isis)。BGP は両端がトポロジー内のものだけ。下の「BGP セッション」 (ADR-0010 D11) |
 | `tunnel` | 対向がトポロジー内のトンネル IF (A→B と B→A は 1 本) |
+
+旧 `routing_adjacency` (`layer3.routing_adjacencies`) と `bgp_session` (`protocols.bgp`) の辺は、ADR-0010 で `routing_neighbor` に置き換えた
+(同じ機器の組に最大 6 本重なっていた)。
+
+### BGP セッション (`routing_neighbor` の `protocol: bgp`、ノードの `bgp_sessions[]`)
+
+どの値も参照をたどって決めた値である (`derive.bgp_session_views`。validator と同じ関数)。
+
+| キー | 内容 |
+|---|---|
+| `id` / `instance` / `vrf` | セッションの id、属するインスタンス、その VRF (default VRF なら `vrf` を出さない) |
+| `from` / `to` (辺) ・ `local` / `peer` (ノードの `bgp_sessions`) | 端: `node`、`l3_interface` (update_source の L3 IF の id)、`interface_name` (その L3 IF の `name`)、`ip` / `ipv6`、`unnumbered: true` (L3 IF にアドレスがない。ADR-0010 D4)、`local_as`、`route_reflector_client`。トポロジー外の相手は `address` と `local_as` だけ |
+| `bgp_type` | `ebgp` / `ibgp`。両端の AS が同じかどうか (AS が決まらなければ出さない) |
+| `address_families` | セッションに書かれた値 |
+| `transport_link` | single-hop の通り道: `{"link": <リンク id>}` か `{"lag": [<この端の LAG>, <相手の LAG>]}`。update_source の L3 IF から導いた値で、YAML の `attaches_to` ではない。multihop (ループバック等)・SVI 上・トポロジー外の相手では出さない (ADR-0010 D7) |
+| `bfd` | セッションに書かれた値 |
+
+underlay / overlay は出さない。知りたいときは次のように導く (informative。ADR-0010 D6):
+`l2vpn_evpn` / `vpnv4` / `vpnv6` を運べば overlay の情報を運ぶセッション、default VRF で `ipv4_unicast` / `ipv6_unicast` だけなら underlay の経路を運ぶセッション、
+両方なら両方、default 以外の VRF で `ipv4_unicast` / `ipv6_unicast` ならテナントの経路 (どちらでもない)。
+
+OSPF / IS-IS の辺は、`from` / `to` に `node`・`interface` (OSPF は L3 IF、IS-IS は L1 IF の id)・`interface_name` を持ち、`area` (OSPF。ドット区切り 4 オクテット) か `level` (IS-IS) を持つ。
 
 ### VLAN の端点 (`vlan_member.endpoints[]`)
 

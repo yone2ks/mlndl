@@ -76,7 +76,7 @@ Pass A のドラフトは Pass C 完了後も削除しない（変更履歴と�
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [0010](0010-control-plane-separation.md) | control plane と data plane の分離 (`control_plane` / `routing_neighbors`) (実装は未着手) | **Accepted** | C |
+| [0010](0010-control-plane-separation.md) | control plane と data plane の分離 (`control_plane` / `routing_neighbors`) (2026-11-01 実装) | **Accepted** | C |
 | [drafts/0010](drafts/0010-control-plane-separation.md) | 同上 Pass A ドラフト (r1〜r4) | Superseded by 0010 | A r4 |
 | [evaluations/round3](evaluations/round3-evaluation.md) | ラウンド3 横断評価メモ (Pass B) と Pass C の結果 | — | — |
 | [evaluations/adr0010](evaluations/adr0010/README.md) | ADR-0010 実証 YAML | — | — |

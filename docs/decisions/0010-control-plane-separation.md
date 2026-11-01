@@ -1,6 +1,6 @@
 # ADR-0010: control plane と data plane の分離 — `control_plane` と `routing_neighbors`
 
-- **Status**: Accepted (スキーマ・validator・エクスポーター・fixture は**未実装**。実装の手順は Consequences)
+- **Status**: Accepted (2026-11-01 に実装。スキーマ・validator・derive・エクスポーター・fixture・examples。ndl-viz の表示は未対応)
 - **Date**: 2026-11-01
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、ユーザー
 - **Pass**: C (ラウンド3。[評価メモ](evaluations/round3-evaluation.md) を入力に再設計)
