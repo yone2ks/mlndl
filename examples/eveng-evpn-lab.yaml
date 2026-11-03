@@ -6,8 +6,8 @@ ndl_version: "1.0"
 meta:
   name: eveng-evpn-vxlan-lab
   description: >
-    NX-OSv 9300v の 2 spine / 2 leaf と VPCS 2 台。eBGP アンダーレイ + eBGP EVPN オーバーレイ
-    （spine が route server）、L2VNI 10010/10020、対称 IRB の L3VNI 50001、Anycast GW。
+    NX-OSv 9300v with 2 spines / 2 leaves and 2 VPCS hosts. eBGP underlay + eBGP EVPN overlay
+    (spines act as route servers), L2VNI 10010/10020, symmetric-IRB L3VNI 50001, anycast gateway.
   network_types: [l1-physical, l2-network, l3-unicast]
 
 layer1:
@@ -17,7 +17,7 @@ layer1:
       name: Windows Host
       implementation: physical
       role: hypervisor
-      description: 6 コア / 12 論理プロセッサ。EVE-NG の VM を載せる
+      description: 6 cores / 12 logical processors. Hosts the EVE-NG VM
 
     - id: eve-ng
       name: EVE-NG
@@ -25,7 +25,7 @@ layer1:
       role: hypervisor
       device_type: eve_ng_community
       attaches_to: windows-host
-      description: EVE-NG Community 6.2.0-4（192.168.0.229）。8 vCPU / RAM 46GB
+      description: EVE-NG Community 6.2.0-4 (192.168.0.229). 8 vCPU / 46 GB RAM
 
     # ── ファブリック（NX-OSv 9300v 10.5.2.F）─────────────────────────────
     - id: spine1
@@ -142,7 +142,7 @@ layer2:
     - id: vlan-3001
       vlan_id: 3001
       name: transit-tenant-a
-      description: L3VNI 50001 用の transit VLAN（ホストポートなし）
+      description: Transit VLAN for L3VNI 50001 (no host ports)
 
   vteps:
     # nve1 の source-interface loopback1
@@ -157,14 +157,14 @@ layer2:
       vni: 10010
       vlan: vlan-10
       vteps: [vtep-leaf1, vtep-leaf2]
-      description: ingress-replication protocol bgp / suppress-arp。RT 65000:10010（手動）
+      description: ingress-replication protocol bgp / suppress-arp. RT 65000:10010 (manual)
 
     - id: vni-10020
       type: l2vni
       vni: 10020
       vlan: vlan-20
       vteps: [vtep-leaf1, vtep-leaf2]
-      description: ingress-replication protocol bgp / suppress-arp。RT 65000:10020（手動）
+      description: ingress-replication protocol bgp / suppress-arp. RT 65000:10020 (manual)
 
     - id: vni-50001
       type: l3vni
@@ -177,14 +177,14 @@ layer3:
     - id: vrf-default
 
     - id: vrf-management
-      description: mgmt0 用（NX-OS の vrf management）。既定経路 192.168.0.1
+      description: For mgmt0 (NX-OS vrf management). Default route 192.168.0.1
 
     - id: vrf-tenant-a
       l3vni: vni-50001
       route_targets:                   # rd は auto
         import: ["65000:50001"]
         export: ["65000:50001"]
-      description: NX-OS 上の名前は TENANT-A
+      description: Named TENANT-A on NX-OS
 
   interfaces:
     # ── Loopback0（Router-ID / BGP）・Loopback1（VTEP）────────────────────

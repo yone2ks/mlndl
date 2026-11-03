@@ -17,9 +17,9 @@ ndl_version: "1.0"
 meta:
   name: eveng-evpn-vxlan-lab-extended
   description: >
-    NX-OSv 9300v の 2 spine / 6 leaf（うち leaf3 / leaf4 は vPC ペア、leaf6 は border leaf）。
-    eBGP アンダーレイ + eBGP EVPN オーバーレイ（spine が route server）、2 テナント（L3VNI 50001 / 50002）、
-    Anycast GW、vPC の共有 VTEP、VRF-lite での外部接続、テナント間ファイアウォール、外部への GRE。
+    NX-OSv 9300v with 2 spines / 6 leaves (leaf3 / leaf4 are a vPC pair, leaf6 is the border leaf).
+    eBGP underlay + eBGP EVPN overlay (spines act as route servers), 2 tenants (L3VNI 50001 / 50002),
+    anycast gateway, shared vPC VTEP, VRF-lite external connections, inter-tenant firewall, GRE to the outside.
   network_types: [l1-physical, l2-network, l3-unicast]
 
 layer1:
@@ -29,7 +29,7 @@ layer1:
       name: Windows Host
       implementation: physical
       role: hypervisor
-      description: 6 コア / 12 論理プロセッサ。EVE-NG の VM を載せる
+      description: 6 cores / 12 logical processors. Hosts the EVE-NG VM
 
     - id: eve-ng
       name: EVE-NG
@@ -37,7 +37,7 @@ layer1:
       role: hypervisor
       device_type: eve_ng_community
       attaches_to: windows-host
-      description: EVE-NG Community 6.2.0-4（192.168.0.229）。8 vCPU / RAM 46GB
+      description: EVE-NG Community 6.2.0-4 (192.168.0.229). 8 vCPU / 46 GB RAM
 
     # ── ファブリック（NX-OSv 9300v 10.5.2.F）─────────────────────────────
     - {id: spine1, name: spine1, implementation: vm, role: spine, device_type: cisco_nxosv9300, attaches_to: eve-ng}
@@ -53,7 +53,7 @@ layer1:
       role: border
       device_type: cisco_nxosv9300
       attaches_to: eve-ng
-      description: border leaf。ホストはつながず、L3VNI と外部接続だけを持つ
+      description: Border leaf. No hosts attached; carries only the L3VNIs and the external connections
 
     # ── 外部・サービス ──────────────────────────────────────────────────
     - id: wan-rtr
@@ -239,7 +239,7 @@ layer2:
 
     - id: vlan-40
       vlan_id: 40
-      description: server3 だけが使う（leaf3 / leaf4 の中で閉じる VNI）
+      description: Used only by server3 (VNI confined to leaf3 / leaf4)
       trunk_ports:
         - {lag: lag-vpc-server3}
         - {lag: lag-leaf3-po1}
@@ -264,14 +264,14 @@ layer2:
         - {lag: lag-leaf4-po1}
 
     # ── L3VNI 用の transit VLAN（ホストポートなし）──────────────────────
-    - {id: vlan-3001, vlan_id: 3001, name: transit-tenant-a, description: L3VNI 50001 用}
-    - {id: vlan-3002, vlan_id: 3002, name: transit-tenant-b, description: L3VNI 50002 用}
+    - {id: vlan-3001, vlan_id: 3001, name: transit-tenant-a, description: For L3VNI 50001}
+    - {id: vlan-3002, vlan_id: 3002, name: transit-tenant-b, description: For L3VNI 50002}
 
     # ── vPC のアンダーレイ・バックアップ（peer-link の上だけ）──────────────
     - id: vlan-3999
       vlan_id: 3999
       name: vpc-backup
-      description: leaf3 / leaf4 の iBGP（underlay のバックアップ経路）。VNI には載せない
+      description: iBGP between leaf3 / leaf4 (backup path for the underlay). Not mapped to a VNI
       trunk_ports:
         - {lag: lag-leaf3-po1}
         - {lag: lag-leaf4-po1}
@@ -325,21 +325,21 @@ layer3:
     - id: vrf-default
 
     - id: vrf-management
-      description: mgmt0 用（NX-OS の vrf management）。既定経路 192.168.0.1
+      description: For mgmt0 (NX-OS vrf management). Default route 192.168.0.1
 
     - id: vrf-tenant-a
       l3vni: vni-50001
       route_targets:                   # rd は auto
         import: ["65000:50001"]
         export: ["65000:50001"]
-      description: NX-OS 上の名前は TENANT-A
+      description: Named TENANT-A on NX-OS
 
     - id: vrf-tenant-b
       l3vni: vni-50002
       route_targets:
         import: ["65000:50002"]
         export: ["65000:50002"]
-      description: NX-OS 上の名前は TENANT-B
+      description: Named TENANT-B on NX-OS
 
   interfaces:
     # ── Loopback0（Router-ID / BGP）・Loopback1（VTEP）────────────────────
