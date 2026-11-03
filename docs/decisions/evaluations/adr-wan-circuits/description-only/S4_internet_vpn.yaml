@@ -1,0 +1,112 @@
+# S4 description-only: 本社がインターネット回線 2 本。ISP はトポロジー外。
+#                       支社とは GRE/IPsec。BGP over トンネルは書かない。
+#
+# 方針: ISP ごとに箱ノード (role: internet)。インターネットは「不特定の網」なので
+# 回線ごとに ISP ノードを立てる。アクセス回線情報は L1Link.description に。
+# tunnel_interfaces は L3 として宣言するが、オーバーレイ側の BGP セッションは
+# 現状書けない (update_source に tunnel を書けるか未確定) ので省略。
+
+ndl_version: "1.0"
+
+meta:
+  name: S4-internet-vpn-description-only
+  description: "本社 2 本インターネット + 支社 GRE/IPsec (BGP over tunnel 省略)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr,     role: border, implementation: physical, labels: {site: hq}}
+    - {id: branch-rtr, role: border, implementation: physical, labels: {site: branch}}
+
+    # ISP ごとに箱 (role: internet は free-form)
+    - id: net-isp-a
+      role: internet
+      description: |
+        provider: isp-a
+        service: internet
+        contract: business
+    - id: net-isp-b
+      role: internet
+      description: |
+        provider: isp-b
+        service: internet
+        contract: standard
+
+  interfaces:
+    - {id: hq-rtr-ge0,     node: hq-rtr,     name: Ge0/0}   # -> ISP A
+    - {id: hq-rtr-ge1,     node: hq-rtr,     name: Ge0/1}   # -> ISP B
+    - {id: branch-rtr-ge0, node: branch-rtr, name: Ge0/0}   # -> ISP A (支社側)
+    - {id: net-isp-a-hq,     node: net-isp-a, name: hq}
+    - {id: net-isp-a-branch, node: net-isp-a, name: branch}
+    - {id: net-isp-b-hq,     node: net-isp-b, name: hq}
+
+  links:
+    - id: link-hq-ispa
+      endpoints: [hq-rtr-ge0, net-isp-a-hq]
+      link_speed: 1G
+      link_role: wan-internet
+      description: "circuit-id=HQ-A-00001, bandwidth=1G, access=flets-cross, static-ip=yes"
+    - id: link-hq-ispb
+      endpoints: [hq-rtr-ge1, net-isp-b-hq]
+      link_speed: 500M
+      link_role: wan-internet
+      description: "circuit-id=HQ-B-00002, bandwidth=500M, access=cable, static-ip=yes"
+    - id: link-branch-ispa
+      endpoints: [branch-rtr-ge0, net-isp-a-branch]
+      link_speed: 100M
+      link_role: wan-internet
+      description: "circuit-id=BR-A-00099, bandwidth=100M, access=flets, static-ip=yes"
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+    - {id: vrf-tenant-a}
+
+  interfaces:
+    - {id: hq-rtr-ge0-l3,     node: hq-rtr,     name: Ge0/0, ip: 203.0.113.2/30,  attaches_to: {interface: hq-rtr-ge0}}
+    - {id: hq-rtr-ge1-l3,     node: hq-rtr,     name: Ge0/1, ip: 198.51.100.2/30, attaches_to: {interface: hq-rtr-ge1}}
+    - {id: branch-rtr-ge0-l3, node: branch-rtr, name: Ge0/0, ip: 203.0.113.6/30,  attaches_to: {interface: branch-rtr-ge0}}
+
+  # GRE/IPsec トンネル (ADR-0011 D6)。両端を定義するが、ここで終わる。
+  # 本来はこの上に overlay BGP を張るが update_source: <tunnel> が確定していないので省略。
+  tunnel_interfaces:
+    - id: tunnel-hq-branch-a
+      node: hq-rtr
+      type: gre
+      source: hq-rtr-ge0-l3
+      destination_interface: branch-rtr-ge0-l3
+      ip: 172.31.0.1/30
+      vrf: vrf-tenant-a
+      transport_vrf: vrf-default
+      mtu: 1476
+      description: "ipsec=yes, cipher=aes256-sha256, pfs=group14"
+    - id: tunnel-branch-hq-a
+      node: branch-rtr
+      type: gre
+      source: branch-rtr-ge0-l3
+      destination_interface: hq-rtr-ge0-l3
+      ip: 172.31.0.2/30
+      vrf: vrf-tenant-a
+      transport_vrf: vrf-default
+      mtu: 1476
+      description: "ipsec=yes, cipher=aes256-sha256, pfs=group14"
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: hq-rtr,     local_as: 65000}
+        - {node: branch-rtr, local_as: 65001}
+  routing_neighbors:
+    # ISP との eBGP (ISP はトポロジー外として address + local_as)
+    - {id: bgp-peer-hq-ispa, type: bgp, instance: bgp-default, from: {node: hq-rtr,     update_source: hq-rtr-ge0-l3},     to: {address: 203.0.113.1,  local_as: 64501}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-hq-ispb, type: bgp, instance: bgp-default, from: {node: hq-rtr,     update_source: hq-rtr-ge1-l3},     to: {address: 198.51.100.1, local_as: 64502}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-br-ispa, type: bgp, instance: bgp-default, from: {node: branch-rtr, update_source: branch-rtr-ge0-l3}, to: {address: 203.0.113.5,  local_as: 64501}, address_families: [ipv4_unicast]}
+    # overlay (hq <-> branch over GRE) は update_source: <tunnel-...> と書きたいが、
+    # ADR-0010 / ADR-0011 で未確定のため省略。別途 ADR で決着したら追記する。
+
+# ndl-viz:
+#   - ISP A/B をそれぞれ雲として描く。各リンクに回線 ID 小字
+#   - GRE トンネルは overlay (破線) として、通る underlay (ISP A の雲) を跨ぐ
+#     ことで表現。この「跨ぐ」描画は tunnel_interfaces の source/destination を
+#     L1 リンクに紐付けて計算する必要があり、ndl-viz 側のロジック

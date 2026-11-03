@@ -1,0 +1,72 @@
+# S3 description-only: 3 拠点を広域イーサで接続。同一 VLAN がストレッチ。
+#
+# 方針: 広域イーサ網 = 箱ノード。VLAN は拠点側のポートだけを trunk に並べる
+# (網側のタグ運用は mlndl のスコープ外として書かない)。
+
+ndl_version: "1.0"
+
+meta:
+  name: S3-wide-ether-description-only
+  description: "3 拠点広域イーサ (description-only)"
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - {id: tokyo-sw,  role: core, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-sw,  role: core, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-sw, role: core, implementation: physical, labels: {site: nagoya}}
+
+    - id: net-wideeth-ntt
+      role: provider-network
+      description: |
+        provider: ntt-com
+        service: wide-ethernet
+        vpn-id: WE-100
+        contract: multipoint
+        max-mtu: 1500
+
+  interfaces:
+    - {id: tokyo-sw-ge0,  node: tokyo-sw,  name: Ge0/0}
+    - {id: osaka-sw-ge0,  node: osaka-sw,  name: Ge0/0}
+    - {id: nagoya-sw-ge0, node: nagoya-sw, name: Ge0/0}
+    - {id: net-wideeth-ntt-tokyo,  node: net-wideeth-ntt, name: tokyo}
+    - {id: net-wideeth-ntt-osaka,  node: net-wideeth-ntt, name: osaka}
+    - {id: net-wideeth-ntt-nagoya, node: net-wideeth-ntt, name: nagoya}
+
+  links:
+    - id: link-tokyo-wideeth
+      endpoints: [tokyo-sw-ge0, net-wideeth-ntt-tokyo]
+      link_speed: 1G
+      link_role: wan-l2                       # 広域イーサは L2 透過
+      description: "circuit-id=WE-100-T, bandwidth=1G, access=metro-ether"
+    - id: link-osaka-wideeth
+      endpoints: [osaka-sw-ge0, net-wideeth-ntt-osaka]
+      link_speed: 1G
+      link_role: wan-l2
+      description: "circuit-id=WE-100-O, bandwidth=1G, access=metro-ether"
+    - id: link-nagoya-wideeth
+      endpoints: [nagoya-sw-ge0, net-wideeth-ntt-nagoya]
+      link_speed: 500M
+      link_role: wan-l2
+      description: "circuit-id=WE-100-N, bandwidth=500M, access=metro-ether"
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: stretched-tenant
+      # 拠点側 trunk 3 ポートだけを並べる。網側は L2 透過と見なして書かない
+      trunk_ports:
+        - {interface: tokyo-sw-ge0}
+        - {interface: osaka-sw-ge0}
+        - {interface: nagoya-sw-ge0}
+
+# link_role のポイント:
+#   - S1 の leased-l2 と S3 の wide-ether を link_role で区別したい場合、
+#     "wan-l2" ではなく "wan-leased-l2" / "wan-wide-ether" のように細分化が要る。
+#     結局語彙を増やしていくと、link_role が description の代替表に近づく。
+#
+# ndl-viz:
+#   - 雲ラベル "NTT Com Wide-Ether (WE-100)"
+#   - VLAN 100 がストレッチしていることを雲内に明示 (layer2.vlans の trunk_ports
+#     から導出可能)

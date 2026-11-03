@@ -121,3 +121,17 @@ Pass C (2026-10-15) で、参照先の種類を `attaches_to` のキーで示す
 ADR-0011 の「書けないまま残るもの」を優先順に扱う。ADR-0014 で、構文は関係の形で決め、方式名は構文に入れない
 という原則を ADR-0005 D4 補則に加えた。
 ADR-0015 では、参照先をスキーマに `Ref` で宣言し、参照の存在の検査を汎用化した (ライブラリの実装方針)。
+
+### ラウンド6: サイトと WAN (2026-11-03)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [0017](0017-sites-and-wan.md) | サイト・事業者網・回線情報の書き分け (スキーマ・validator は変更なし) | **Accepted** | C |
+| [drafts/0017](drafts/0017-sites-and-wan.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0017 | A |
+| [evaluations/adr0017](evaluations/adr0017/evaluation.md) | 横断評価メモ (Pass B) と Pass C の結果。試し書き S1〜S6b、`passc/` P1〜P4 | — | — |
+| evaluations/adr-site-boundary/ | サイトの書き方の比較 (T1〜T3 × 4 案) | — | — |
+| evaluations/adr-wan-circuits/ | WAN 回線の書き方の比較 (S1〜S5 × 4 案、`description-only/`) | — | — |
+
+ndl-viz が `link_role: wan` のリンクを除いた連結成分を「サイト」と推定して描いていたことから始まった。
+サイトは `labels.site`、2 点間の回線は `L1Link`、事業者網は `role: provider-network` の箱ノード、回線 ID などは `description` に書き、構文は足さない。
+広域イーサ越しに自社の機器どうしが張るセッション (事業者網が L2 を透過する場合) は書き切れず、次の ADR で扱う (ADR-0017 D5-2)。

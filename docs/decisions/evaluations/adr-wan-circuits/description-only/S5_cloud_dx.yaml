@@ -1,0 +1,79 @@
+# S5 description-only: オンプレ - AWS 間 Direct Connect。
+#
+# 方針: DX サービス自体を 1 箱ノードに。クラウド側は parent 未実装のためフラットに
+# 書く (VPC / Subnet / VGW をノードとして並列に置き、parent は使わない)。
+# location や cidr は labels に。契約情報 (DX 回線 ID 等) は box node / L1Link の
+# description に。
+
+ndl_version: "1.0"
+
+meta:
+  name: S5-cloud-dx-description-only
+  description: "オンプレ - AWS Direct Connect (description-only、parent 未使用)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: onprem-rtr, role: border, implementation: physical, labels: {site: onprem-tokyo, location: on-prem}}
+
+    # クラウド側ノード群 (parent なし。所属は labels で表す)
+    - id: vpc-prod
+      role: vpc
+      labels: {location: cloud, provider: aws, extent: region, region: ap-northeast-1, cidr: "10.0.0.0/16"}
+      description: "owner-account: 123456789012"
+    - id: subnet-private
+      role: subnet
+      labels: {location: cloud, provider: aws, az: ap-northeast-1a, cidr: "10.0.1.0/24", vpc: vpc-prod}
+      description: "purpose: workload-private"
+    - id: vgw-prod
+      role: gateway
+      labels: {location: cloud, provider: aws, kind: virtual-gateway, vpc: vpc-prod}
+      description: "attach-type: vgw, asn: 64512"
+
+    # DX 回線 (箱)
+    - id: net-dx-aws-01
+      role: dx-connection
+      description: |
+        provider: aws
+        service: direct-connect
+        circuit-id: dxcon-ab12cd34
+        bandwidth: 1G
+        colocation: equinix-ty2
+        vlan: 101
+
+  interfaces:
+    - {id: onprem-rtr-ge0, node: onprem-rtr, name: Ge0/0}
+    - {id: net-dx-aws-01-onprem, node: net-dx-aws-01, name: onprem}
+    - {id: net-dx-aws-01-aws,    node: net-dx-aws-01, name: aws}
+    - {id: vgw-prod-dx, node: vgw-prod, name: dx-attach}
+
+  links:
+    - id: link-onprem-dx
+      endpoints: [onprem-rtr-ge0, net-dx-aws-01-onprem]
+      link_speed: 1G
+      link_role: wan-l2                       # DX の物理接続は L2
+      description: "last-mile=cross-connect, patch=ty2-rack-A3"
+    - id: link-dx-vgw
+      endpoints: [net-dx-aws-01-aws, vgw-prod-dx]
+      link_speed: 1G
+      link_role: wan-l2
+      description: "virtual-interface=private-vif, vif-id=dxvif-11223344"
+
+layer3:
+  interfaces:
+    - {id: onprem-rtr-ge0-l3, node: onprem-rtr, name: Ge0/0.101, ip: 169.254.100.1/30, attaches_to: {interface: onprem-rtr-ge0}, description: "dx-vif peering IP"}
+    - {id: vgw-prod-dx-l3,    node: vgw-prod,   name: dx-vif,    ip: 169.254.100.2/30, attaches_to: {interface: vgw-prod-dx},    description: "dx-vif peering IP"}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: onprem-rtr, local_as: 65000}
+        - {node: vgw-prod,   local_as: 64512}
+  routing_neighbors:
+    - {id: bgp-peer-dx, type: bgp, from: {node: onprem-rtr, update_source: onprem-rtr-ge0-l3}, to: {node: vgw-prod, update_source: vgw-prod-dx-l3}, address_families: [ipv4_unicast]}
+
+# ndl-viz:
+#   - VPC を枠として描きたい (compound) が parent 未実装なので、labels: {vpc: ...}
+#     の値で視覚的にグルーピングするしかない。ADR-0008 の parent が入ると自然に書ける
+#   - DX の雲ラベルに "AWS DX dxcon-ab12cd34 1G" を出す

@@ -60,7 +60,7 @@ layer1:
     - {id: igw-prod,   role: gateway, kind: internet-gateway, parent: vpc-prod}
 
     # オンプレの箱も同じ書き方
-    - {id: pod-tokyo,  role: pod,     location: on-prem, labels: {az: az-1a, site: site-tokyo}}
+    - {id: pod-tokyo,  role: pod,     location: on-prem, labels: {az: az-1a, site: tokyo}}
     - {id: leaf1,      role: leaf,    location: on-prem, parent: pod-tokyo,
        attaches_to: esxi-01, labels: {az: az-1a, tenant: acme}}
 ```

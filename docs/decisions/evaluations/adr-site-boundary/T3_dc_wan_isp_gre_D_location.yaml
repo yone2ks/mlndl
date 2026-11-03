@@ -1,0 +1,52 @@
+# ADR-site-boundary 試し書き
+# Topology T3: 1 DC に WAN ルーター 2 台 + 拠点間 WAN + GRE-only 拠点
+# Candidate D: ADR-0008 Draft の `location` 軸を使う
+#
+# !! 現行スキーマでは parse できない (location は extra_forbidden) !!
+#
+# サイト名を YAML に書けるか: いいえ。T3 は全ノードが on-prem なので
+#   location の値は全ノードで一致し、拠点境界には 0 bit の情報しか載らない。
+# 書かなかったとき: 書いても書かなくても同じ (全ノード同値)。
+# 書き忘れ・矛盾: location と site が別軸であることが問題を増幅する。
+#   クラウドとオンプレの混在であれば D は意味があるが、「拠点境界」という
+#   論点では値域不足。この用途に D 単独では不可能。
+
+ndl_version: "1.0"
+
+meta:
+  name: T3-dc-wan-isp-gre
+  description: "ADR-0008 Draft の location は拠点境界の表現には粒度不足"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: dc-core1, role: core,   implementation: vm,       location: on-prem}
+    - {id: dc-wan1,  role: border, implementation: vm,       location: on-prem}
+    - {id: dc-wan2,  role: border, implementation: vm,       location: on-prem}
+    - {id: s2-wan,   role: border, implementation: physical, location: on-prem}
+    - {id: s3-rtr,   role: border, implementation: physical, location: on-prem}
+    # どの行も on-prem のため location は拠点を区別しない
+
+  interfaces:
+    - {id: dc-core1-swp1, node: dc-core1, name: swp1}
+    - {id: dc-core1-swp2, node: dc-core1, name: swp2}
+    - {id: dc-wan1-swp1,  node: dc-wan1,  name: swp1}
+    - {id: dc-wan1-eth1,  node: dc-wan1,  name: eth1}
+    - {id: dc-wan2-swp1,  node: dc-wan2,  name: swp1}
+    - {id: dc-wan2-eth1,  node: dc-wan2,  name: eth1}
+    - {id: s2-wan-eth0,   node: s2-wan,   name: eth0}
+    - {id: s3-rtr-eth0,   node: s3-rtr,   name: eth0}
+
+  links:
+    - {id: link-dc-core1-wan1, endpoints: [dc-core1-swp1, dc-wan1-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-dc-core1-wan2, endpoints: [dc-core1-swp2, dc-wan2-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-wan-dc-s2,     endpoints: [dc-wan2-eth1, s2-wan-eth0],   link_speed: 1G,  link_role: uplink}
+
+layer3:
+  interfaces:
+    - {id: dc-wan1-eth1-l3, node: dc-wan1, name: eth1, ip: 203.0.113.2/30, attaches_to: {interface: dc-wan1-eth1}}
+    - {id: s3-rtr-eth0-l3,  node: s3-rtr,  name: eth0, ip: 198.51.100.9/30, attaches_to: {interface: s3-rtr-eth0}}
+  tunnel_interfaces:
+    - {id: tunnel-dc-wan1-s3, node: dc-wan1, type: gre,
+       source: dc-wan1-eth1-l3, destination_interface: s3-rtr-eth0-l3,
+       ip: 10.254.0.1/30, mtu: 1476}

@@ -1,0 +1,103 @@
+# S4 (ADR-0017): 本社がインターネット回線 2 本。支社とは GRE/IPsec。
+#
+# ISP ごとに箱ノード (role: provider-network。role: internet は使わない)。網の種類とサービス名
+# (ISP の名前) は name で読む (D3)。アクセス回線の情報は L1Link.description に。
+# ISP との eBGP は、ISP ルーターがトポロジー外なので address + local_as で書く (D5-1)。
+# tunnel_interfaces 上の overlay BGP は update_source: <tunnel> が確定していないため省略。
+# labels は site のみ。
+
+ndl_version: "1.0"
+
+meta:
+  name: S4-internet-vpn
+  description: 本社がインターネット 2 回線を持ち、支社と GRE/IPsec で接続する構成
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr,     role: border, implementation: physical, labels: {site: hq}}
+    - {id: branch-rtr, role: border, implementation: physical, labels: {site: branch}}
+
+    # ISP ごとに箱 (D3)。回線ごとに相手の ISP が違うので同じ箱に相乗りしない。
+    - id: net-isp-a
+      name: ISP-A インターネット
+      role: provider-network
+      description: ISP-A のビジネス向けインターネット接続。
+    - id: net-isp-b
+      name: ISP-B インターネット
+      role: provider-network
+      description: ISP-B のスタンダード向けインターネット接続。
+
+  interfaces:
+    - {id: hq-rtr-ge0,     node: hq-rtr,     name: Ge0/0}
+    - {id: hq-rtr-ge1,     node: hq-rtr,     name: Ge0/1}
+    - {id: branch-rtr-ge0, node: branch-rtr, name: Ge0/0}
+    - {id: net-isp-a-hq,     node: net-isp-a, name: hq}
+    - {id: net-isp-a-branch, node: net-isp-a, name: branch}
+    - {id: net-isp-b-hq,     node: net-isp-b, name: hq}
+
+  links:
+    - id: link-hq-ispa
+      endpoints: [hq-rtr-ge0, net-isp-a-hq]
+      link_speed: 1G
+      description: >-
+        本社の ISP-A 回線。回線 ID HQ-A-00001、フレッツ・クロス、固定 IP、
+        契約帯域 1G。
+    - id: link-hq-ispb
+      endpoints: [hq-rtr-ge1, net-isp-b-hq]
+      link_speed: 500M
+      description: >-
+        本社の ISP-B 回線。回線 ID HQ-B-00002、ケーブル、固定 IP、契約帯域 500M。
+    - id: link-branch-ispa
+      endpoints: [branch-rtr-ge0, net-isp-a-branch]
+      link_speed: 100M
+      description: >-
+        支社の ISP-A 回線。回線 ID BR-A-00099、フレッツ、固定 IP、契約帯域 100M。
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+    - {id: vrf-tenant-a}
+
+  interfaces:
+    - {id: hq-rtr-ge0-l3,     node: hq-rtr,     name: Ge0/0, ip: 203.0.113.2/30,  attaches_to: {interface: hq-rtr-ge0}}
+    - {id: hq-rtr-ge1-l3,     node: hq-rtr,     name: Ge0/1, ip: 198.51.100.2/30, attaches_to: {interface: hq-rtr-ge1}}
+    - {id: branch-rtr-ge0-l3, node: branch-rtr, name: Ge0/0, ip: 203.0.113.6/30,  attaches_to: {interface: branch-rtr-ge0}}
+
+  # GRE/IPsec トンネル (ADR-0011 D6)。本来はこの上に overlay BGP を張るが、
+  # update_source: <tunnel> の扱いが未確定 (ADR-0010 の課題) なので省略。
+  tunnel_interfaces:
+    - id: tunnel-hq-branch-a
+      node: hq-rtr
+      type: gre
+      source: hq-rtr-ge0-l3
+      destination_interface: branch-rtr-ge0-l3
+      ip: 172.31.0.1/30
+      vrf: vrf-tenant-a
+      transport_vrf: vrf-default
+      mtu: 1476
+      description: GRE over IPsec (AES256-SHA256、PFS group14)。
+    - id: tunnel-branch-hq-a
+      node: branch-rtr
+      type: gre
+      source: branch-rtr-ge0-l3
+      destination_interface: hq-rtr-ge0-l3
+      ip: 172.31.0.2/30
+      vrf: vrf-tenant-a
+      transport_vrf: vrf-default
+      mtu: 1476
+      description: GRE over IPsec (AES256-SHA256、PFS group14)。
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: hq-rtr,     local_as: 65000}
+        - {node: branch-rtr, local_as: 65001}
+  routing_neighbors:
+    # ISP との eBGP (ISP はトポロジー外として address + local_as)。
+    - {id: bgp-peer-hq-ispa, type: bgp, instance: bgp-default, from: {node: hq-rtr,     update_source: hq-rtr-ge0-l3},     to: {address: 203.0.113.1,  local_as: 64501}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-hq-ispb, type: bgp, instance: bgp-default, from: {node: hq-rtr,     update_source: hq-rtr-ge1-l3},     to: {address: 198.51.100.1, local_as: 64502}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-br-ispa, type: bgp, instance: bgp-default, from: {node: branch-rtr, update_source: branch-rtr-ge0-l3}, to: {address: 203.0.113.5,  local_as: 64501}, address_families: [ipv4_unicast]}
+    # overlay (hq <-> branch over GRE) は update_source: <tunnel-...> と書きたいが、
+    # ADR-0010 / ADR-0011 で未確定のため省略。

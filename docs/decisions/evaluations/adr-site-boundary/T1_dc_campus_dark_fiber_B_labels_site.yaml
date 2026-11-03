@@ -1,0 +1,48 @@
+# ADR-site-boundary 試し書き
+# Topology T1: DC と Campus を dark fiber で直結した 2 拠点
+# Candidate B: ノードの labels: {site: <name>} でサイトに所属させる
+#
+# サイト名を YAML に書けるか: はい。`site: dc-tokyo` / `site: campus-osaka` と
+#   直接書ける。
+# 書かなかったとき: サイト属性のないノードは「site 不明」として扱うしかなく、
+#   ndl-viz は何かのフォールバックを決める必要が出る (null 行き / 連結成分
+#   フォールバック / 無視)。筆者から見ると「全ノードに書くか、1 つも書かないか」
+#   の二択になりがち。
+# 書き忘れ・矛盾: 隣接する機器で site が食い違う例を仕込むと起きる (下記
+#   注記参照)。labels は非参照の自由文字列なので mlndl コアは `dc-tokyo` と
+#   `dc_tokyo`、`tokyo` の表記揺れを検出しない (warning はキー名のみ)。
+#   `labels: {site: ...}` が無いノードは「どちらの連結成分にも属する」か
+#   「どちらでもない」か定義されない。
+
+ndl_version: "1.0"
+
+meta:
+  name: T1-dc-campus-dark-fiber
+  description: "DC と Campus を dark fiber で直結。labels: {site: ...} でサイト所属"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: dc-leaf1,     role: leaf,   implementation: vm,
+       labels: {site: dc-tokyo}}
+    - {id: dc-border1,   role: border, implementation: vm,
+       labels: {site: dc-tokyo}}
+    - {id: cm-core1,     role: core,   implementation: physical,
+       labels: {site: campus-osaka}}
+    - {id: cm-access1,   role: access, implementation: physical,
+       labels: {site: campus-osaka}}
+    # NOTE: 書き忘れを再現したいなら、1 ノードだけ labels を外す。mlndl の
+    #       検査はパスするが、ndl-viz 側で「site 不明」ノードが生じる。
+
+  interfaces:
+    - {id: dc-leaf1-swp1,    node: dc-leaf1,   name: swp1}
+    - {id: dc-border1-swp1,  node: dc-border1, name: swp1}
+    - {id: dc-border1-swp2,  node: dc-border1, name: swp2}
+    - {id: cm-core1-te1-1,   node: cm-core1,   name: Te1/1}
+    - {id: cm-core1-ge1-1,   node: cm-core1,   name: Ge1/1}
+    - {id: cm-access1-ge0-1, node: cm-access1, name: Ge0/1}
+
+  links:
+    - {id: link-dc-leaf1-border1,  endpoints: [dc-leaf1-swp1, dc-border1-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-wan-border1-core1, endpoints: [dc-border1-swp2, cm-core1-te1-1], link_speed: 10G, link_role: uplink}
+    - {id: link-cm-core1-access1,  endpoints: [cm-core1-ge1-1, cm-access1-ge0-1], link_speed: 1G, link_role: underlay}

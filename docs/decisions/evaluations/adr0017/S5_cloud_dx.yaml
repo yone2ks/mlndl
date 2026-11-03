@@ -1,0 +1,62 @@
+# S5 (ADR-0017): オンプレ - AWS 間 Direct Connect。
+#
+# Direct Connect の網は箱ノード (role: provider-network。role: dx-connection は使わない)。
+# サービス名は name で読む (D3)。AWS 側 (VGW) は箱の向こうの事業者側機器なので、トポロジー外の
+# 相手 address + local_as で書く (D5-1)。クラウド側の論理階層 (VPC / Subnet / VGW) は
+# この ADR のスコープ外 (drafts/0008 で別に扱う)。
+# labels は site のみ (provider / cidr / vpc などは書かない)。
+
+ndl_version: "1.0"
+
+meta:
+  name: S5-cloud-dx
+  description: オンプレ (東京) から AWS ap-northeast-1 へ Direct Connect で接続する構成
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: onprem-rtr, role: border, implementation: physical, labels: {site: onprem-tokyo}}
+
+    # DX 回線は箱ノード。網の種類とサービス名は name で読む。
+    - id: net-aws-dx
+      name: AWS Direct Connect (dxcon-ab12cd34)
+      role: provider-network
+      description: >-
+        AWS Direct Connect dxcon-ab12cd34、1G、Equinix TY2 で相互接続、
+        Private VIF 101 を割り当て。
+
+  interfaces:
+    - {id: onprem-rtr-ge0,  node: onprem-rtr, name: Ge0/0}
+    - {id: net-aws-dx-onprem, node: net-aws-dx, name: onprem}
+
+  links:
+    - id: link-onprem-dx
+      endpoints: [onprem-rtr-ge0, net-aws-dx-onprem]
+      link_speed: 1G
+      description: >-
+        TY2 データセンター内のクロスコネクト (ラック A3 のパッチ経由)。
+
+layer3:
+  interfaces:
+    - id: onprem-rtr-ge0-l3
+      node: onprem-rtr
+      name: Ge0/0.101
+      ip: 169.254.100.1/30
+      attaches_to: {interface: onprem-rtr-ge0}
+      description: AWS DX の Private VIF (dxvif-11223344) 向けのピアリング IP。
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: onprem-rtr, local_as: 65000}
+  routing_neighbors:
+    # AWS 側 (VGW) はトポロジー外の相手として書く (D5-1)。
+    - {id: bgp-peer-aws-vgw, type: bgp,
+       from: {node: onprem-rtr, update_source: onprem-rtr-ge0-l3},
+       to: {address: 169.254.100.2, local_as: 64512},
+       address_families: [ipv4_unicast]}
+
+# ndl-viz:
+#   - 雲ラベル "AWS Direct Connect (dxcon-ab12cd34)"
+#   - クラウド側の VPC / Subnet / VGW を書く必要が出たら drafts/0008 の parent と併せて扱う。

@@ -1,0 +1,69 @@
+# S1 候補 B: layer1.circuits を独立エンティティにする (未実装の構文)
+#
+# 回線を「物理的な契約単位」として分離し、L1Link は論理的な通線 (ケーブル) のまま
+# で、attaches_to: {circuit: ...} で参照する。
+#
+# 書けるか:
+#   service / provider / circuit_id / bandwidth = yes (circuits 側に書く)
+#   片端がトポロジー外 = circuits 単体では書けないが、L1Link で片端 IF を省略できる
+#     ようにすれば両立。本サンプルでは S1 (両端トポロジー内) に限定
+#   VLAN/L3 IF/BGP の通り道 = L1Link は従来通り。circuit は L1Link の下位 (さらに
+#     下の層)。
+#
+# 利点: 1 本の物理回線を複数の論理リンクで共有するケース (例: 1 本の L2 専用線上に
+#   複数の VLAN タグで複数のポイントツーポイントを収容) を自然に書ける。
+# 欠点: Phase 1 の L1 サンプルとしては過剰。レベルが 1 つ増える。
+#
+# ndl-viz: 線を 2 層で描く。細い実線 = L1Link、その下の太い影 = circuit。
+#   ホバーで circuit 情報 (provider, circuit_id, bandwidth) を出す。
+#
+# [NOTE] 現行スキーマ未実装:
+#   - layer1.circuits コレクション (L1Circuit モデル)
+#   - L1Link.attaches_to: {circuit:} キー (ADR-0001 D8 の ATTACH_KEYS に追加)
+
+ndl_version: "1.0"
+
+meta:
+  name: S1-leased-lines-B
+  description: "東京 DC - 大阪 DC 冗長専用線 (候補 B: 独立 circuits エンティティ)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: dc-tokyo-rtr,  role: border, implementation: physical, labels: {site: dc-tokyo}}
+    - {id: dc-osaka-rtr,  role: border, implementation: physical, labels: {site: dc-osaka}}
+
+  interfaces:
+    - {id: dc-tokyo-rtr-ge0, node: dc-tokyo-rtr, name: Ge0/0}
+    - {id: dc-tokyo-rtr-ge1, node: dc-tokyo-rtr, name: Ge0/1}
+    - {id: dc-osaka-rtr-ge0, node: dc-osaka-rtr, name: Ge0/0}
+    - {id: dc-osaka-rtr-ge1, node: dc-osaka-rtr, name: Ge0/1}
+
+  # [未実装の構文] 回線 (物理契約) を独立エンティティに
+  circuits:
+    - id: circ-nttcom-tokyo-osaka
+      provider: ntt-com
+      circuit_id: NC-00012345
+      service: dark-fiber        # dark-fiber / leased-l2 / leased-l3 / ip-vpn / wide-ethernet
+      bandwidth: 10G
+      labels: {wan_region: domestic-jp}
+
+    - id: circ-kddi-tokyo-osaka
+      provider: kddi
+      circuit_id: KV-77889900
+      service: leased-l2
+      bandwidth: 1G
+
+  links:
+    - id: link-tokyo-osaka-nttcom
+      endpoints: [dc-tokyo-rtr-ge0, dc-osaka-rtr-ge0]
+      link_speed: 10G
+      link_role: wan
+      attaches_to: {circuit: circ-nttcom-tokyo-osaka}   # ← 未実装のキー
+    - id: link-tokyo-osaka-kddi
+      endpoints: [dc-tokyo-rtr-ge1, dc-osaka-rtr-ge1]
+      link_speed: 1G
+      link_role: wan
+      attaches_to: {circuit: circ-kddi-tokyo-osaka}
+
+# L3 / control_plane は候補 A と同一のため省略 (差分なし)

@@ -1,0 +1,90 @@
+# S5: オンプレとクラウドを閉域接続 (Direct Connect 等)。ADR-0008 の
+#      `role: vpc` を参照する。
+#
+# クラウド側は ADR-0008 D2 の例に合わせ、`role: vpc` + `parent` の階層構造。
+# オンプレ ↔ クラウドの境界 (= 専用線 Direct Connect) をどう書くかが本論点。
+#
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 A (L1Link + 属性): DX 回線は「オンプレ側ルータ」と「クラウド側の
+#   DX ゲートウェイ or VPC アタッチメント」の 2 端点がある。クラウド側の
+#   端点を L1 IF として書けるなら A でも書ける。ADR-0008 では VPC がノード
+#   なので、VPC 配下に DX GW ノードを置き IF を持たせれば、L1Link で両端を
+#   指せる → A でも書けるが、クラウド側に物理機器が無いのに IF を立てる違和感
+# ──────────────────────────────────────────────────────────────────────────
+#
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 C (網 = 箱ノード): DX サービスそのものを 1 ノードに ★ ADR-0008 と整合
+# ──────────────────────────────────────────────────────────────────────────
+
+ndl_version: "1.0"
+
+meta:
+  name: S5-cloud-dx-C
+  description: "候補 C: オンプレ - AWS 間 Direct Connect"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: onprem-rtr, role: border, implementation: physical, labels: {site: onprem-tokyo, location: on-prem}}
+
+    # クラウド側 (ADR-0008 D2)
+    - {id: vpc-prod,       role: vpc,     labels: {location: cloud, provider: aws, extent: region, cidr: "10.0.0.0/16"}}
+    - {id: subnet-private, role: subnet,  parent: vpc-prod, labels: {location: cloud, az: ap-northeast-1a, cidr: "10.0.1.0/24"}}
+    # ADR-0008 では implicit_router / cidr は専用フィールド候補だが Phase 1 では
+    # labels に逃がすしかない (未実装)。
+    - {id: vgw-prod,       role: gateway, parent: vpc-prod, labels: {location: cloud, kind: virtual-gateway}}
+
+    # DX 回線を 1 ノードに (網 = 箱)
+    - id: net-dx-aws-01
+      role: dx-connection
+      implementation: physical
+      labels:
+        provider: aws
+        service: direct-connect
+        circuit_id: dxcon-ab12cd34
+        bandwidth: 1G
+        location: colocation         # 物理的な接続ポイント (DX location)
+
+  interfaces:
+    - {id: onprem-rtr-ge0, node: onprem-rtr, name: Ge0/0}
+    # DX 側の両ポート
+    - {id: net-dx-aws-01-onprem, node: net-dx-aws-01, name: onprem}
+    - {id: net-dx-aws-01-aws,    node: net-dx-aws-01, name: aws}
+    # VGW のポート (AWS 側の DX attachment)
+    - {id: vgw-prod-dx, node: vgw-prod, name: dx-attach}
+
+  links:
+    - {id: link-onprem-dx, endpoints: [onprem-rtr-ge0, net-dx-aws-01-onprem], link_speed: 1G, link_role: wan}
+    - {id: link-dx-vgw,    endpoints: [net-dx-aws-01-aws, vgw-prod-dx],       link_speed: 1G, link_role: wan}
+    # [書きにくさ] 1 本の DX 回線なのに L1Link が 2 本に分裂する (候補 C 共通の弱点)。
+    # これを嫌うなら候補 B (circuits) で 1 つの circuit に括るのが素直。
+
+layer3:
+  interfaces:
+    # DX の BGP セッション用 /30 (AWS DX は VLAN サブ IF で払い出される仕様)
+    - {id: onprem-rtr-ge0-l3, node: onprem-rtr, name: Ge0/0, ip: 169.254.100.1/30, attaches_to: {interface: onprem-rtr-ge0}}
+    # クラウド側は update_source を書けるか微妙。VGW に L3 IF を立てる?
+    # ADR-0008 では implicit_router があり、ノード本体が L3 を持つが、
+    # L3Interface の attaches_to を vgw-prod-dx (L1 IF) に向けるのは
+    # 「物理 IF ではない」ので意味論的に無理がある。labels に逃がすしかない
+    - {id: vgw-prod-dx-l3, node: vgw-prod, name: dx-vif, ip: 169.254.100.2/30, attaches_to: {interface: vgw-prod-dx}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: onprem-rtr, local_as: 65000}
+        - {node: vgw-prod,   local_as: 64512}   # AWS DX の推奨 private ASN
+  routing_neighbors:
+    - {id: bgp-peer-dx, type: bgp, from: {node: onprem-rtr, update_source: onprem-rtr-ge0-l3}, to: {node: vgw-prod, update_source: vgw-prod-dx-l3}, address_families: [ipv4_unicast]}
+
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 D: C と同じ。クラウド側は「網」としてのノード (VPC/VGW) で表現、
+#   オンプレ側のラストマイル (DX location までの物理回線) は要すれば候補 A の
+#   link_attrs で足せる (= 本当の意味で A と C を混ぜる余地)。
+# ──────────────────────────────────────────────────────────────────────────
+#
+# ndl-viz: VPC を compound node (ADR-0008 の parent → cytoscape compound) で
+#   枠として描く。中に subnet / vgw / instance を入れる。DX 回線は雲 or
+#   独立ノードとして枠の外に出し、オンプレルータから枠内 VGW までの線を描く。
+#   線のラベルに "AWS DX dxcon-ab12cd34 1G"。

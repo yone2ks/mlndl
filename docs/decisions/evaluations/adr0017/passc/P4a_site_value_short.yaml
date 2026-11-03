@@ -1,0 +1,34 @@
+# P4a (ADR-0017 Pass C): labels.site の値を短い形 "tokyo" で書く
+#
+# 対になるのは P4b (site: site-tokyo)。両方 valid だが、ndl-viz でサイトの枠
+# (フレーム) に出るラベルの見え方が違う。
+
+ndl_version: "1.0"
+
+meta:
+  name: P4a-site-value-short
+  description: labels.site を短い値 (tokyo / osaka) で書く
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: osaka}}
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+
+  links:
+    - {id: link-tokyo-osaka, endpoints: [tokyo-rtr-ge0, osaka-rtr-ge0], link_speed: 1G,
+       description: "直結専用線 (比較用)"}
+
+# 期待される validator 出力:
+#   errors 0, warnings 0 (OK)
+#
+# ndl-viz:
+#   - サイトの枠が 2 つできる。枠の名前はそれぞれ "tokyo"、"osaka"。
+#   - 枠の名前がそのまま拠点の呼び名になるので、「tokyo」だけだとやや無骨。
+#   - 一方で labels のキーが site であることは画面に出ないので、
+#     「tokyo」というバリューを見ただけでは「これはサイトの値」と分かりにくいという
+#     課題もある (キーとバリューの意味を見るのは下流ツール)。

@@ -1,0 +1,44 @@
+# S1 (ADR-0017): 東京 DC - 大阪 DC を 2 本の専用線で冗長
+#
+# 専用線は点対点。相手が 1 台に決まるので箱ノードは立てず L1Link にする (D3)。
+# 回線 ID / 事業者 / 契約情報は L1Link.description に人が読む文で書く (D4)。
+# link_role は書かない (D2。既存の推奨語彙では「専用線」を表せない)。
+# サイトは両端のノードの labels.site から導ける (D1)。
+
+ndl_version: "1.0"
+
+meta:
+  name: S1-leased-lines
+  description: 東京 DC と大阪 DC を 2 本の専用線で冗長化した構成
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: dc-tokyo-rtr, role: border, implementation: physical, labels: {site: dc-tokyo}}
+    - {id: dc-osaka-rtr, role: border, implementation: physical, labels: {site: dc-osaka}}
+
+  interfaces:
+    - {id: dc-tokyo-rtr-ge0, node: dc-tokyo-rtr, name: Ge0/0}
+    - {id: dc-tokyo-rtr-ge1, node: dc-tokyo-rtr, name: Ge0/1}
+    - {id: dc-osaka-rtr-ge0, node: dc-osaka-rtr, name: Ge0/0}
+    - {id: dc-osaka-rtr-ge1, node: dc-osaka-rtr, name: Ge0/1}
+
+  links:
+    - id: link-tokyo-osaka-nttcom
+      endpoints: [dc-tokyo-rtr-ge0, dc-osaka-rtr-ge0]
+      link_speed: 10G
+      description: >-
+        NTT Com のダークファイバ。回線 ID NC-00012345、ビジネス契約、
+        SLA 99.99%。
+    - id: link-tokyo-osaka-kddi
+      endpoints: [dc-tokyo-rtr-ge1, dc-osaka-rtr-ge1]
+      link_speed: 1G
+      description: >-
+        KDDI の L2 専用線。回線 ID KV-77889900、標準契約、SLA 99.95%、
+        契約帯域 1G。
+
+# ndl-viz:
+#   - 2 本の線を描くだけ。サイト枠は labels.site で描く (D1)。
+#   - 線のラベルに事業者名を出すなら、description の冒頭から取るのが素直
+#     (ただし description はパースしない方針なので、「書式を決めずに
+#     先頭だけ表示する」といった運用になる)。

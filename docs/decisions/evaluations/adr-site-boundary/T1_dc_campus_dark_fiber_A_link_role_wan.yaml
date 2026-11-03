@@ -1,0 +1,43 @@
+# ADR-site-boundary 試し書き
+# Topology T1: DC と Campus を dark fiber で直結した 2 拠点
+# Candidate A: link_role: wan を推奨値に加え、拠点境界をリンクに書く
+#
+# サイト名を YAML に書けるか: いいえ。link_role は値 (`wan`) だけで名前
+#   (`dc-tokyo`/`campus-osaka`) は入らない。ndl-viz は wan を除いた L1 の
+#   連結成分をサイトとして取るので「名無しの component A/B」になる。
+# 書かなかったとき: サイト 2 つが 1 つの連結成分として融合する (link_role を
+#   省くか underlay/trunk にすると融合)。
+# 書き忘れ・矛盾: Dark fiber は物理的には trunk / underlay とも書けるため、
+#   どのリンクが「サイト境界」かは筆者の意図に依存する。推奨値に `wan` が
+#   入っても mlndl が意図を確認する手段はなく、連結成分の切り方で結果が静かに
+#   変わる。
+
+ndl_version: "1.0"
+
+meta:
+  name: T1-dc-campus-dark-fiber
+  description: "DC と Campus を dark fiber で直結。link_role: wan をサイト境界に使う"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: dc-leaf1,     role: leaf,   implementation: vm, device_type: cumulus_linux}
+    - {id: dc-border1,   role: border, implementation: vm, device_type: cumulus_linux}
+    - {id: cm-core1,     role: core,   implementation: physical, device_type: cisco_nexus_9508}
+    - {id: cm-access1,   role: access, implementation: physical, device_type: cisco_catalyst_9300}
+
+  interfaces:
+    - {id: dc-leaf1-swp1,   node: dc-leaf1,   name: swp1}
+    - {id: dc-border1-swp1, node: dc-border1, name: swp1}   # DC 内 uplink
+    - {id: dc-border1-swp2, node: dc-border1, name: swp2}   # dark fiber -> campus
+    - {id: cm-core1-te1-1,  node: cm-core1,   name: Te1/1}  # dark fiber -> dc
+    - {id: cm-core1-ge1-1,  node: cm-core1,   name: Ge1/1}  # Campus 内
+    - {id: cm-access1-ge0-1, node: cm-access1, name: Ge0/1}
+
+  links:
+    # DC 内
+    - {id: link-dc-leaf1-border1, endpoints: [dc-leaf1-swp1, dc-border1-swp1], link_speed: 10G, link_role: underlay}
+    # サイト境界 (dark fiber)
+    - {id: link-wan-border1-core1, endpoints: [dc-border1-swp2, cm-core1-te1-1], link_speed: 10G, link_role: wan}
+    # Campus 内
+    - {id: link-cm-core1-access1, endpoints: [cm-core1-ge1-1, cm-access1-ge0-1], link_speed: 1G, link_role: underlay}

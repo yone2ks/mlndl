@@ -1,0 +1,76 @@
+# S1 候補 C: 網 (回線) を箱ノードで書く (現行スキーマで parse 可)
+#
+# ダークファイバ / 専用線を 1 本の仮想的な「中継ノード」として表現。両端のルータは
+# この箱に対して独立したリンクで接続される。
+#
+# 書けるか:
+#   service / provider / circuit_id / bandwidth = labels で逃がすしかない
+#     (L1Node に専用フィールドはない)。意味論的に ADR-0009 D1 の labels=Classification
+#     と衝突する (ここでは「固有識別」を labels に書くことになる)
+#   片端がトポロジー外 = 書ける (網ノードの対向側 IF を定義しないか、意図的に
+#     片方だけ外部 IP で表す)
+#   VLAN/L3 IF/BGP の通り道 = BGP セッションの update_source → L3 IF →
+#     attaches_to {interface:} → L1 link → 対向 IF の node が「網」になる。
+#     ADR-0010 D7 の導出が 1 ホップでは拠点間に届かず、網ノードを通過する必要あり
+#     (今の導出ロジックが途中ノードを素通りするかは未確認。network-tech-reviewer へ)
+#
+# ndl-viz: 中継ノードを「雲 (cloud)」として描く。両端から雲へ線を 2 本引く
+#   (= 1 本の論理回線が 2 本に見える欠点)。雲のラベルに provider / circuit_id を出す。
+
+ndl_version: "1.0"
+
+meta:
+  name: S1-leased-lines-C
+  description: "東京 DC - 大阪 DC 冗長専用線 (候補 C: 回線 = 箱ノード)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: dc-tokyo-rtr, role: border, implementation: physical, labels: {site: dc-tokyo}}
+    - {id: dc-osaka-rtr, role: border, implementation: physical, labels: {site: dc-osaka}}
+
+    # 回線を箱ノードに。role は推奨語彙外 (free-form で valid)
+    # [書きにくさ] implementation に何を書くか迷う。'physical' は実体に合うが
+    # 「中身が見えない網」なので 'virtual' が欲しくなる (ADR-0004 で廃止済)
+    - id: circ-nttcom
+      role: leased-line
+      implementation: physical
+      labels:
+        provider: ntt-com
+        circuit_id: NC-00012345
+        service: dark-fiber
+        bandwidth: 10G       # labels は str のみ。int は書けない
+        site: wan
+
+    - id: circ-kddi
+      role: leased-line
+      implementation: physical
+      labels:
+        provider: kddi
+        circuit_id: KV-77889900
+        service: leased-l2
+        bandwidth: 1G
+        site: wan
+
+  interfaces:
+    - {id: dc-tokyo-rtr-ge0, node: dc-tokyo-rtr, name: Ge0/0}
+    - {id: dc-tokyo-rtr-ge1, node: dc-tokyo-rtr, name: Ge0/1}
+    - {id: dc-osaka-rtr-ge0, node: dc-osaka-rtr, name: Ge0/0}
+    - {id: dc-osaka-rtr-ge1, node: dc-osaka-rtr, name: Ge0/1}
+    # 網側のポート (架空)
+    - {id: circ-nttcom-tokyo-side, node: circ-nttcom, name: tokyo}
+    - {id: circ-nttcom-osaka-side, node: circ-nttcom, name: osaka}
+    - {id: circ-kddi-tokyo-side,   node: circ-kddi,   name: tokyo}
+    - {id: circ-kddi-osaka-side,   node: circ-kddi,   name: osaka}
+
+  # 1 本の論理回線が L1Link 2 本に分裂する ← 書きにくさの中心
+  links:
+    - {id: link-tokyo-nttcom, endpoints: [dc-tokyo-rtr-ge0, circ-nttcom-tokyo-side], link_speed: 10G, link_role: wan}
+    - {id: link-nttcom-osaka, endpoints: [circ-nttcom-osaka-side, dc-osaka-rtr-ge0], link_speed: 10G, link_role: wan}
+    - {id: link-tokyo-kddi,   endpoints: [dc-tokyo-rtr-ge1, circ-kddi-tokyo-side],   link_speed: 1G,  link_role: wan}
+    - {id: link-kddi-osaka,   endpoints: [circ-kddi-osaka-side, dc-osaka-rtr-ge1],   link_speed: 1G,  link_role: wan}
+
+# L3 / BGP: 候補 A と同じ IP で張れる (網ノードは L3 を持たず、ただの L1 中継)。
+# ただし両端の BGP セッションを update_source から導くとき、L1 の対向が
+# "circ-nttcom" ノードになり、拠点間の直接セッションに見えない。
+# 導出 (derive) ロジックの改修か、網ノードを「透過」として扱う規約が必要。

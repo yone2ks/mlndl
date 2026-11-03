@@ -1,0 +1,55 @@
+# S1 description-only: 東京 DC - 大阪 DC を 2 本の専用線で冗長
+#
+# 方針: 専用線は L1Link。回線 ID / 事業者 / 契約は L1Link.description に書く。
+# 事業者網の「箱」は立てない (ダークファイバ / L2 専用線は点対点なので不要)。
+#
+# 書きぶりの揺れ (意図的に 2 つの事業者で別書式にして見せる):
+#   - NTT Com 回線: 単一行 "key=value, key=value" 形式
+#   - KDDI 回線: 複数行 YAML スカラ (|) + "key: value" 形式
+# どちらも valid な YAML。推奨書式が無いと必ずこの揺れが出る。
+#
+# link_role の候補:
+#   wan-l2 / leased-l2 / wan-leased  (ダークファイバも L2 専用線も同じ値で良いか?)
+#   区別したいなら link_role を細分化するか、結局 description を読む羽目になる。
+
+ndl_version: "1.0"
+
+meta:
+  name: S1-leased-lines-description-only
+  description: "東京 DC - 大阪 DC 冗長専用線 (description-only、箱ノードなし)"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: dc-tokyo-rtr, role: border, implementation: physical, labels: {site: dc-tokyo}}
+    - {id: dc-osaka-rtr, role: border, implementation: physical, labels: {site: dc-osaka}}
+
+  interfaces:
+    - {id: dc-tokyo-rtr-ge0, node: dc-tokyo-rtr, name: Ge0/0}
+    - {id: dc-tokyo-rtr-ge1, node: dc-tokyo-rtr, name: Ge0/1}
+    - {id: dc-osaka-rtr-ge0, node: dc-osaka-rtr, name: Ge0/0}
+    - {id: dc-osaka-rtr-ge1, node: dc-osaka-rtr, name: Ge0/1}
+
+  links:
+    - id: link-tokyo-osaka-nttcom
+      endpoints: [dc-tokyo-rtr-ge0, dc-osaka-rtr-ge0]
+      link_speed: 10G
+      link_role: wan-l2                       # ダークファイバを L2 専用線と同一視
+      description: "provider=ntt-com, circuit-id=NC-00012345, service=dark-fiber, bandwidth=10G, contract=business, sla=99.99"
+
+    - id: link-tokyo-osaka-kddi
+      endpoints: [dc-tokyo-rtr-ge1, dc-osaka-rtr-ge1]
+      link_speed: 1G
+      link_role: wan-l2
+      description: |
+        provider: kddi
+        circuit-id: KV-77889900
+        service: leased-l2
+        bandwidth: 1G
+        contract: std
+        sla: 99.95
+
+# ndl-viz:
+#   - 線を 2 本描くだけ (箱ノードが無いのでシンプル)
+#   - 線に沿って description の中身を出したい → パーサは description を機械可読に
+#     解析しないので、どのキーを出すかはビューワ側の約束事になる

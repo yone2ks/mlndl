@@ -1,0 +1,70 @@
+# P2a (ADR-0017 Pass C): 広域イーサ越しに 2 拠点の eBGP。相手をトポロジー外として書く。
+#
+# 候補 (a) = 現状の構文で valid にする唯一の書き方。
+# S6a と同じ形。「自分の機器を外として書く」ことが残る (ADR-0017 ドラフト D5-2 の懸念そのもの)。
+#
+# Pass C の確認ポイント:
+#   - 相手の osaka-rtr は layer1.nodes として定義しているが、BGP セッションの to には
+#     node を書かず address + local_as で書く。これで validator は errors 0 で通る。
+#   - 逆向きのセッション (osaka-rtr から tokyo-rtr の address へ) を書き足しても
+#     validator は通ってしまう (相手が address だと同じ両端の重複と見なされない)
+#     が、1 セッションを 2 エントリに書くので ADR-0010 の「1 エントリ = 1 セッション」
+#     に反する。したがって片側からしか書けない。
+
+ndl_version: "1.0"
+
+meta:
+  name: P2a-ebgp-via-box-outside
+  description: 広域イーサ越しに 2 拠点の eBGP。相手は address + local_as で書く
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: osaka}}
+
+    - id: net-ntt-wideether
+      name: NTT Com 広域イーサ (地域間 VPN-220)
+      role: provider-network
+      description: 2 拠点を結ぶ広域イーサ。契約 WE-220、ポイントツーポイント型
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-ntt-wideether-tokyo, node: net-ntt-wideether, name: tokyo}
+    - {id: net-ntt-wideether-osaka, node: net-ntt-wideether, name: osaka}
+
+  links:
+    - {id: link-tokyo-wideether, endpoints: [tokyo-rtr-ge0, net-ntt-wideether-tokyo], link_speed: 1G,
+       description: "東京 アクセス回線。回線 ID WE-220-T"}
+    - {id: link-osaka-wideether, endpoints: [osaka-rtr-ge0, net-ntt-wideether-osaka], link_speed: 1G,
+       description: "大阪 アクセス回線。回線 ID WE-220-O"}
+
+layer3:
+  interfaces:
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    # 片側からの視点だけ書く。osaka-rtr は layer1.nodes にあるが、
+    # BGP の相手としてはトポロジー外 (address + local_as) として書く。
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-l3},
+       to:   {address: 10.100.0.2, local_as: 65002},
+       address_families: [ipv4_unicast]}
+
+# 期待される validator 出力:
+#   errors 0, warnings 0 (OK)
+#
+# 根拠:
+#   - from は BgpInsideEndpoint (node + update_source)、to は BgpOutsideEndpoint (address + local_as)。
+#   - 両端ともトポロジー外ではないので one_end_inside() を通る。
+#   - 片端が outside なので transport_mismatch 検査は走らない (bgp_session_views の
+#     transport は from/to の l3_interface が両方必要)。

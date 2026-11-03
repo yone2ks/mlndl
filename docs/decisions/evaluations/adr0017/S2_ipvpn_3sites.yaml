@@ -1,0 +1,79 @@
+# S2 (ADR-0017): 3 拠点を IP-VPN で接続。CE は PE と eBGP。
+#
+# IP-VPN 網は箱ノード。role は provider-network に揃え、網の種類とサービス名は name で読む (D3)。
+# 回線 ID・事業者・サービスの情報は、箱ノードの description と各リンクの description に人が読む
+# 文で書く (D4)。CE から PE への BGP は、PE をトポロジー外の相手として address + local_as で書く (D5-1)。
+
+ndl_version: "1.0"
+
+meta:
+  name: S2-ipvpn-3sites
+  description: 3 拠点を NTT Com の IP-VPN (VPN-01) で接続した構成
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-ce,  role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-ce,  role: border, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-ce, role: border, implementation: physical, labels: {site: nagoya}}
+
+    - id: net-ipvpn-ntt
+      name: NTT Com IP-VPN (VPN-01)   # 網の種類とサービス名を name に書く (D3)
+      role: provider-network
+      description: >-
+        NTT Communications の IP-VPN サービス。契約 VPN-01、
+        閉域 L3、シングルテナント構成。
+      # implementation は省略 (網に VM / 物理 / コンテナの区別は当てはまらない)。
+      # labels.site も付けない (網はどのサイトにも属さない)。
+
+  interfaces:
+    - {id: tokyo-ce-ge0,  node: tokyo-ce,  name: Ge0/0}
+    - {id: osaka-ce-ge0,  node: osaka-ce,  name: Ge0/0}
+    - {id: nagoya-ce-ge0, node: nagoya-ce, name: Ge0/0}
+    - {id: net-ipvpn-ntt-tokyo,  node: net-ipvpn-ntt, name: tokyo}
+    - {id: net-ipvpn-ntt-osaka,  node: net-ipvpn-ntt, name: osaka}
+    - {id: net-ipvpn-ntt-nagoya, node: net-ipvpn-ntt, name: nagoya}
+
+  links:
+    - id: link-tokyo-ipvpn
+      endpoints: [tokyo-ce-ge0, net-ipvpn-ntt-tokyo]
+      link_speed: 1G
+      description: >-
+        東京拠点のアクセス回線。回線 ID IPVPN-01-T、メトロイーサ、
+        契約帯域 1G、QoS クラス S。
+    - id: link-osaka-ipvpn
+      endpoints: [osaka-ce-ge0, net-ipvpn-ntt-osaka]
+      link_speed: 1G
+      description: >-
+        大阪拠点のアクセス回線。回線 ID IPVPN-01-O、メトロイーサ、
+        契約帯域 500M、QoS クラス S。
+    - id: link-nagoya-ipvpn
+      endpoints: [nagoya-ce-ge0, net-ipvpn-ntt-nagoya]
+      link_speed: 100M
+      description: >-
+        名古屋拠点のアクセス回線。回線 ID IPVPN-01-N、フレッツ接続、
+        契約帯域 100M、ベストエフォート。
+
+layer3:
+  interfaces:
+    - {id: tokyo-ce-ge0-l3,  node: tokyo-ce,  name: Ge0/0, ip: 100.64.0.2/30,  attaches_to: {interface: tokyo-ce-ge0}}
+    - {id: osaka-ce-ge0-l3,  node: osaka-ce,  name: Ge0/0, ip: 100.64.0.6/30,  attaches_to: {interface: osaka-ce-ge0}}
+    - {id: nagoya-ce-ge0-l3, node: nagoya-ce, name: Ge0/0, ip: 100.64.0.10/30, attaches_to: {interface: nagoya-ce-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-ce,  local_as: 65001}
+        - {node: osaka-ce,  local_as: 65002}
+        - {node: nagoya-ce, local_as: 65003}
+  routing_neighbors:
+    # PE は事業者の機器なのでトポロジー外の相手として書く (D5-1)。
+    # update_source のある側 (CE) は L3 IF を指し、相手 (PE) は address + local_as。
+    - {id: bgp-peer-tokyo-pe,  type: bgp, from: {node: tokyo-ce,  update_source: tokyo-ce-ge0-l3},  to: {address: 100.64.0.1, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-osaka-pe,  type: bgp, from: {node: osaka-ce,  update_source: osaka-ce-ge0-l3},  to: {address: 100.64.0.5, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-nagoya-pe, type: bgp, from: {node: nagoya-ce, update_source: nagoya-ce-ge0-l3}, to: {address: 100.64.0.9, local_as: 65100}, address_families: [ipv4_unicast]}
+
+# ndl-viz:
+#   - 網を雲として描く。雲のラベルは name "NTT Com IP-VPN (VPN-01)"。
+#   - 各リンクの回線 ID を線の近くに出す — description の最初の 1 文を表示する運用になる。

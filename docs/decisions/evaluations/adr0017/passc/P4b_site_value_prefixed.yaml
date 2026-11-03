@@ -1,0 +1,45 @@
+# P4b (ADR-0017 Pass C): labels.site の値を長い形 "site-tokyo" で書く
+#
+# label-vocabulary.md の例 (site-tokyo) に合わせた形。
+# P4a (site: tokyo) と対。両方 valid。
+
+ndl_version: "1.0"
+
+meta:
+  name: P4b-site-value-prefixed
+  description: labels.site を長い値 (site-tokyo / site-osaka) で書く
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: site-tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: site-osaka}}
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+
+  links:
+    - {id: link-tokyo-osaka, endpoints: [tokyo-rtr-ge0, osaka-rtr-ge0], link_speed: 1G,
+       description: "直結専用線 (比較用)"}
+
+# 期待される validator 出力:
+#   errors 0, warnings 0 (OK)
+#   - labels の値は str であれば構文上何でも可。キー `site` も ADR-0002 D1 の正規表現に
+#     従うので warning も出ない。
+#
+# ndl-viz:
+#   - サイトの枠の名前は "site-tokyo"、"site-osaka" になる。
+#   - 枠自体が「サイトの枠」として描かれるので、枠の名前にまで "site-" を付けると
+#     「サイト サイト 東京」と二重に読める冗長表現になる。
+#   - 一方で、`labels.az: ap-northeast-1a` と `labels.site: ap-northeast-1a` が
+#     ごっちゃになる状況では値だけで区別できる利点がある (値を見れば軸が分かる)。
+#
+# Pass C で ADR-0017 に書くべきこと:
+#   - 値の書き方 (`tokyo` か `site-tokyo` か) は言語として一方を強制しない。
+#     規約として ADR-0017 と label-vocabulary.md のどちらかに揃える必要がある。
+#   - 推奨: 「値は拠点の固有名詞 (`tokyo`、`dc1`、`nagoya` など) にする。枠の名前が
+#     ndl-viz で何度も見られるので冗長な `site-` 接頭辞は避ける」。
+#     label-vocabulary.md の例 (site-tokyo) は改める。
+#   - 他の軸との読み違えは、キー名 (site / az / region) で区別する前提。これはすでに
+#     ADR-0009 の「キーの文字セット」で ID 正規表現に揃えることで対処済み。

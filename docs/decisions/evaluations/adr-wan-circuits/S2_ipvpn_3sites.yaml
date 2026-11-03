@@ -1,0 +1,103 @@
+# S2: 3 拠点を IP-VPN で接続。CE は PE と eBGP。対向拠点は L3 で見えない。
+#
+# 候補ごとの差分だけを 1 ファイルにまとめる (抜粋)。
+#
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 A (L1Link 属性): 書けない
+# ──────────────────────────────────────────────────────────────────────────
+# IP-VPN は PE が事業者側で見えないため、L1Link の endpoints に
+# 「拠点 CE」と「相手の何か」を書けない。両方ともトポロジー内でなければならない。
+# "attaches_to の片端を省略して外部化する" ような構文が無い限り不可。
+# → 候補 A 単独では S2 が書けない。別途「外部ピア」を表す仕組みが必要。
+#
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 B (circuits): 書けるが、各拠点ごとに circuit が 3 つに分かれ、
+# 「同じ IP-VPN サービス」の纏まりがどこにあるのか曖昧
+# ──────────────────────────────────────────────────────────────────────────
+# layer1:
+#   circuits:
+#     - {id: circ-ipvpn-tokyo, provider: ntt-com, circuit_id: IPVPN-01-T, service: ip-vpn, bandwidth: 1G}
+#     - {id: circ-ipvpn-osaka, provider: ntt-com, circuit_id: IPVPN-01-O, service: ip-vpn, bandwidth: 1G}
+#     - {id: circ-ipvpn-nagoya, provider: ntt-com, circuit_id: IPVPN-01-N, service: ip-vpn, bandwidth: 1G}
+#   links:
+#     # CE の WAN ポートは「網に向かう半リンク」になる。endpoints の片方が無い
+#     # 以上、やはり何らかの外部化が必要
+#
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 C (網 = 箱ノード): 自然に書ける ★ 推奨
+# ──────────────────────────────────────────────────────────────────────────
+
+ndl_version: "1.0"
+
+meta:
+  name: S2-ipvpn-3sites-C
+  description: "候補 C: 3 拠点 IP-VPN。網を 1 つの箱ノードで表現"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-ce,  role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-ce,  role: border, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-ce, role: border, implementation: physical, labels: {site: nagoya}}
+
+    # IP-VPN 網そのものを 1 ノードとして。role は free-form
+    - id: net-ipvpn-ntt
+      role: provider-network         # 推奨語彙外 (ADR-0003 で valid)
+      implementation: physical
+      labels:
+        provider: ntt-com
+        service: ip-vpn
+        vpn_id: VPN-01
+        # 回線 ID は拠点ごとに違うため、labels では 1 件しか書けず nagoya 用の
+        # circuit_id が落ちる。拠点ごとの label キーに分けるか (circuit_id_tokyo
+        # 等)、PE 側ポートの IF description に書くしかない ← 書きにくさ
+
+  interfaces:
+    - {id: tokyo-ce-ge0,  node: tokyo-ce,  name: Ge0/0}
+    - {id: osaka-ce-ge0,  node: osaka-ce,  name: Ge0/0}
+    - {id: nagoya-ce-ge0, node: nagoya-ce, name: Ge0/0}
+    # 網側の PE ポートは 3 つ (CE ごとに 1 つ)。実在しない機器のポートを
+    # 定義する違和感はあるが、拠点ごとの回線 ID をここの description に書ける
+    - {id: net-ipvpn-ntt-pe-tokyo,  node: net-ipvpn-ntt, name: pe-tokyo,  description: "IPVPN-01-T"}
+    - {id: net-ipvpn-ntt-pe-osaka,  node: net-ipvpn-ntt, name: pe-osaka,  description: "IPVPN-01-O"}
+    - {id: net-ipvpn-ntt-pe-nagoya, node: net-ipvpn-ntt, name: pe-nagoya, description: "IPVPN-01-N"}
+
+  links:
+    - {id: link-tokyo-ipvpn,  endpoints: [tokyo-ce-ge0,  net-ipvpn-ntt-pe-tokyo],  link_speed: 1G, link_role: wan}
+    - {id: link-osaka-ipvpn,  endpoints: [osaka-ce-ge0,  net-ipvpn-ntt-pe-osaka],  link_speed: 1G, link_role: wan}
+    - {id: link-nagoya-ipvpn, endpoints: [nagoya-ce-ge0, net-ipvpn-ntt-pe-nagoya], link_speed: 1G, link_role: wan}
+
+layer3:
+  interfaces:
+    # CE 側: PE と eBGP。/30 で張る
+    - {id: tokyo-ce-ge0-l3,  node: tokyo-ce,  name: Ge0/0, ip: 100.64.0.2/30, attaches_to: {interface: tokyo-ce-ge0}}
+    - {id: osaka-ce-ge0-l3,  node: osaka-ce,  name: Ge0/0, ip: 100.64.0.6/30, attaches_to: {interface: osaka-ce-ge0}}
+    - {id: nagoya-ce-ge0-l3, node: nagoya-ce, name: Ge0/0, ip: 100.64.0.10/30, attaches_to: {interface: nagoya-ce-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-ce,  local_as: 65001}
+        - {node: osaka-ce,  local_as: 65002}
+        - {node: nagoya-ce, local_as: 65003}
+  routing_neighbors:
+    # 各 CE は PE を "トポロジー外" (address + local_as) として扱うのが自然
+    # [書きにくさ] 網をノードにしたのに、BGP セッションは「外部相手」として
+    # address + local_as で書く。この二重表現が気持ち悪い:
+    #   - L1 には PE ポートが存在する (net-ipvpn-ntt-pe-tokyo)
+    #   - L3 では PE は update_source 不明の外部ピアとして扱う
+    # 「網ノード = L1 透過箱、L3 的には外部」という規約が要る
+    - {id: bgp-peer-tokyo-pe,  type: bgp, from: {node: tokyo-ce,  update_source: tokyo-ce-ge0-l3},  to: {address: 100.64.0.1, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-osaka-pe,  type: bgp, from: {node: osaka-ce,  update_source: osaka-ce-ge0-l3},  to: {address: 100.64.0.5, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-nagoya-pe, type: bgp, from: {node: nagoya-ce, update_source: nagoya-ce-ge0-l3}, to: {address: 100.64.0.9, local_as: 65100}, address_families: [ipv4_unicast]}
+
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 D: C と同じ (IP-VPN は網 = ノード)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# ──────────────────────────────────────────────────────────────────────────
+# ndl-viz:
+#   網ノードを「雲」で描く。拠点 CE から雲へ 3 本線。雲ラベルは
+#   "NTT Com IP-VPN (VPN-01)"。CE ポートに回線 ID を小さく出す。
+#   拠点どうしの直接接続は描かない (L3 的にも事業者網を透過的に通る)。

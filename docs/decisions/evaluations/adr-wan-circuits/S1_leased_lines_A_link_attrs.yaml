@@ -1,0 +1,73 @@
+# S1 候補 A: L1Link に属性を足す (未実装の構文)
+#
+# 東京 DC と大阪 DC を 2 本の専用線で冗長接続。1 本目は NTT Com、2 本目は KDDI。
+# それぞれ回線 ID (NC-00012345 / KV-77889900) を持ち、帯域が異なる (10G / 1G)。
+#
+# 書けるか:
+#   service=yes / provider=yes / circuit_id=yes / bandwidth=yes (link_speed と重複)
+#   片端がトポロジー外 = NO (endpoints は両方 L1 IF の ID が必須。Ref で検証される)
+#   VLAN/L3 IF/BGP の通り道 = 普通の直結リンクと同じ。update_source の L3 IF → attaches_to
+#   {interface:} → L1 link の対向、で 1 ホップで導出できる
+#
+# ndl-viz: 普通の線 1 本に見せる。ラベルは "NTT Com NC-00012345 10G" のように
+#   provider + circuit_id + link_speed を 1 行で。線種は service=dark-fiber なら破線、
+#   leased-l2 なら太実線など。
+#
+# [NOTE] L1Link は現在 extra="forbid" のため、下記の provider / circuit_id / service /
+#        bandwidth は現行スキーマでは parse エラーになる。候補 A 採択なら
+#        src/mlndl/schema/layer1.py の L1Link にこれらのフィールドを追加する。
+
+ndl_version: "1.0"
+
+meta:
+  name: S1-leased-lines-A
+  description: "東京 DC - 大阪 DC 冗長専用線 (候補 A: L1Link 属性方式)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: dc-tokyo-rtr,  role: border, implementation: physical, labels: {site: dc-tokyo}}
+    - {id: dc-osaka-rtr,  role: border, implementation: physical, labels: {site: dc-osaka}}
+
+  interfaces:
+    - {id: dc-tokyo-rtr-ge0, node: dc-tokyo-rtr, name: Ge0/0}   # -> NTT 回線
+    - {id: dc-tokyo-rtr-ge1, node: dc-tokyo-rtr, name: Ge0/1}   # -> KDDI 回線
+    - {id: dc-osaka-rtr-ge0, node: dc-osaka-rtr, name: Ge0/0}
+    - {id: dc-osaka-rtr-ge1, node: dc-osaka-rtr, name: Ge0/1}
+
+  links:
+    # [未実装の構文] L1Link に provider / circuit_id / service / bandwidth を追加
+    - id: link-tokyo-osaka-nttcom
+      endpoints: [dc-tokyo-rtr-ge0, dc-osaka-rtr-ge0]
+      link_speed: 10G
+      link_role: wan
+      provider: ntt-com          # ← 未実装
+      circuit_id: NC-00012345    # ← 未実装
+      service: dark-fiber        # ← 未実装 (dark-fiber / leased-l2 / leased-l3)
+      # bandwidth は link_speed と重複。回線契約帯域 ≠ ポート速度 の場合に
+      # bandwidth を別に持たせたい (例: 10G ポート上の 1G 契約)。本サンプルでは省略。
+
+    - id: link-tokyo-osaka-kddi
+      endpoints: [dc-tokyo-rtr-ge1, dc-osaka-rtr-ge1]
+      link_speed: 1G
+      link_role: wan
+      provider: kddi             # ← 未実装
+      circuit_id: KV-77889900    # ← 未実装
+      service: leased-l2         # ← 未実装
+
+layer3:
+  interfaces:
+    - {id: dc-tokyo-rtr-ge0-l3, node: dc-tokyo-rtr, name: Ge0/0, ip: 10.100.0.0/31, attaches_to: {interface: dc-tokyo-rtr-ge0}}
+    - {id: dc-osaka-rtr-ge0-l3, node: dc-osaka-rtr, name: Ge0/0, ip: 10.100.0.1/31, attaches_to: {interface: dc-osaka-rtr-ge0}}
+    - {id: dc-tokyo-rtr-ge1-l3, node: dc-tokyo-rtr, name: Ge0/1, ip: 10.100.0.2/31, attaches_to: {interface: dc-tokyo-rtr-ge1}}
+    - {id: dc-osaka-rtr-ge1-l3, node: dc-osaka-rtr, name: Ge0/1, ip: 10.100.0.3/31, attaches_to: {interface: dc-osaka-rtr-ge1}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: dc-tokyo-rtr, local_as: 65000}
+        - {node: dc-osaka-rtr, local_as: 65001}
+  routing_neighbors:
+    - {id: bgp-peer-tokyo-osaka-nttcom, type: bgp, from: {node: dc-tokyo-rtr, update_source: dc-tokyo-rtr-ge0-l3}, to: {node: dc-osaka-rtr, update_source: dc-osaka-rtr-ge0-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-osaka-kddi,   type: bgp, from: {node: dc-tokyo-rtr, update_source: dc-tokyo-rtr-ge1-l3}, to: {node: dc-osaka-rtr, update_source: dc-osaka-rtr-ge1-l3}, address_families: [ipv4_unicast]}

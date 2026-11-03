@@ -1,0 +1,116 @@
+# S4: 本社がインターネット回線 2 本。ISP はトポロジー外。支社とは
+#      インターネット VPN (GRE/IPsec) で接続。
+#
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 A (L1Link 属性): インターネットは「不特定の網」なので ISP ごとに回線を
+#   書いても、「向こう側がどこか」を書けない。L1Link の endpoints はトポロジー内
+#   の L1 IF 2 つが必須。→ ISP 側の擬似ノードを立てないと書けない (結局 C になる)。
+#   支社との GRE は control_plane / layer3.tunnel_interfaces で表現できる (ADR-0011)。
+# ──────────────────────────────────────────────────────────────────────────
+#
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 C (網 = 箱ノード): ISP ごとに箱ノードを立てる。インターネット全体を
+#   1 ノードで表すか ISP ごとに分けるかは好み (本サンプルは ISP ごと)。★ 推奨
+# ──────────────────────────────────────────────────────────────────────────
+
+ndl_version: "1.0"
+
+meta:
+  name: S4-internet-vpn-C
+  description: "候補 C: 本社インターネット 2 本 + 支社と GRE/IPsec VPN"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr,     role: border, implementation: physical, labels: {site: hq}}
+    - {id: branch-rtr, role: border, implementation: physical, labels: {site: branch}}
+
+    # ISP ごとに箱。role: internet (free-form)
+    - id: net-isp-a
+      role: internet
+      implementation: physical
+      labels: {provider: isp-a, service: internet, circuit_id: HQ-A-00001, bandwidth: 1G}
+    - id: net-isp-b
+      role: internet
+      implementation: physical
+      labels: {provider: isp-b, service: internet, circuit_id: HQ-B-00002, bandwidth: 500M}
+
+  interfaces:
+    - {id: hq-rtr-ge0,     node: hq-rtr,     name: Ge0/0}   # -> ISP A
+    - {id: hq-rtr-ge1,     node: hq-rtr,     name: Ge0/1}   # -> ISP B
+    - {id: branch-rtr-ge0, node: branch-rtr, name: Ge0/0}   # -> ISP (支社側は 1 本と仮定)
+    - {id: net-isp-a-hq,     node: net-isp-a, name: hq}
+    - {id: net-isp-a-branch, node: net-isp-a, name: branch}
+    - {id: net-isp-b-hq,     node: net-isp-b, name: hq}
+
+  links:
+    - {id: link-hq-ispa,     endpoints: [hq-rtr-ge0,     net-isp-a-hq],     link_speed: 1G, link_role: wan}
+    - {id: link-hq-ispb,     endpoints: [hq-rtr-ge1,     net-isp-b-hq],     link_speed: 1G, link_role: wan}
+    - {id: link-branch-ispa, endpoints: [branch-rtr-ge0, net-isp-a-branch], link_speed: 100M, link_role: wan}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+    - {id: vrf-tenant-a}   # overlay (VPN 内) 用
+
+  interfaces:
+    # Underlay (ISP に向けた globally-routable or NATed address)
+    - {id: hq-rtr-ge0-l3,     node: hq-rtr,     name: Ge0/0, ip: 203.0.113.2/30,  attaches_to: {interface: hq-rtr-ge0}}
+    - {id: hq-rtr-ge1-l3,     node: hq-rtr,     name: Ge0/1, ip: 198.51.100.2/30, attaches_to: {interface: hq-rtr-ge1}}
+    - {id: branch-rtr-ge0-l3, node: branch-rtr, name: Ge0/0, ip: 203.0.113.6/30,  attaches_to: {interface: branch-rtr-ge0}}
+
+  # GRE/IPsec トンネル (ADR-0011 D6)
+  tunnel_interfaces:
+    - id: tunnel-hq-branch-a
+      node: hq-rtr
+      type: gre
+      source: hq-rtr-ge0-l3
+      destination_interface: branch-rtr-ge0-l3   # 対向はトポロジー内 → ID 参照
+      ip: 172.31.0.1/30
+      vrf: vrf-tenant-a
+      transport_vrf: vrf-default
+      mtu: 1476
+    - id: tunnel-branch-hq-a
+      node: branch-rtr
+      type: gre
+      source: branch-rtr-ge0-l3
+      destination_interface: hq-rtr-ge0-l3
+      ip: 172.31.0.2/30
+      vrf: vrf-tenant-a
+      transport_vrf: vrf-default
+      mtu: 1476
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: hq-rtr,     local_as: 65000}
+        - {node: branch-rtr, local_as: 65001}
+    - id: bgp-tenant-a
+      vrf: vrf-tenant-a
+      nodes:
+        - {node: hq-rtr,     local_as: 65000}
+        - {node: branch-rtr, local_as: 65001}
+  routing_neighbors:
+    # ISP との eBGP (トポロジー外として address + local_as)
+    - {id: bgp-peer-hq-ispa, type: bgp, instance: bgp-default, from: {node: hq-rtr, update_source: hq-rtr-ge0-l3}, to: {address: 203.0.113.1,  local_as: 64501}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-hq-ispb, type: bgp, instance: bgp-default, from: {node: hq-rtr, update_source: hq-rtr-ge1-l3}, to: {address: 198.51.100.1, local_as: 64502}, address_families: [ipv4_unicast]}
+    # [書きにくさ] ISP A をノードとして書いた (net-isp-a) のに、BGP は外部相手
+    # として address+local_as で書く。net-isp-a-hq という L1 IF が存在するのに、
+    # update_source: net-isp-a-* とは書けない (L3 IF が無いし、相手 AS が入らない)。
+    # 「網ノードは L3 を持たない」と割り切る規約を立てないと迷う。
+
+    # Overlay (tunnel の両端で eBGP)
+    - {id: bgp-peer-hq-branch-overlay, type: bgp, instance: bgp-tenant-a, from: {node: hq-rtr, update_source: tunnel-hq-branch-a}, to: {node: branch-rtr, update_source: tunnel-branch-hq-a}, address_families: [ipv4_unicast]}
+    # [技術的疑問] update_source に tunnel_interfaces の id を書けるかどうかは
+    # ADR-0010 / ADR-0011 の両方を見ても明示されていない (L3 IF と並列の扱いか)。
+    # network-tech-reviewer へ要確認。
+
+# ──────────────────────────────────────────────────────────────────────────
+# 候補 D: C と同じ。ISP = 網 = ノード、支社とのトンネルは L3 で表現。
+# ──────────────────────────────────────────────────────────────────────────
+#
+# ndl-viz:
+#   ISP A/B をそれぞれ雲で描く (丸で "ISP-A", "ISP-B")。
+#   インターネット VPN (GRE) は雲を跨ぐ破線で描く (= underlay はインターネット、
+#   overlay は論理トンネル)。これは L1 の線ではなく L3 の破線。

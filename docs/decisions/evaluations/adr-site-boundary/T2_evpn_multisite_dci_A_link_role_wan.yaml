@@ -1,0 +1,56 @@
+# ADR-site-boundary 試し書き
+# Topology T2: 2 つの DC を EVPN マルチサイトでストレッチ
+#   dc1-bgw1 <--DCI--> dc2-bgw1 を跨いで L2VNI/L3VNI が延伸
+# Candidate A: link_role: wan を DCI リンクに書く
+#
+# サイト名を YAML に書けるか: いいえ。`link_role: wan` の 1 語しか載らず、
+#   DCI が「どのサイトとどのサイトの境界か」は endpoints の node id を
+#   パースして拠点ごとに決める規約 (`dc1-*` prefix) に頼る。言語機構では
+#   区別されない。
+# 書かなかったとき: 連結成分が 1 つに融合する。既存の
+#   `link-dc-spine*-border*` と同じく underlay / uplink の値を使うと、
+#   ndl-viz はサイトを分けられない。
+# 書き忘れ・矛盾: DCI は現実には暗号化トンネル (VXLAN GPE 等) を載せる
+#   underlay であり、`wan` と `underlay` のどちらが正しいかの合意が
+#   必要。「サイト境界」と「転送の役割」を 1 枚の文字列で両立させるのは
+#   かなり無理がある (feedback)。
+
+ndl_version: "1.0"
+
+meta:
+  name: T2-evpn-multisite-dci
+  description: "2 DC を EVPN マルチサイトで延伸。link_role: wan を DCI に"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    # DC1
+    - {id: dc1-spine1,  role: spine,  implementation: vm}
+    - {id: dc1-leaf1,   role: leaf,   implementation: vm}
+    - {id: dc1-bgw1,    role: border, implementation: vm, description: "EVPN Border Gateway"}
+    # DC2
+    - {id: dc2-spine1,  role: spine,  implementation: vm}
+    - {id: dc2-leaf1,   role: leaf,   implementation: vm}
+    - {id: dc2-bgw1,    role: border, implementation: vm, description: "EVPN Border Gateway"}
+
+  interfaces:
+    - {id: dc1-spine1-swp1, node: dc1-spine1, name: swp1}
+    - {id: dc1-spine1-swp2, node: dc1-spine1, name: swp2}
+    - {id: dc1-leaf1-swp51, node: dc1-leaf1,  name: swp51}
+    - {id: dc1-bgw1-swp51,  node: dc1-bgw1,   name: swp51}
+    - {id: dc1-bgw1-swp1,   node: dc1-bgw1,   name: swp1}    # DCI
+    - {id: dc2-spine1-swp1, node: dc2-spine1, name: swp1}
+    - {id: dc2-spine1-swp2, node: dc2-spine1, name: swp2}
+    - {id: dc2-leaf1-swp51, node: dc2-leaf1,  name: swp51}
+    - {id: dc2-bgw1-swp51,  node: dc2-bgw1,   name: swp51}
+    - {id: dc2-bgw1-swp1,   node: dc2-bgw1,   name: swp1}    # DCI
+
+  links:
+    # DC1 underlay
+    - {id: link-dc1-spine1-leaf1, endpoints: [dc1-spine1-swp1, dc1-leaf1-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc1-spine1-bgw1,  endpoints: [dc1-spine1-swp2, dc1-bgw1-swp51],  link_speed: 100G, mtu: 9216, link_role: underlay}
+    # DCI (サイト境界)
+    - {id: link-dci-bgw1-bgw1,    endpoints: [dc1-bgw1-swp1, dc2-bgw1-swp1],     link_speed: 100G, mtu: 9216, link_role: wan}
+    # DC2 underlay
+    - {id: link-dc2-spine1-leaf1, endpoints: [dc2-spine1-swp1, dc2-leaf1-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc2-spine1-bgw1,  endpoints: [dc2-spine1-swp2, dc2-bgw1-swp51],  link_speed: 100G, mtu: 9216, link_role: underlay}

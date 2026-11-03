@@ -1,0 +1,63 @@
+# ADR-site-boundary 試し書き
+# Topology T3: 1 DC に WAN ルーター 2 台 + 拠点間 WAN + GRE-only 拠点
+# Candidate C: parent: <site-id> で箱ノードに所属 (ADR-0009 / ADR-0008 Draft)
+#
+# !! 現行スキーマでは parse できない (parent は extra_forbidden) !!
+#
+# サイト名を YAML に書けるか: はい。しかも箱に `role: site, cidr: ...` の
+#   ような属性 (拠点 ASN、拠点管理テナント、所在リージョン) を乗せられる
+#   のは B より強い (B は非参照の自由文字列なので属性を持てない)。
+# 書かなかったとき: parent 未指定のノードが「どこの拠点でもない」になる。
+#   T3 では ISP に対応する箱ノード (`site-isp` 等) を作りたくなるが、
+#   ISP は意図的にトポロジー外に置いているので、ここでも B と同じ制約が残る。
+# 書き忘れ・矛盾:
+#   - 箱と中身を揃えて書く冗長さ (ノード数が増える) は、B より重い。
+#   - GRE-only の S3 を箱に置くことは問題なくできる。L1 リンクに依存しないのは
+#     B と同じく C の利点。
+#   - validator に parent の参照整合性 / 循環 / 自己参照検査が必要
+#     (ADR-0008 の未解決事項)。
+
+ndl_version: "1.0"
+
+meta:
+  name: T3-dc-wan-isp-gre
+  description: "parent: で箱ノードに所属 (Phase 3+)。GRE-only 拠点も箱で扱える"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    # 箱ノード
+    - {id: site-dc-tokyo,       role: site, description: "DC Tokyo"}
+    - {id: site-branch-osaka,   role: site, description: "Branch Osaka (L1 で接続)"}
+    - {id: site-branch-fukuoka, role: site, description: "Branch Fukuoka (GRE のみ)"}
+
+    # 中身
+    - {id: dc-core1, role: core,   implementation: vm,       parent: site-dc-tokyo}
+    - {id: dc-wan1,  role: border, implementation: vm,       parent: site-dc-tokyo}
+    - {id: dc-wan2,  role: border, implementation: vm,       parent: site-dc-tokyo}
+    - {id: s2-wan,   role: border, implementation: physical, parent: site-branch-osaka}
+    - {id: s3-rtr,   role: border, implementation: physical, parent: site-branch-fukuoka}
+
+  interfaces:
+    - {id: dc-core1-swp1, node: dc-core1, name: swp1}
+    - {id: dc-core1-swp2, node: dc-core1, name: swp2}
+    - {id: dc-wan1-swp1,  node: dc-wan1,  name: swp1}
+    - {id: dc-wan1-eth1,  node: dc-wan1,  name: eth1}
+    - {id: dc-wan2-swp1,  node: dc-wan2,  name: swp1}
+    - {id: dc-wan2-eth1,  node: dc-wan2,  name: eth1}
+    - {id: s2-wan-eth0,   node: s2-wan,   name: eth0}
+    - {id: s3-rtr-eth0,   node: s3-rtr,   name: eth0}
+
+  links:
+    - {id: link-dc-core1-wan1, endpoints: [dc-core1-swp1, dc-wan1-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-dc-core1-wan2, endpoints: [dc-core1-swp2, dc-wan2-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-wan-dc-s2,     endpoints: [dc-wan2-eth1, s2-wan-eth0],   link_speed: 1G,  link_role: uplink}
+
+layer3:
+  interfaces:
+    - {id: dc-wan1-eth1-l3, node: dc-wan1, name: eth1, ip: 203.0.113.2/30, attaches_to: {interface: dc-wan1-eth1}}
+    - {id: s3-rtr-eth0-l3,  node: s3-rtr,  name: eth0, ip: 198.51.100.9/30, attaches_to: {interface: s3-rtr-eth0}}
+  tunnel_interfaces:
+    - {id: tunnel-dc-wan1-s3, node: dc-wan1, type: gre,
+       source: dc-wan1-eth1-l3, destination_interface: s3-rtr-eth0-l3,
+       ip: 10.254.0.1/30, mtu: 1476}

@@ -72,6 +72,14 @@ D11 で `unattached` をループバックとみなさないと決めたので�
 `id` / `label` / `vni`。L2VNI は `vlan` と `vteps` (書かれたもの)、L3VNI は `vrf` と `vteps`
 (VRF に L3 IF を持つノードが終端する VTEP から導いたもの。ADR-0014 D3)。
 
+## `description`
+
+YAML に `description` があれば、人が読む補足としてそのまま出す (ADR-0011 D7)。出すのは、対応する要素があるもの:
+機器ノード、`vlan`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
+要素を持たないもの (L1 IF、LAG、VRF、VTEP、インスタンス) の `description` は出さない。
+受け取るツールは表示するだけで、パースせず、一部を取り出しもしない。回線 ID などを書く場所でもある ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
+`role: provider-network` (事業者網の箱) も、ほかの role と同じくそのまま出す。
+
 ## エッジ
 
 | `type` | 内容 |

@@ -1,0 +1,49 @@
+# ADR-site-boundary 試し書き
+# Topology T2: 2 つの DC を EVPN マルチサイトでストレッチ
+# Candidate D: ADR-0008 Draft の `location` 軸を使う
+#
+# !! 現行スキーマでは parse できない (location は extra_forbidden) !!
+#
+# サイト名を YAML に書けるか: いいえ。`location` は「所在のクラス」であり
+#   拠点ごとの固有名詞は表現できない。両方の DC がオンプレ (`on-prem`) なら、
+#   location の値は全ノードで同じになり、拠点境界に関する情報は 0 bit。
+# 書かなかったとき: 違いが出ない。
+# 書き忘れ・矛盾: 「location = on-prem」の中にさらに拠点を分けたいという
+#   最も頻出のケースでそもそも粒度が合わない。ADR-0008 D1 の未決注記自体が
+#   「location は labels に畳める」と述べており、拠点境界には不十分であること
+#   を暗に認めている。この用途では D と B は実質同じ機構に落ちる。
+
+ndl_version: "1.0"
+
+meta:
+  name: T2-evpn-multisite-dci
+  description: "ADR-0008 Draft の location 軸を 2 DC に適用。全ノードで on-prem なので区別が付かない"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: dc1-spine1, role: spine,  implementation: vm, location: on-prem}
+    - {id: dc1-leaf1,  role: leaf,   implementation: vm, location: on-prem}
+    - {id: dc1-bgw1,   role: border, implementation: vm, location: on-prem}
+    - {id: dc2-spine1, role: spine,  implementation: vm, location: on-prem}
+    - {id: dc2-leaf1,  role: leaf,   implementation: vm, location: on-prem}
+    - {id: dc2-bgw1,   role: border, implementation: vm, location: on-prem}
+
+  interfaces:
+    - {id: dc1-spine1-swp1, node: dc1-spine1, name: swp1}
+    - {id: dc1-spine1-swp2, node: dc1-spine1, name: swp2}
+    - {id: dc1-leaf1-swp51, node: dc1-leaf1,  name: swp51}
+    - {id: dc1-bgw1-swp51,  node: dc1-bgw1,   name: swp51}
+    - {id: dc1-bgw1-swp1,   node: dc1-bgw1,   name: swp1}
+    - {id: dc2-spine1-swp1, node: dc2-spine1, name: swp1}
+    - {id: dc2-spine1-swp2, node: dc2-spine1, name: swp2}
+    - {id: dc2-leaf1-swp51, node: dc2-leaf1,  name: swp51}
+    - {id: dc2-bgw1-swp51,  node: dc2-bgw1,   name: swp51}
+    - {id: dc2-bgw1-swp1,   node: dc2-bgw1,   name: swp1}
+
+  links:
+    - {id: link-dc1-spine1-leaf1, endpoints: [dc1-spine1-swp1, dc1-leaf1-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc1-spine1-bgw1,  endpoints: [dc1-spine1-swp2, dc1-bgw1-swp51],  link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dci-bgw1-bgw1,    endpoints: [dc1-bgw1-swp1, dc2-bgw1-swp1],     link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc2-spine1-leaf1, endpoints: [dc2-spine1-swp1, dc2-leaf1-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc2-spine1-bgw1,  endpoints: [dc2-spine1-swp2, dc2-bgw1-swp51],  link_speed: 100G, mtu: 9216, link_role: underlay}

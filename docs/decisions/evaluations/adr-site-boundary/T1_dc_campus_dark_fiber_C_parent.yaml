@@ -1,0 +1,57 @@
+# ADR-site-boundary 試し書き
+# Topology T1: DC と Campus を dark fiber で直結した 2 拠点
+# Candidate C: parent: <site-id> で箱ノードに所属させる (ADR-0009 / ADR-0008 Draft)
+#
+# !! 現行スキーマでは parse できない !!
+#   L1Node は model_config = ConfigDict(extra="forbid") で、`parent` は未実装。
+#   `python -m mlndl validate` は pydantic の extra_forbidden error を返す
+#   (下記のメモ参照)。ADR-0009 D2 は Phase 3+ で実装予定。
+#
+# サイト名を YAML に書けるか: はい。箱ノードの id (`site-tokyo` 等) を名前と
+#   して使え、箱に `cidr` / `role: pod` / `description` 等の属性を付けられる。
+# 書かなかったとき: parent 未指定のノードは「どの箱にも入っていない」ので、
+#   サイトを決めるには最低限 node ごとに書く必要がある。
+# 書き忘れ・矛盾: 箱ノード (site-tokyo) を使うエンティティと使わないエンティ
+#   ティが混在するとき、ndl-viz の集計の母集団に穴ができる (containment で
+#   辿れないノードが出る)。箱に `attaches_to` を付けると realization と
+#   containment の混同が起きるが、ADR-0009 D1 で意味論は分離されている
+#   (parent は Containment 専用)。
+#
+# 現状スキーマで試すと:
+#   $ python -m mlndl validate .../T1_dc_campus_dark_fiber_C_parent.yaml
+#   ERROR    layer1.nodes[0]: Extra inputs are not permitted (parent)
+#   ERROR    layer1.nodes[1]: Extra inputs are not permitted (parent)
+#   ... (site-tokyo / campus-osaka の箱ノードは parse できる — それらは
+#        自由文字列の role を使っているだけなので)
+
+ndl_version: "1.0"
+
+meta:
+  name: T1-dc-campus-dark-fiber
+  description: "DC と Campus を dark fiber で直結。parent: で箱ノードに所属 (Phase 3+)"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    # 箱ノード — ADR-0008 D2 「箱そのものも普通のノード」
+    - {id: site-tokyo,    role: site, description: "DC Tokyo"}
+    - {id: site-osaka,    role: site, description: "Campus Osaka"}
+
+    # 中身のノード (parent: は Phase 3+ 未実装 → 現行では extra_forbidden)
+    - {id: dc-leaf1,     role: leaf,   implementation: vm, parent: site-tokyo}
+    - {id: dc-border1,   role: border, implementation: vm, parent: site-tokyo}
+    - {id: cm-core1,     role: core,   implementation: physical, parent: site-osaka}
+    - {id: cm-access1,   role: access, implementation: physical, parent: site-osaka}
+
+  interfaces:
+    - {id: dc-leaf1-swp1,    node: dc-leaf1,   name: swp1}
+    - {id: dc-border1-swp1,  node: dc-border1, name: swp1}
+    - {id: dc-border1-swp2,  node: dc-border1, name: swp2}
+    - {id: cm-core1-te1-1,   node: cm-core1,   name: Te1/1}
+    - {id: cm-core1-ge1-1,   node: cm-core1,   name: Ge1/1}
+    - {id: cm-access1-ge0-1, node: cm-access1, name: Ge0/1}
+
+  links:
+    - {id: link-dc-leaf1-border1,  endpoints: [dc-leaf1-swp1, dc-border1-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-wan-border1-core1, endpoints: [dc-border1-swp2, cm-core1-te1-1], link_speed: 10G, link_role: uplink}
+    - {id: link-cm-core1-access1,  endpoints: [cm-core1-ge1-1, cm-access1-ge0-1], link_speed: 1G, link_role: underlay}

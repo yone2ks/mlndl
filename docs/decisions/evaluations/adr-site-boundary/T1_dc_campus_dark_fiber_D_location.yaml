@@ -1,0 +1,49 @@
+# ADR-site-boundary 試し書き
+# Topology T1: DC と Campus を dark fiber で直結した 2 拠点
+# Candidate D: ADR-0008 Draft の `location` 軸を使う
+#
+# !! 現行スキーマでは parse できない !!
+#   L1Node は extra="forbid" で、`location` も `provider` も未実装。
+#   ADR-0008 自体 Draft で Phase 3+。D1 の未決注記では
+#   「`labels: {location: cloud, provider: aws}` に畳める」とされる。
+#
+# サイト名を YAML に書けるか: `location` の値域は `cloud` / `on-prem` / `edge`
+#   のような**所在のクラス**であり、拠点の固有名詞ではない。サイトの一意名
+#   (`dc-tokyo` / `campus-osaka`) は別軸 (labels / parent) で持つ前提の
+#   設計になっており、`location: dc-tokyo` と書くのは語の意図からずれる。
+# 書かなかったとき: ADR-0008 D1 は値域をオープンフォームと述べるが、
+#   既定語彙 (cloud/on-prem/edge) 以外を書くと informative な一貫性が崩れる。
+#   サイト境界を location 1 軸で表そうとすると、拠点を跨いだ「クラウド」と
+#   「オンプレ」の混在のときに表現が足りなくなる。
+# 書き忘れ・矛盾: ノードが on-prem の pod-tokyo と cloud の vpc-prod を
+#   またぐとき、`location` だけでは site 名が落ちる。ADR-0008 D1 の
+#   未決注記そのものがこの問題を認識している (location + site は直交軸)。
+
+ndl_version: "1.0"
+
+meta:
+  name: T1-dc-campus-dark-fiber
+  description: "ADR-0008 Draft の location 軸を dark fiber 2 拠点に適用した試し書き"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    # location は所在のクラス (on-prem) で拠点名ではない。拠点名はさらに
+    # labels か parent に頼ることになり、Candidate B/C と重なる。
+    - {id: dc-leaf1,     role: leaf,   implementation: vm,       location: on-prem}
+    - {id: dc-border1,   role: border, implementation: vm,       location: on-prem}
+    - {id: cm-core1,     role: core,   implementation: physical, location: on-prem}
+    - {id: cm-access1,   role: access, implementation: physical, location: on-prem}
+
+  interfaces:
+    - {id: dc-leaf1-swp1,    node: dc-leaf1,   name: swp1}
+    - {id: dc-border1-swp1,  node: dc-border1, name: swp1}
+    - {id: dc-border1-swp2,  node: dc-border1, name: swp2}
+    - {id: cm-core1-te1-1,   node: cm-core1,   name: Te1/1}
+    - {id: cm-core1-ge1-1,   node: cm-core1,   name: Ge1/1}
+    - {id: cm-access1-ge0-1, node: cm-access1, name: Ge0/1}
+
+  links:
+    - {id: link-dc-leaf1-border1,  endpoints: [dc-leaf1-swp1, dc-border1-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-wan-border1-core1, endpoints: [dc-border1-swp2, cm-core1-te1-1], link_speed: 10G, link_role: uplink}
+    - {id: link-cm-core1-access1,  endpoints: [cm-core1-ge1-1, cm-access1-ge0-1], link_speed: 1G, link_role: underlay}

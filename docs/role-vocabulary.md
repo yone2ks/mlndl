@@ -71,6 +71,7 @@ NetBox から mlndl YAML に変換する際のアダプター参照表 (informat
 | 語彙 | 理由 | 代替表現 |
 |------|------|---------|
 | `vswitch`, `dvswitch` | ソフトウェア機能であり L1 物理「箱」ではない | Phase 2 の `layer2.bridges` 等で設計予定 |
+| `isp`, `carrier-network`, `transit`, `cloud` (事業者網の箱として) | 狭い (`isp` はインターネット、`carrier-network` は通信事業者に寄る)、または別の意味と衝突する (`transit` は BGP の transit) | `provider-network` (ADR-0017 D3) |
 | `eor` (End of Row) | 物理配置概念であり論理 role 軸と直交 | `leaf` または `core` で表現 |
 | `router` | 機能ではなく実装タイプ。`border`/`core` 等で役割を示すほうが明確 | — |
 
@@ -110,6 +111,7 @@ ADR-0008 / ADR-0009 でクラウド・オンプレの「箱」をノードとし
 | `pod` | Clos ファブリックの物理増設単位 | 下記の注意を参照 |
 | `tenant` | テナント (管理・課金の単位) | 1 tenant ⊃ 複数 VPC。ただし AWS RAM の subnet sharing により 1 VPC ⊃ 複数 tenant も実在するため、階層は多対多になりうる |
 | `gateway` | 境界ゲートウェイ | 種別は `kind: internet-gateway` / `nat-gateway` / `transit-gateway` 等で細分 |
+| `provider-network` | 自社の外の事業者網 (IP-VPN・広域イーサ・インターネット・閉域接続など) | [ADR-0017](decisions/0017-sites-and-wan.md) D3。サービスの種類は `role` で分けず `name` に書く。`implementation` と `labels.site` は書かない。箱の中 (L3 IF) は書かない (規約。validator は検査しない)。ndl-viz は雲で描く |
 
 > **⚠️ `role: pod` の意味制約 (strongly recommended)**
 >

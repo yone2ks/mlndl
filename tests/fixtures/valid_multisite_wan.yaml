@@ -20,27 +20,27 @@ meta:
 layer1:
   nodes:
     # ── DC site ─────────────────────────────────────────────────────────
-    - { id: dc-spine1,  name: DC-Spine-1,  role: spine,  implementation: vm, device_type: cumulus_linux }
-    - { id: dc-spine2,  name: DC-Spine-2,  role: spine,  implementation: vm, device_type: cumulus_linux }
-    - { id: dc-leaf1,   name: DC-Leaf-1,   role: leaf,   implementation: vm, device_type: cumulus_linux }
-    - { id: dc-leaf2,   name: DC-Leaf-2,   role: leaf,   implementation: vm, device_type: cumulus_linux }
-    - { id: dc-border1, name: DC-Border-1, role: border, implementation: vm, device_type: cumulus_linux }
-    - { id: dc-border2, name: DC-Border-2, role: border, implementation: vm, device_type: cumulus_linux }
-    - { id: dc-server1, name: DC-Server-1, role: server, implementation: physical }
-    - { id: dc-server2, name: DC-Server-2, role: server, implementation: physical }
+    - { id: dc-spine1,  name: DC-Spine-1,  role: spine,  implementation: vm, device_type: cumulus_linux, labels: {site: dc} }
+    - { id: dc-spine2,  name: DC-Spine-2,  role: spine,  implementation: vm, device_type: cumulus_linux, labels: {site: dc} }
+    - { id: dc-leaf1,   name: DC-Leaf-1,   role: leaf,   implementation: vm, device_type: cumulus_linux, labels: {site: dc} }
+    - { id: dc-leaf2,   name: DC-Leaf-2,   role: leaf,   implementation: vm, device_type: cumulus_linux, labels: {site: dc} }
+    - { id: dc-border1, name: DC-Border-1, role: border, implementation: vm, device_type: cumulus_linux, labels: {site: dc} }
+    - { id: dc-border2, name: DC-Border-2, role: border, implementation: vm, device_type: cumulus_linux, labels: {site: dc} }
+    - { id: dc-server1, name: DC-Server-1, role: server, implementation: physical, labels: {site: dc} }
+    - { id: dc-server2, name: DC-Server-2, role: server, implementation: physical, labels: {site: dc} }
 
     # ── Campus site ─────────────────────────────────────────────────────
     # NOTE: 3-tier キャンパスでは Core/Aggregation/Distribution が混在するが
     #       推奨 9 語彙 (ADR-0003) に 'aggregation' / 'distribution' は無い。
     #       自由文字列なので valid だが、可視化スタイル既定が無い点に注意。
-    - { id: cm-core1,   name: CM-Core-1,   role: core,         implementation: physical, device_type: cisco_nexus_9508 }
-    - { id: cm-core2,   name: CM-Core-2,   role: core,         implementation: physical, device_type: cisco_nexus_9508 }
-    - { id: cm-agg1,    name: CM-Dist-1,   role: distribution, implementation: physical, device_type: cisco_nexus_7706 }
-    - { id: cm-agg2,    name: CM-Dist-2,   role: distribution, implementation: physical, device_type: cisco_nexus_7706 }
-    - { id: cm-dist1,   name: CM-Access-1, role: access,       implementation: physical, device_type: cisco_catalyst_9300 }
-    - { id: cm-dist2,   name: CM-Access-2, role: access,       implementation: physical, device_type: cisco_catalyst_9300 }
-    - { id: cm-host1,   name: CM-Host-1,   role: server,       implementation: physical }
-    - { id: cm-host2,   name: CM-Host-2,   role: server,       implementation: physical }
+    - { id: cm-core1,   name: CM-Core-1,   role: core,         implementation: physical, device_type: cisco_nexus_9508, labels: {site: campus} }
+    - { id: cm-core2,   name: CM-Core-2,   role: core,         implementation: physical, device_type: cisco_nexus_9508, labels: {site: campus} }
+    - { id: cm-agg1,    name: CM-Dist-1,   role: distribution, implementation: physical, device_type: cisco_nexus_7706, labels: {site: campus} }
+    - { id: cm-agg2,    name: CM-Dist-2,   role: distribution, implementation: physical, device_type: cisco_nexus_7706, labels: {site: campus} }
+    - { id: cm-dist1,   name: CM-Access-1, role: access,       implementation: physical, device_type: cisco_catalyst_9300, labels: {site: campus} }
+    - { id: cm-dist2,   name: CM-Access-2, role: access,       implementation: physical, device_type: cisco_catalyst_9300, labels: {site: campus} }
+    - { id: cm-host1,   name: CM-Host-1,   role: server,       implementation: physical, labels: {site: campus} }
+    - { id: cm-host2,   name: CM-Host-2,   role: server,       implementation: physical, labels: {site: campus} }
 
   interfaces:
     # ── DC Spine ────────────────────────────────────────────────────────

@@ -1,0 +1,55 @@
+# ADR-site-boundary 試し書き
+# Topology T2: 2 つの DC を EVPN マルチサイトでストレッチ
+# Candidate C: parent: <site-id> で箱ノードに所属 (ADR-0009 / ADR-0008 Draft)
+#
+# !! 現行スキーマでは parse できない (parent は extra_forbidden) !!
+#
+# サイト名を YAML に書けるか: はい。箱ノード (`site-dc1`) に属性 (cidr /
+#   description / role) を付けられる。マルチサイト EVPN のドメインを
+#   `parent: evpn-domain-prod` のように更に上に重ねる (Containment の連鎖)
+#   拡張も自然 (ADR-0008 D3)。
+# 書かなかったとき: parent 未指定 = どの箱にも入っていない。T2 ではすべての
+#   機器を site-dc1 / site-dc2 のどちらかに置かないと集計から漏れる。
+# 書き忘れ・矛盾: 箱の属性だけ書いて中身を parent 指定し忘れる、または逆が
+#   起きる。validator に `parent` チェーンの参照整合性と循環検査が要る
+#   (ADR-0008 の未解決事項)。
+
+ndl_version: "1.0"
+
+meta:
+  name: T2-evpn-multisite-dci
+  description: "2 DC を EVPN マルチサイトで延伸。parent: でサイト所属 (Phase 3+)"
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    # 箱ノード (サイト = EVPN サイトドメインの単位)
+    - {id: site-dc1, role: site, description: "EVPN site dc1"}
+    - {id: site-dc2, role: site, description: "EVPN site dc2"}
+
+    # 中身 — parent は Phase 3+ 未実装のため現行では extra_forbidden
+    - {id: dc1-spine1, role: spine,  implementation: vm, parent: site-dc1}
+    - {id: dc1-leaf1,  role: leaf,   implementation: vm, parent: site-dc1}
+    - {id: dc1-bgw1,   role: border, implementation: vm, parent: site-dc1, description: "EVPN Border Gateway"}
+    - {id: dc2-spine1, role: spine,  implementation: vm, parent: site-dc2}
+    - {id: dc2-leaf1,  role: leaf,   implementation: vm, parent: site-dc2}
+    - {id: dc2-bgw1,   role: border, implementation: vm, parent: site-dc2, description: "EVPN Border Gateway"}
+
+  interfaces:
+    - {id: dc1-spine1-swp1, node: dc1-spine1, name: swp1}
+    - {id: dc1-spine1-swp2, node: dc1-spine1, name: swp2}
+    - {id: dc1-leaf1-swp51, node: dc1-leaf1,  name: swp51}
+    - {id: dc1-bgw1-swp51,  node: dc1-bgw1,   name: swp51}
+    - {id: dc1-bgw1-swp1,   node: dc1-bgw1,   name: swp1}
+    - {id: dc2-spine1-swp1, node: dc2-spine1, name: swp1}
+    - {id: dc2-spine1-swp2, node: dc2-spine1, name: swp2}
+    - {id: dc2-leaf1-swp51, node: dc2-leaf1,  name: swp51}
+    - {id: dc2-bgw1-swp51,  node: dc2-bgw1,   name: swp51}
+    - {id: dc2-bgw1-swp1,   node: dc2-bgw1,   name: swp1}
+
+  links:
+    - {id: link-dc1-spine1-leaf1, endpoints: [dc1-spine1-swp1, dc1-leaf1-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc1-spine1-bgw1,  endpoints: [dc1-spine1-swp2, dc1-bgw1-swp51],  link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dci-bgw1-bgw1,    endpoints: [dc1-bgw1-swp1, dc2-bgw1-swp1],     link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc2-spine1-leaf1, endpoints: [dc2-spine1-swp1, dc2-leaf1-swp51], link_speed: 100G, mtu: 9216, link_role: underlay}
+    - {id: link-dc2-spine1-bgw1,  endpoints: [dc2-spine1-swp2, dc2-bgw1-swp51],  link_speed: 100G, mtu: 9216, link_role: underlay}

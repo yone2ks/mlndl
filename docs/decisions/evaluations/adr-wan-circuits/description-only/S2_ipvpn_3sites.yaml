@@ -1,0 +1,88 @@
+# S2 description-only: 3 拠点を IP-VPN で接続。CE は PE と eBGP。
+#
+# 方針: IP-VPN 網 = 箱ノード (role: provider-network、implementation 省略)。
+# サービス名・事業者・VPN-ID は箱ノードの description に。
+# アクセス回線 ID / 帯域 / 回線種別 (メトロ / Flets 等) は L1Link.description に。
+#
+# 書きぶりの揺れ: 回線 ID をどこに書くかで 2 案:
+#   (a) 箱ノードの description に拠点別で列挙 → 全体像は見やすいが、キー衝突
+#       (circuit-id-tokyo / circuit-id-osaka / ...) で表記が肥大化
+#   (b) L1Link.description に各本ごと → 分散するが「どの L1 リンクが何本目か」で
+#       追いやすい
+# 本サンプルは (b) を採用。
+
+ndl_version: "1.0"
+
+meta:
+  name: S2-ipvpn-3sites-description-only
+  description: "3 拠点 IP-VPN (description-only、網 = 箱ノード)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-ce,  role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-ce,  role: border, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-ce, role: border, implementation: physical, labels: {site: nagoya}}
+
+    # 事業者網 (箱)。implementation を省略 — 「網そのもの」に VM/物理の区分けを
+    # 当てはめるのが不自然なので任意項目として外す (ユーザー方針)
+    - id: net-ipvpn-ntt
+      role: provider-network
+      description: |
+        provider: ntt-com
+        service: ip-vpn
+        vpn-id: VPN-01
+        contract: closed-l3
+        multi-tenant: single
+
+  interfaces:
+    - {id: tokyo-ce-ge0,  node: tokyo-ce,  name: Ge0/0}
+    - {id: osaka-ce-ge0,  node: osaka-ce,  name: Ge0/0}
+    - {id: nagoya-ce-ge0, node: nagoya-ce, name: Ge0/0}
+    # 網側 PE ポート (架空)。実在しない機器のポートを立てる違和感は残る
+    - {id: net-ipvpn-ntt-pe-tokyo,  node: net-ipvpn-ntt, name: pe-tokyo}
+    - {id: net-ipvpn-ntt-pe-osaka,  node: net-ipvpn-ntt, name: pe-osaka}
+    - {id: net-ipvpn-ntt-pe-nagoya, node: net-ipvpn-ntt, name: pe-nagoya}
+
+  links:
+    - id: link-tokyo-ipvpn
+      endpoints: [tokyo-ce-ge0, net-ipvpn-ntt-pe-tokyo]
+      link_speed: 1G
+      link_role: wan-l3                       # IP-VPN アクセス (L3 で終端)
+      description: "circuit-id=IPVPN-01-T, bandwidth=1G, access=metro-ether, qos=class-s"
+    - id: link-osaka-ipvpn
+      endpoints: [osaka-ce-ge0, net-ipvpn-ntt-pe-osaka]
+      link_speed: 500M
+      link_role: wan-l3
+      description: "circuit-id=IPVPN-01-O, bandwidth=500M, access=metro-ether, qos=class-s"
+    - id: link-nagoya-ipvpn
+      endpoints: [nagoya-ce-ge0, net-ipvpn-ntt-pe-nagoya]
+      link_speed: 100M
+      link_role: wan-l3
+      description: "circuit-id=IPVPN-01-N, bandwidth=100M, access=flets, qos=best-effort"
+
+layer3:
+  interfaces:
+    - {id: tokyo-ce-ge0-l3,  node: tokyo-ce,  name: Ge0/0, ip: 100.64.0.2/30,  attaches_to: {interface: tokyo-ce-ge0}}
+    - {id: osaka-ce-ge0-l3,  node: osaka-ce,  name: Ge0/0, ip: 100.64.0.6/30,  attaches_to: {interface: osaka-ce-ge0}}
+    - {id: nagoya-ce-ge0-l3, node: nagoya-ce, name: Ge0/0, ip: 100.64.0.10/30, attaches_to: {interface: nagoya-ce-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-ce,  local_as: 65001}
+        - {node: osaka-ce,  local_as: 65002}
+        - {node: nagoya-ce, local_as: 65003}
+  routing_neighbors:
+    # PE はトポロジー外として address + local_as で書く。
+    # 網をノードにしたのに L3 的には外部ピアで扱う二重表現が残る (既知の弱点)。
+    - {id: bgp-peer-tokyo-pe,  type: bgp, from: {node: tokyo-ce,  update_source: tokyo-ce-ge0-l3},  to: {address: 100.64.0.1, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-osaka-pe,  type: bgp, from: {node: osaka-ce,  update_source: osaka-ce-ge0-l3},  to: {address: 100.64.0.5, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-nagoya-pe, type: bgp, from: {node: nagoya-ce, update_source: nagoya-ce-ge0-l3}, to: {address: 100.64.0.9, local_as: 65100}, address_families: [ipv4_unicast]}
+
+# ndl-viz:
+#   - 網を雲として描く。雲のラベルに "NTT Com IP-VPN (VPN-01)" (役割 + 事業者 + VPN-ID)
+#   - 各リンクに回線 ID を小さく。これは description を機械で読まない限り出せない
+#   - 「拠点間の論理トポロジー」(フルメッシュ or ハブスポーク等) は mlndl では
+#     表現できない (BGP 経路配布ポリシーに依存する運用情報。構文には出さない)

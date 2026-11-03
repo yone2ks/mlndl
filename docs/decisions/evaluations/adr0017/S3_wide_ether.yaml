@@ -1,0 +1,66 @@
+# S3 (ADR-0017): 3 拠点を広域イーサで接続。同一 VLAN 100 がストレッチ。
+#
+# 広域イーサ網は箱ノード (role: provider-network)。網の種類とサービス名は name で読む (D3)。
+# VLAN は拠点側のポートだけを trunk_ports に並べる。網側のタグ運用は mlndl のスコープ外とする。
+# link_role は書かない (D2)。
+
+ndl_version: "1.0"
+
+meta:
+  name: S3-wide-ether
+  description: 3 拠点を NTT Com の広域イーサ (WE-100) で接続して VLAN 100 をストレッチする構成
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - {id: tokyo-sw,  role: core, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-sw,  role: core, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-sw, role: core, implementation: physical, labels: {site: nagoya}}
+
+    - id: net-wideeth-ntt
+      name: NTT Com 広域イーサ (WE-100)
+      role: provider-network
+      description: >-
+        NTT Communications の広域イーサネット。契約 WE-100、
+        マルチポイント型、最大 MTU 1500。
+
+  interfaces:
+    - {id: tokyo-sw-ge0,  node: tokyo-sw,  name: Ge0/0}
+    - {id: osaka-sw-ge0,  node: osaka-sw,  name: Ge0/0}
+    - {id: nagoya-sw-ge0, node: nagoya-sw, name: Ge0/0}
+    - {id: net-wideeth-ntt-tokyo,  node: net-wideeth-ntt, name: tokyo}
+    - {id: net-wideeth-ntt-osaka,  node: net-wideeth-ntt, name: osaka}
+    - {id: net-wideeth-ntt-nagoya, node: net-wideeth-ntt, name: nagoya}
+
+  links:
+    - id: link-tokyo-wideeth
+      endpoints: [tokyo-sw-ge0, net-wideeth-ntt-tokyo]
+      link_speed: 1G
+      description: >-
+        東京拠点のアクセス回線。回線 ID WE-100-T、メトロイーサ、契約帯域 1G。
+    - id: link-osaka-wideeth
+      endpoints: [osaka-sw-ge0, net-wideeth-ntt-osaka]
+      link_speed: 1G
+      description: >-
+        大阪拠点のアクセス回線。回線 ID WE-100-O、メトロイーサ、契約帯域 1G。
+    - id: link-nagoya-wideeth
+      endpoints: [nagoya-sw-ge0, net-wideeth-ntt-nagoya]
+      link_speed: 500M
+      description: >-
+        名古屋拠点のアクセス回線。回線 ID WE-100-N、メトロイーサ、契約帯域 500M。
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: stretched-tenant
+      # 拠点側 trunk 3 ポートだけを並べる。網側は L2 透過とみなして書かない。
+      trunk_ports:
+        - {interface: tokyo-sw-ge0}
+        - {interface: osaka-sw-ge0}
+        - {interface: nagoya-sw-ge0}
+
+# ndl-viz:
+#   - 雲ラベル "NTT Com 広域イーサ (WE-100)"
+#   - VLAN 100 がストレッチしていることは、trunk_ports の 3 件が別々のサイトにある
+#     ことから読める (labels.site で区別する)。

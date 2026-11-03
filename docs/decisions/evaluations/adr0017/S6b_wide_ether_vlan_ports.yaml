@@ -1,0 +1,82 @@
+# S6b (ADR-0017 D5-2 候補 b): 箱ノードの IF を VLAN の trunk_ports に並べて、derive が
+# 「網の中でこれらの IF は同じ L2 にある」とみなしてくれることを期待する試み。
+#
+# 期待 (ドラフトのメモどおり):
+#   - 現在の derive はセッションの通り道を「両端の update_source の L3 IF の基盤が同じリンク /
+#     LAG / VLAN の上にあるか」で判定する。
+#   - 両ルーターの L3 IF はルーテッドポート (attaches_to: {interface: ...}) で基盤は L1 IF。
+#     それぞれの L1 IF の対向は網の別々のポート (tokyo-rtr-ge0 → net-...-tokyo、
+#     osaka-rtr-ge0 → net-...-osaka) で、両端が同じリンクではない。
+#   - 結果 derive._transport は mismatch を返し、validator は次の error を出す想定:
+#       "両端の update_source ('tokyo-rtr-ge0-l3' と 'osaka-rtr-ge0-l3') が同じリンク /
+#        LAG / VLAN の上にありません。直結のインターフェースどうしで張るなら、同じリンクの
+#        両端を指してください (ADR-0010 D7)"
+#
+#   derive 側で「VLAN の trunk_ports に挙がっている L1 IF どうしは同じ L2 セグメント上に
+#   ある」と拡張解釈するロジックはまだない。候補 (b) を採るなら derive の拡張が必要になる
+#   (仕様変更ではなく実装追加)。
+#
+# もう 1 つの懸念 (ドラフト D5-2 候補 b):
+#   - 拠点側がタグなしの場合、vlan_id にどの値を書いても意味が通らない (事業者の内部タグは
+#     分からない)。本サンプルは便宜上 100 を割り振ったが、現実には拠点でタグが見えない
+#     ケースがほとんどで、ここに書く値そのものが根拠を欠く。
+
+ndl_version: "1.0"
+
+meta:
+  name: S6b-wide-ether-vlan-ports
+  description: 広域イーサ上の 2 拠点が直接 BGP。箱 IF を VLAN の trunk_ports に並べて derive の結果を見る
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: osaka}}
+
+    - id: net-wideeth-ntt
+      name: NTT Com 広域イーサ (地域間 VPN-200)
+      role: provider-network
+      description: 地域間広域イーサ。両拠点を同一 L2 セグメントで透過する。
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-wideeth-ntt-tokyo, node: net-wideeth-ntt, name: tokyo}
+    - {id: net-wideeth-ntt-osaka, node: net-wideeth-ntt, name: osaka}
+
+  links:
+    - {id: link-tokyo-wideeth, endpoints: [tokyo-rtr-ge0, net-wideeth-ntt-tokyo], link_speed: 1G}
+    - {id: link-osaka-wideeth, endpoints: [osaka-rtr-ge0, net-wideeth-ntt-osaka], link_speed: 1G}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: wideeth-transit
+      # 箱ノードの両ポートを trunk_ports に並べる (候補 b)。
+      # 拠点側のポートはここに書かない (拠点側は routed port なので VLAN には属さない)。
+      trunk_ports:
+        - {interface: net-wideeth-ntt-tokyo}
+        - {interface: net-wideeth-ntt-osaka}
+
+layer3:
+  interfaces:
+    # 拠点側はルーテッドポート。VLAN には属さない。
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+  routing_neighbors:
+    # 両端とも自分の機器として書く (理想形)。
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-l3},
+       address_families: [ipv4_unicast]}
+
+# 期待: validator は error 1 件 (transport_mismatch)。「同じリンク / LAG / VLAN の上にありません」。
+# これを通すには derive 側の拡張 (VLAN の trunk_ports から「網越しの同一 L2」を導く) が要る。

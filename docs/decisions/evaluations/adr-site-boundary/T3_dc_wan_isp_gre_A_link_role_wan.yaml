@@ -1,0 +1,65 @@
+# ADR-site-boundary 試し書き
+# Topology T3: 1 DC に WAN ルーター 2 台。ISP 向けと 拠点間 WAN。
+#              拠点 S2 は L1 でつながるが、拠点 S3 は L1 なしで GRE だけ。
+# Candidate A: link_role: wan を使う
+#
+# サイト名を YAML に書けるか: いいえ。
+# 書かなかったとき: 1 連結成分 (S2) に融合。S3 は L1 がないのでそもそも
+#   表現されず、ndl-viz の L1 連結成分では S3 が「存在しない拠点」になる。
+# 書き忘れ・矛盾 (致命的):
+#   - **ISP リンク (link-dc-wan1-isp)** は実際には endpoints に書く対向
+#     ノードがない (ISP はトポロジー外)。L1Link の endpoints は 2 固定で
+#     片端外部は書けないため、`link_role: wan` を付けるリンク自体が存在
+#     できない。(round4 の feedback Y8 と同根)
+#   - **S3 (GRE-only)** は L1 リンクが 1 本もない。link_role に基づく
+#     サイト分離は、L1 リンクを介さずにしか繋がらない拠点を**原理的に
+#     検出できない**。GRE トンネルは layer3.tunnel_interfaces であり
+#     link_role は持たない。
+#
+# したがって Candidate A はこの構成の時点で破綻する。
+
+ndl_version: "1.0"
+
+meta:
+  name: T3-dc-wan-isp-gre
+  description: "DC 2 WAN + 拠点間 WAN + GRE-only 拠点。link_role: wan は原理的に不足"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: dc-core1, role: core,   implementation: vm}
+    - {id: dc-wan1,  role: border, implementation: vm, description: "ISP egress"}
+    - {id: dc-wan2,  role: border, implementation: vm, description: "inter-site WAN"}
+    - {id: s2-wan,   role: border, implementation: physical}
+    - {id: s3-rtr,   role: border, implementation: physical, description: "GRE-only remote"}
+    # NOTE: ISP ノードは意図的に書かない (= トポロジー外。control_plane.routing_neighbors の
+    #       to: {address: ...} で表現する想定)
+
+  interfaces:
+    - {id: dc-core1-swp1, node: dc-core1, name: swp1}
+    - {id: dc-core1-swp2, node: dc-core1, name: swp2}
+    - {id: dc-wan1-swp1,  node: dc-wan1,  name: swp1}   # dc-core1 向け (内部)
+    - {id: dc-wan1-eth1,  node: dc-wan1,  name: eth1}   # ISP 向け (外) -- 対向なし
+    - {id: dc-wan2-swp1,  node: dc-wan2,  name: swp1}   # dc-core1 向け (内部)
+    - {id: dc-wan2-eth1,  node: dc-wan2,  name: eth1}   # 拠点間 WAN
+    - {id: s2-wan-eth0,   node: s2-wan,   name: eth0}
+    - {id: s3-rtr-eth0,   node: s3-rtr,   name: eth0}   # GRE の source になる (下記 L3)
+
+  links:
+    # DC 内部
+    - {id: link-dc-core1-wan1, endpoints: [dc-core1-swp1, dc-wan1-swp1], link_speed: 10G, link_role: underlay}
+    - {id: link-dc-core1-wan2, endpoints: [dc-core1-swp2, dc-wan2-swp1], link_speed: 10G, link_role: underlay}
+    # DC - S2 の拠点間 WAN
+    - {id: link-wan-dc-s2,     endpoints: [dc-wan2-eth1, s2-wan-eth0],   link_speed: 1G,  link_role: wan}
+    # ISP: 対向ノードが無いので 1 端点の link が書けない — feedback 参照
+    # - {id: link-wan-dc-isp,  endpoints: [dc-wan1-eth1, ???],           link_speed: 1G,  link_role: wan}
+    # S3 (GRE only): L1 リンクが存在しない
+
+layer3:
+  interfaces:
+    - {id: dc-wan1-eth1-l3, node: dc-wan1, name: eth1, ip: 203.0.113.2/30, attaches_to: {interface: dc-wan1-eth1}}
+    - {id: s3-rtr-eth0-l3,  node: s3-rtr,  name: eth0, ip: 198.51.100.9/30, attaches_to: {interface: s3-rtr-eth0}}
+  tunnel_interfaces:
+    - {id: tunnel-dc-wan1-s3, node: dc-wan1, type: gre,
+       source: dc-wan1-eth1-l3, destination_interface: s3-rtr-eth0-l3,
+       ip: 10.254.0.1/30, mtu: 1476}

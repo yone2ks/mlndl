@@ -1,0 +1,127 @@
+# P3 (ADR-0017 Pass C): 「線」で書く回線と「箱」で書く事業者網を同じトポロジーに並べる
+#
+# 判定基準 (Pass B 評価メモ): 「契約が 2 点間の回線か、事業者網への接続か」で分ける。
+#
+# 線で書くもの:
+#   - ダークファイバ (NTT 東日本)        — 2 点間の光ファイバ貸出。L1 のみ
+#   - DWDM 波長 (NTT Com λ-service)      — 2 点間の波長貸出
+#   - L2 専用線 (KDDI EtherVPN)          — 2 点間の L2 専用線
+#
+# 箱で書くもの:
+#   - モバイル閉域網 (NTT Docomo gigaCloud VPN) — モバイル網への接続。拠点のモバイル
+#     ルーターが網に繋がり、網の中は不透明。契約は「網への接続」。
+#
+# 迷いやすいのが DWDM と L2 専用線。どちらも「透明に光 / L2 が通る」のだが、契約の形が
+# 「2 点間」なので線で書く。網の中が自分で設計できるかどうかは判定に使わない
+# (評価メモ「D3 の判定基準」参照)。
+
+ndl_version: "1.0"
+
+meta:
+  name: P3-lines-vs-boxes-mixed
+  description: ダークファイバ / DWDM 波長 / L2 専用線 (線) とモバイル閉域網 (箱) の混在
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    # 本社と DR サイトは十分近いのでダークファイバ・DWDM・L2 専用線で結ぶ
+    - {id: hq-core,  role: core,   implementation: physical, labels: {site: hq}}
+    - {id: hq-rtr,   role: border, implementation: physical, labels: {site: hq}}
+    - {id: dr-core,  role: core,   implementation: physical, labels: {site: dr}}
+    - {id: dr-rtr,   role: border, implementation: physical, labels: {site: dr}}
+    # 営業所。固定回線が引けないのでモバイル閉域網
+    - {id: branch-rtr, role: border, implementation: physical, labels: {site: branch}}
+
+    # 事業者網 (箱) はモバイル閉域網だけ
+    - id: net-docomo-gcv
+      name: NTT Docomo gigaCloud VPN
+      role: provider-network
+      description: >-
+        LTE / 5G 閉域網。契約 GCV-7788、APN closed.docomo.ne.jp。
+        網の中はキャリアに任せる (経路設計の対象外)。
+
+  interfaces:
+    - {id: hq-core-te1, node: hq-core, name: Te1/1}   # dark fiber
+    - {id: hq-core-te2, node: hq-core, name: Te1/2}   # DWDM wavelength
+    - {id: hq-rtr-ge0,  node: hq-rtr,  name: Ge0/0}   # L2 専用線
+    - {id: hq-rtr-ge1,  node: hq-rtr,  name: Ge0/1}   # モバイル閉域網 (本社出口)
+    - {id: dr-core-te1, node: dr-core, name: Te1/1}
+    - {id: dr-core-te2, node: dr-core, name: Te1/2}
+    - {id: dr-rtr-ge0,  node: dr-rtr,  name: Ge0/0}
+    - {id: branch-rtr-ge0, node: branch-rtr, name: Ge0/0}
+    - {id: net-docomo-gcv-branch, node: net-docomo-gcv, name: branch}
+    - {id: net-docomo-gcv-hq,     node: net-docomo-gcv, name: hq}
+
+  links:
+    # ── ダークファイバ (線) ─────────────────────────────────────────
+    # 2 点間の光ファイバ。L2 以上は自分の装置で決まるので、link_speed は装置の
+    # ポート速度にそろえる。回線の情報は description に書く。
+    - id: link-hq-dr-dark-fiber
+      endpoints: [hq-core-te1, dr-core-te1]
+      link_speed: 10G
+      description: >-
+        NTT 東日本 ダークファイバ。物件番号 DF-2024-0033。
+        SMF 2 芯 (TX/RX)、約 24 km。
+
+    # ── DWDM 波長 (線) ─────────────────────────────────────────────
+    # λ-service。契約は 10G の波長 1 本。中継の中継器・分岐は事業者所有だが、
+    # 契約の形は「2 点間の波長」なので線で書く。
+    - id: link-hq-dr-dwdm
+      endpoints: [hq-core-te2, dr-core-te2]
+      link_speed: 10G
+      description: >-
+        NTT Com λ-service。契約 LAM-010、1532.68 nm (channel 42)、10G LAN-PHY。
+        2 点間の波長 1 本。クライアント側は 10GBASE-LR。
+
+    # ── L2 専用線 (線) ─────────────────────────────────────────────
+    # EtherVPN。契約は 1 本の L2 専用線。L3 以上は自分の装置で終端する。
+    - id: link-hq-dr-l2
+      endpoints: [hq-rtr-ge0, dr-rtr-ge0]
+      link_speed: 1G
+      description: >-
+        KDDI EtherVPN。契約 EV-5566、1 Gbps 専用、タグ透過。
+        2 点間の L2 専用線。
+
+    # ── モバイル閉域網 (箱) ────────────────────────────────────────
+    - id: link-branch-mobile
+      endpoints: [branch-rtr-ge0, net-docomo-gcv-branch]
+      link_speed: 100M
+      description: LTE Cat.6 USB モデム経由。APN closed.docomo.ne.jp
+    - id: link-hq-mobile
+      endpoints: [hq-rtr-ge1, net-docomo-gcv-hq]
+      link_speed: 1G
+      description: >-
+        網出口は本社 (Access Premium)。回線 ID GCV-7788-HQ、
+        契約帯域 100M (ベストエフォート)。
+
+layer3:
+  interfaces:
+    # L2 専用線上の L3 (hq-rtr ↔ dr-rtr)
+    - {id: hq-rtr-ge0-l3, node: hq-rtr, name: Ge0/0, ip: 10.0.1.1/30, attaches_to: {interface: hq-rtr-ge0}}
+    - {id: dr-rtr-ge0-l3, node: dr-rtr, name: Ge0/0, ip: 10.0.1.2/30, attaches_to: {interface: dr-rtr-ge0}}
+    # モバイル閉域網へのアクセス回線上の L3 (CE 側)
+    - {id: hq-rtr-ge1-l3,     node: hq-rtr,     name: Ge0/1, ip: 100.100.0.2/30,  attaches_to: {interface: hq-rtr-ge1}}
+    - {id: branch-rtr-ge0-l3, node: branch-rtr, name: Ge0/0, ip: 100.100.0.6/30,  attaches_to: {interface: branch-rtr-ge0}}
+
+# 期待される validator 出力:
+#   errors 0, warnings 0 (OK)
+#
+# 根拠:
+#   - リンクはすべて L1 IF の id を endpoints に書くだけなので参照整合性 OK。
+#   - 箱 (net-docomo-gcv) は普通の L1 ノード扱い。L3 IF を持たないことは言語の
+#     規約に委ね、validator は検査しない (評価メモ「一致した点」より)。
+#
+# ndl-viz:
+#   - ダークファイバ・DWDM・L2 専用線は普通のリンク (線) として hq-dr 間に 3 本並ぶ。
+#     description は線を押したときの Properties に出る (線の上には出さない)。
+#   - モバイル閉域網は雲 (net-docomo-gcv) として描かれ、branch と hq の両方から
+#     それぞれ別の線が雲へ入る。
+#
+# Pass C で ADR-0017 に書くべきこと:
+#   - 「線 (link) で書くか、箱 (provider-network ノード) で書くか」の判定基準は、
+#     事業者網の技術の種類 (L1 波長 / L2 / L3 VPN) ではなく「契約の形」。
+#     契約が 2 点間なら線、網への接続なら箱。
+#   - 線で書くときは description に回線 ID・事業者名・契約帯域・物件番号などを書く。
+#     link_speed は自分の装置のポート速度を書く (契約帯域は description に)。
+#   - 線で書いたからといって「中に装置がない」ことを意味しない (DWDM の中継器や
+#     L2 VPN の PE はあるが、契約の対象外なので mlndl には書かない)。

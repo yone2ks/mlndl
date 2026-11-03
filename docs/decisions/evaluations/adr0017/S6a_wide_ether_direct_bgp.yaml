@@ -1,0 +1,69 @@
+# S6a (ADR-0017 D5-2 候補 a): 広域イーサ越しに 2 拠点のルーターどうしが直接 BGP。
+#
+# 候補 (a): 相手のルーターは自分の機器なのに、トポロジー外として address + local_as で書く。
+# 現状の構文で valid にする唯一の書き方。
+#
+# 問題点:
+#   - tokyo-rtr と osaka-rtr はどちらも自分の機器 (L1 ノードとして定義済み) なのに、BGP セッションの
+#     片方だけが「中の端」、もう片方は「外の端」になる。同じ機器が 2 通りに書かれる。
+#   - 片方向 (tokyo → osaka) しかセッションが現れない。相互の視点を書くなら 2 本必要になる。
+#   - エクスポーターの出力でもセッションの線は 1 本だけ、しかも途中で消える。
+
+ndl_version: "1.0"
+
+meta:
+  name: S6a-wide-ether-direct-bgp
+  description: 広域イーサ越しに 2 拠点のルーターが直接 BGP を張る (相手をトポロジー外として書く)
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: osaka}}
+
+    - id: net-wideeth-ntt
+      name: NTT Com 広域イーサ (地域間 VPN-200)
+      role: provider-network
+      description: >-
+        地域間を結ぶ広域イーサ。契約 WE-200、ポイントツーポイント型。
+        両拠点のルーターは同じセグメントに同居し、直接ピアを張れる。
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-wideeth-ntt-tokyo, node: net-wideeth-ntt, name: tokyo}
+    - {id: net-wideeth-ntt-osaka, node: net-wideeth-ntt, name: osaka}
+
+  links:
+    - id: link-tokyo-wideeth
+      endpoints: [tokyo-rtr-ge0, net-wideeth-ntt-tokyo]
+      link_speed: 1G
+      description: 東京拠点のアクセス回線。回線 ID WE-200-T、契約帯域 1G。
+    - id: link-osaka-wideeth
+      endpoints: [osaka-rtr-ge0, net-wideeth-ntt-osaka]
+      link_speed: 1G
+      description: 大阪拠点のアクセス回線。回線 ID WE-200-O、契約帯域 1G。
+
+layer3:
+  interfaces:
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+  routing_neighbors:
+    # 相手は自分の機器 (osaka-rtr) なのに、トポロジー外の相手として address + local_as で書く (候補 a)。
+    # 逆向き (osaka-rtr から tokyo-rtr の address へ) をもう 1 本書いても validator は通る
+    # (相手が address なので、同じ両端の重複とはみなされない)。ただしそれは 1 つのセッションを
+    # 2 エントリに書くことになり、ADR-0010 の「1 エントリ = 1 セッション」に反する。
+    # したがって片方の機器の側からしか書けない。
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-l3},
+       to: {address: 10.100.0.2, local_as: 65002},
+       address_families: [ipv4_unicast]}
+
+# 期待: errors 0。ただし「自分の機器を外として書く」ことが残る (ドラフト D5-2 の懸念そのもの)。

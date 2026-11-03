@@ -25,6 +25,9 @@
 
 三者の役割分担は [ADR-0009](decisions/0009-membership-orthogonality.md) を参照してください。
 
+`labels` は、同じ値を複数の要素が共有する**分類**です。1 つの要素だけを識別する値 (回線 ID、契約番号、資産タグ) は
+`labels` ではなく `description` に書いてください ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
+
 ---
 
 ## 推奨軸名
@@ -40,7 +43,7 @@
 | `az` | Availability Zone。電源・冷却・建屋の障害単位 | `ap-northeast-1a` | クラウド・オンプレ共通。AZ ⊇ 複数 pod が一般的 |
 | `pod` | Clos ファブリックの増設単位 (Cisco PoD = Point of Delivery) | `pod-tokyo` | IS-IS / underlay BGP が pod 内で完結する。**Kubernetes Pod ではない** |
 | `rack` | 物理ラック。ToR 障害・ラック電源の単位 | `rack-a01` | |
-| `site` | 物理拠点 / データセンター建屋 | `site-tokyo` | DCI をまたぐ単位 |
+| `site` | 物理拠点 / データセンター建屋 | `tokyo` | DCI をまたぐ単位。値はサイトの名前をそのまま書く (`site-tokyo` としない)。図のサイトの枠にも使う。両端のノードの `site` が違うリンクがサイト間のリンク。事業者網の箱には付けない ([ADR-0017](decisions/0017-sites-and-wan.md) D1) |
 | `region` | 地理リージョン | `ap-northeast-1` | クラウドのリージョン境界 |
 
 ### 管理軸 (management axis)
@@ -74,6 +77,7 @@
 
 | 状況 | ndl-viz の動作 |
 |------|---------------|
+| `site` がある | 同じ値のノードを 1 つの枠にまとめ、値を枠の名前にする。`site` のないノードには枠を出さない |
 | 推奨軸名のキーがある | 軸別のフィルタ・色分けを既定で提供 |
 | 推奨軸名にないキー (例: `ticket`) | フィルタ候補として列挙するが既定スタイルは適用しない |
 | `labels` 未設定 | 何もしない。警告は出さない |
@@ -90,6 +94,7 @@
 |------|------|---------|
 | `labels: {vpc: vpc-prod}` で階層を表現する | `labels` は多軸フラット分類。VPC ⊃ subnet ⊃ instance の階層は連鎖で辿れる必要がある | `parent: vpc-prod` (Phase 3+) |
 | `labels: {node: leaf1}` のような ID 参照 | `labels` は非参照。参照整合性の検証対象外 | `attaches_to` / `parent` |
+| `labels: {circuit-id: KD-0123}` のような識別子 | 同じ値を共有する要素がなく、分類にならない | `description` (ADR-0017 D4) |
 | 同一軸に複数値を持たせる | map なので構造的に不可能 | 軸を分ける (`az` と `az-secondary` 等)、または Phase 3+ の構造化構成子を待つ |
 
 ---
@@ -110,7 +115,8 @@ mlndl コアはそれを止められません。
 ### 適用範囲の拡大
 
 Phase 1 では `layer1.nodes` にのみ `labels` を実装しています。
-Phase 2 で link / lag / vlan / vxlan / vrf / routing_adjacency へ横展開予定です。
+Phase 2 で lag / vlan / vxlan / vrf / routing_neighbor へ横展開予定です。
+リンク (`L1Link.labels`) は、リンクを分類で選ぶ用途が出るまで足しません ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
 
 ### 語彙の追加
 

@@ -260,6 +260,18 @@ MPLS は `mpls_label` / `label_stack`、802.1Q は `vlan_id`（実装済み）�
 Phase 3+ の `blast_radius` クエリが軸の性質を区別できない。当面は `docs/label-vocabulary.md` の分類を
 informative な指針とし、必要が明確になった時点で構造化構成子に昇格させる（加算的変更）。
 
+### 11. サイト・事業者網・回線情報（構文は足さない）
+
+> **→ 詳細: [ADR-0017](docs/decisions/0017-sites-and-wan.md)**
+
+- **サイト**は `labels: {site: tokyo}`（値はサイトの名前そのまま。`site-tokyo` としない）。規約で、書かなくても valid。サイト間のリンクは両端の `site` の違いから取り出す
+- **2 点間の回線**（専用線・L2 専用線・ダークファイバ・波長）は `L1Link`。**事業者網への接続**（IP-VPN・広域イーサ・インターネット・閉域接続）は
+  `role: provider-network` の箱ノード + 拠点から箱への `L1Link`。サービスの種類は `role` で分けず箱の `name` に書く。箱は L3 IF を持たない（規約。検査しない）
+- **回線 ID・契約帯域・事業者名**は `description` に書く。書式は決めず、ツールはパースしない。`labels` には書かない。`link_role` に `wan` などの推奨値は足さない
+- **事業者の機器**（PE・クラウドのルーター）との BGP は、相手をトポロジー外 `{address, local_as}` で書く
+- **広域イーサ越しに自社の機器どうしが張る BGP** は、当面は片側をトポロジー外として書く（両端 `node` は ADR-0010 D7 で error）。
+  3 拠点以上の広域イーサの OSPF / IS-IS は範囲外。構文は次の ADR で決める
+
 ---
 
 ## NDL YAML フォーマット概要
@@ -280,6 +292,7 @@ layer1:
       role: spine                # 自由文字列 (推奨値: docs/role-vocabulary.md 参照)
       device_type: cumulus_linux
       labels:                    # 任意: 多軸分類（ADR-0009）。キー・値とも自由文字列
+        site: tokyo              # サイト（ADR-0017）。図のサイトの枠になる
         az: ap-northeast-1a
         tenant: acme
       overrides:                 # 任意: eve-lab-builder のデフォルト値を上書き
@@ -564,6 +577,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0013](docs/decisions/0013-vlan-ports-on-lag.md) | VLAN のポート | **C**（D7 を追記） | `trunk_ports` / `access_ports` は `{interface:}` か `{lag:}`。`node` は書かない。MLAG は 1 エントリで両ノード。LAG とメンバーの併記は error、メンバーだけは warning。D7: VLAN の端点（ポートの対向の IF と IP）を参照をたどって導く。1 ホップ、`name` では引かない。tagged trunk のタグ一致は推定 |
 | [ADR-0014](docs/decisions/drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) | A (Draft) | `layer2.vteps`（`sources` = 終端するノードの L3 IF、`address` / `address_v6`）。VNI は `vteps` で参照。方式中立（anycast / vPC / BGW を構文に出さない）。アドレス省略は `sources` が 1 つのときだけ。旧 `vtep_source` / `members` は 1.x の間 warning（**実装済み**） |
 | [ADR-0015](docs/decisions/drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する | A (Draft) | 参照先が 1 つに決まる参照は `Annotated[str, Ref("layer2.vlans")]` と型に書き、汎用の検査が全参照を検査する。キーで選ぶ参照（attaches_to 等）と意味の検査は別。`topology.resolve(id)` で id から実体を引く（**実装済み**） |
+| [ADR-0017](docs/decisions/0017-sites-and-wan.md) | サイト・事業者網・回線情報の書き分け | **C** | スキーマ・validator は変えない。サイトは `labels.site`（値は `tokyo`）。2 点間の回線は `L1Link`、事業者網は `role: provider-network` の箱 + 箱への `L1Link`（契約の形で分ける）。回線 ID 等は `description`（書式なし、パースしない）。`link_role` に WAN の推奨値は足さない。事業者の機器はトポロジー外の相手。広域イーサ越しの自社機器どうしのセッションは次の ADR（D5-2） |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---
