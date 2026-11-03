@@ -271,6 +271,7 @@ informative な指針とし、必要が明確になった時点で構造化構�
 - **事業者の機器**（PE・クラウドのルーター）との BGP は、相手をトポロジー外 `{address, local_as}` で書く
 - **広域イーサ越しに自社の機器どうしが張る BGP** は、当面は片側をトポロジー外として書く（両端 `node` は ADR-0010 D7 で error）。
   3 拠点以上の広域イーサの OSPF / IS-IS は範囲外。構文は次の ADR で決める
+- **→ ADR-0018 で決着（実装は未着手）**: 箱の中の L2 の転送は `layer2.bridges`（`ports` は箱のポートだけ）に書き、両端 `node` で書く。トンネルの上のセッションは `update_source` / OSPF の `interface` にトンネル IF を書く
 
 ---
 
@@ -578,6 +579,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0014](docs/decisions/drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) | A (Draft) | `layer2.vteps`（`sources` = 終端するノードの L3 IF、`address` / `address_v6`）。VNI は `vteps` で参照。方式中立（anycast / vPC / BGW を構文に出さない）。アドレス省略は `sources` が 1 つのときだけ。旧 `vtep_source` / `members` は 1.x の間 warning（**実装済み**） |
 | [ADR-0015](docs/decisions/drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する | A (Draft) | 参照先が 1 つに決まる参照は `Annotated[str, Ref("layer2.vlans")]` と型に書き、汎用の検査が全参照を検査する。キーで選ぶ参照（attaches_to 等）と意味の検査は別。`topology.resolve(id)` で id から実体を引く（**実装済み**） |
 | [ADR-0017](docs/decisions/0017-sites-and-wan.md) | サイト・事業者網・回線情報の書き分け | **C** | スキーマ・validator は変えない。サイトは `labels.site`（値は `tokyo`）。2 点間の回線は `L1Link`、事業者網は `role: provider-network` の箱 + 箱への `L1Link`（契約の形で分ける）。回線 ID 等は `description`（書式なし、パースしない）。`link_role` に WAN の推奨値は足さない。事業者の機器はトポロジー外の相手。広域イーサ越しの自社機器どうしのセッションは次の ADR（D5-2） |
+| [ADR-0018](docs/decisions/0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 | **C**（実装は未着手） | `layer2.bridges` を最小の形（`id` / `name` / `ports` / `description`）で先取り。`ports` は転送する側（箱）のポートだけ、`{interface:}` / `{lag:}`、方式名は書かない、書かなければ透過しない。両端が同じ bridge に届けば通り道は `{bridge:}`（1 ホップ）。`update_source` / OSPF の `interface` はトンネル IF も指せ（`Ref` の複数コレクション）、対になれば `{tunnel: [from, to]}`。OSPF / IS-IS も通り道を導き、食い違いは 1.x warning・2.0 error。マルチアクセスは次の ADR |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

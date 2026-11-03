@@ -1,0 +1,99 @@
+# P4: トンネルの対向が destination_ip (= トポロジー外) で、その上に BGP を張る
+#
+# 構成:
+#   hq-rtr --- [IIJ Internet] ---(トポロジー外のクラウド/ISP の対向、203.0.113.100)
+#       │
+#       └── GRE (destination_ip: 203.0.113.100) --- (overlay peer: 169.254.0.2, AS 64512)
+#
+# ゼロから考えた書き分け:
+#   - トンネルの対が自分の機器でないときは、ADR-0011 D6 のとおり tunnel_interfaces.
+#     destination_ip を使う (destination_interface と排他)。
+#   - その上の BGP セッションの to 側はトポロジー外の相手 ({address, local_as})。
+#     to.address はトンネル IF の中の overlay IP (= 169.254.0.2) を指す。
+#     tunnel の destination_ip (203.0.113.100) は underlay 側の外側パケットの宛先であって、
+#     BGP の相手 (overlay) ではない。
+#   - D3 の「対の判定」は両端ともトンネル IF の場合のみ適用される。
+#     片端が outside ({address}) のときは、from.update_source のトンネル IF の
+#     destination_ip が BGP の to.address と同じ /30 の対にあるかどうかを validator が
+#     見るか見ないかは、ADR-0018 の範囲外 (ADR-0010 の outside endpoint の既決のまま)。
+#
+# 試した論点 (Pass C Input サマリ):
+#   3. トンネル IF を update_source に書く — ただし片端が outside のとき
+#   7. ADR-0017 D5-2 の置き換え — クラウドの PE などトポロジー外の相手は、トンネル越し
+#      でも「片側トポロジー外にする」の書き方が引き続き使える
+#
+# 期待する validator の結果 (この設計で実装したら):
+#   - errors: 0
+#   - update_source: tunnel-hq-cloud は Ref の拡張で tunnel_interfaces を指せる
+#   - D3 の「対の判定」は from.node + to.node の両方があるときだけ走るので、
+#     to が outside ({address}) の本件はスキップされる
+#   - 通り道は導かれない (= outside endpoint は通り道の計算対象外。ADR-0010 のまま)
+#
+# 書きにくかった点:
+#   - 「BGP の to.address」と「tunnel の destination_ip」が別の IP なのが読み手には
+#     紛らわしい (前者は overlay、後者は underlay)。
+#     構文上は違うキーなので取り違えは起きにくいが、「どの IP が overlay / underlay か」
+#     を読み分けるのは BGP + トンネルを両方理解している前提になる。
+#     ドラフト D6 のメッセージが「相手がトポロジー外なら…」の分岐でこの構図を示すか
+#     どうかは、Pass B 評価の問 6 (食い違いのメッセージ) に関係する。
+#   - トンネルの source の L3 IF が underlay IP (203.0.113.1) を持ち、トンネル IF 自身は
+#     overlay IP (169.254.0.1/30) を持つ。この二層構造は ADR-0011 D6 のまま。本件での
+#     ADR-0018 の加算は update_source が tunnel IF を指せるようになる点だけ。
+#   - 片側が outside の場合に「対になっていない」の警告を出すべきか迷った。結論: 出さない。
+#     outside endpoint は address しか持たず、「相手のトンネル IF の有無」は書けないので、
+#     対の判定は両端 node のときだけに閉じるのが素直。D3 本文にこの線引きを明記すべき
+#     (= Pass C の提案)。
+#   - Pass B の B4c (= 両端 node なのに片側しかトンネル IF がない) とは別の形式。
+#     B4c は「書き手の意図が不明」なので error (D6 の新しいメッセージ)。
+#     本件は「書き手の意図が明確」(outside peer との 1 対 1) なので valid。
+#     この違いが D3 本文の分岐で区別されることを確認した。
+
+ndl_version: "1.0"
+
+meta:
+  name: P4-tunnel-destination-ip
+  description: "GRE tunnel to an outside peer via destination_ip; BGP uses {address, local_as}"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr, name: HQ-RTR, role: border, implementation: physical, labels: {site: tokyo}}
+    - id: net-iij-internet
+      name: IIJ Internet
+      role: provider-network
+      description: "Business Internet (transport for GRE)"
+
+  interfaces:
+    - {id: hq-rtr-ge0, node: hq-rtr, name: Ge0/0}
+    - {id: net-iij-internet-hq, node: net-iij-internet, name: hq}
+
+  links:
+    - {id: link-hq-iij, endpoints: [hq-rtr-ge0, net-iij-internet-hq], link_speed: 1G}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # underlay 側 (ISP が払い出すグローバル IP)
+    - {id: hq-rtr-ge0-l3, node: hq-rtr, name: Ge0/0, ip: 203.0.113.1/30,
+       attaches_to: {interface: hq-rtr-ge0}}
+
+  tunnel_interfaces:
+    # 対向は自社の機器ではなく、クラウド (または ISP) の対向。destination_ip を使う
+    - {id: tunnel-hq-cloud, node: hq-rtr, type: gre,
+       source: hq-rtr-ge0-l3, destination_ip: 203.0.113.100,
+       ip: 169.254.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes: [{node: hq-rtr, local_as: 65001}]
+
+  routing_neighbors:
+    # update_source: tunnel-hq-cloud (トンネル IF)
+    # to は outside。to.address (169.254.0.2) は overlay の相手 IP (tunnel IF の対向 /30)
+    - {id: bgp-peer-hq-cloud, type: bgp,
+       from: {node: hq-rtr, update_source: tunnel-hq-cloud},
+       to: {address: 169.254.0.2, local_as: 64512},
+       address_families: [ipv4_unicast]}

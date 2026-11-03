@@ -1,0 +1,83 @@
+# B4c: 嫌なケース — トンネルを片側だけ書いた
+#
+# 構成:
+#   tokyo-rtr と fukuoka-rtr のあいだで GRE を張るつもりだが、
+#   tunnel-tokyo-fukuoka (tokyo 側) しか書かず、fukuoka 側の tunnel-fukuoka-tokyo を忘れた。
+#
+# 意図:
+#   D3 の対の判定 (source と destination_interface の対) を、片側しかない状況で試す。
+#
+# ドラフトのどの D を試すか:
+#   - D3 「片方だけトンネル IF、または両方トンネル IF で対になっていなければ食い違い」
+#   - Pass B 評価の問 4 (1 本のトンネルだけ書き、相手のトンネル IF がない場合)
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - from.update_source は tunnel-* (トンネル IF)
+#   - to.update_source は fukuoka-rtr-lo (ループバック: L3 IF、トンネル IF ではない)
+#   - D3 「片方だけトンネル IF」に該当 → 食い違いで error
+#   - D6 の新しいメッセージ: 「from 側はトンネル IF (…) ですが to 側はループバック (…) で、
+#     対になっていません。相手の tunnel_interfaces も書くか、両端を同じ bridge/リンクに
+#     揃えてください」のような、書き手の意図を推測した助言が欲しい
+#   - 現状の mlndl: update_source: tunnel-* が Ref("layer3.interfaces") で ERROR になり、
+#     対の判定にすら進まない (= ドラフトの D3 を実装してはじめて「対になっていない」を言える)
+#
+# 迷った箇所:
+#   - トンネルの対になっていない書き方は、現実にはよくあるミス (片側しか作っていない状態の
+#     途中コミット)。validator が「相手を書き忘れていませんか」を示唆できるかは、
+#     ドラフト本文の D6 のメッセージからは明確でない。D6 は「直結・事業者網・トンネル」の
+#     3 択を示すだけで、「相手のトンネルが足りない」は言わない。
+
+ndl_version: "1.0"
+
+meta:
+  name: B4c-tunnel-one-side-only
+  description: One side of the GRE pair is missing (expected error)
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr,   name: Tokyo-RTR,   role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: fukuoka-rtr, name: Fukuoka-RTR, role: border, implementation: physical, labels: {site: fukuoka}}
+    - id: net-iij-internet
+      name: IIJ Internet
+      role: provider-network
+      description: IIJ Internet (transport)
+
+  interfaces:
+    - {id: tokyo-rtr-ge0,   node: tokyo-rtr,   name: Ge0/0}
+    - {id: fukuoka-rtr-ge0, node: fukuoka-rtr, name: Ge0/0}
+    - {id: net-iij-internet-tokyo,   node: net-iij-internet, name: tokyo}
+    - {id: net-iij-internet-fukuoka, node: net-iij-internet, name: fukuoka}
+
+  links:
+    - {id: link-tokyo-iij,   endpoints: [tokyo-rtr-ge0,   net-iij-internet-tokyo],   link_speed: 1G}
+    - {id: link-fukuoka-iij, endpoints: [fukuoka-rtr-ge0, net-iij-internet-fukuoka], link_speed: 1G}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    - {id: tokyo-rtr-ge0-l3,   node: tokyo-rtr,   name: Ge0/0, ip: 203.0.113.1/30,  attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: fukuoka-rtr-ge0-l3, node: fukuoka-rtr, name: Ge0/0, ip: 198.51.100.1/30, attaches_to: {interface: fukuoka-rtr-ge0}}
+    - {id: fukuoka-rtr-lo,     node: fukuoka-rtr, name: lo0,   ip: 10.255.0.4/32}
+
+  tunnel_interfaces:
+    # tokyo 側のトンネルだけ書いて fukuoka 側を忘れている
+    - {id: tunnel-tokyo-fukuoka, node: tokyo-rtr, type: gre,
+       source: tokyo-rtr-ge0-l3, destination_interface: fukuoka-rtr-ge0-l3,
+       ip: 172.31.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr,   local_as: 65001}
+        - {node: fukuoka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    # 期待: D3 の「片方だけトンネル IF」で error
+    - {id: bgp-peer-tokyo-fukuoka, type: bgp,
+       from: {node: tokyo-rtr,   update_source: tunnel-tokyo-fukuoka},
+       to:   {node: fukuoka-rtr, update_source: fukuoka-rtr-lo},
+       address_families: [ipv4_unicast]}

@@ -1,0 +1,227 @@
+# B5: examples/wan-sites.yaml を ADR-0018 ドラフトで書き直した版
+#
+# 意図:
+#   examples/wan-sites.yaml が書けていなかった 2 つの穴を埋める:
+#     (1) 広域イーサ (東京 - 名古屋、tokyo-core-te3 / nagoya-sw-ge48) の上の BGP が未記述
+#         → bridge-we100 を追加し、両端 node の eBGP を追加 (ADR-0018 D1 / D2)
+#     (2) インターネット VPN (GRE over IPsec, tokyo-rtr2 - fukuoka-rtr) の上の BGP が未記述
+#         → tunnel-* を update_source にした両端 node の eBGP を追加 (ADR-0018 D3)
+#
+# ドラフトのどの D を試すか:
+#   - D1 (bridges 最小形): 広域イーサの箱の L1 IF を members に。
+#   - D2 (bridge への通り道): 両端の L3 IF が同じ bridge に届く。
+#   - D3 (update_source にトンネル IF)。
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - errors: 0 (元の wan-sites.yaml が全エラーなしだった前提で、追加分も通る)
+#   - 広域イーサの BGP の通り道: {bridge: bridge-we100}
+#   - GRE の上の BGP の通り道: {tunnel: [tunnel-tokyo-fukuoka, tunnel-fukuoka-tokyo]}
+#
+# 元ファイル (examples/wan-sites.yaml) との差分 (本ファイル中 "+ ADR-0018" マーカー):
+#   + layer2.bridges を 1 ブロック新設 (bridge-we100)
+#   + control_plane.bgp.default の nagoya-rtr の local_as を 65003 → 65303 に変える必要はなし
+#     (元の 65003 を活かし、新しい eBGP の AS 違いで eBGP になる。tokyo-core は AS を元に持たないので
+#      新しい BGP セッションのために tokyo-core にも local_as を追加する必要がある → nodes に 1 行追加)
+#     ※ 元 wan-sites.yaml の tokyo-core は BGP を話さない core SW だった前提を破るのが辛い。
+#       代替案として tokyo-rtr1 の方で広域イーサに接続し直すのが現実的だが、L1 を変えると
+#       「差分」が膨らむ。ここでは「bgp.nodes に tokyo-core / nagoya-sw を加える」最小の差分でよしとする。
+#       → 技術的妥当性としては違和感 (core SW が BGP を話す)。example-author の疑問点。
+#
+# 迷った箇所:
+#   - 広域イーサは元のファイルでは L2 (vlan-100) として書いてあった。bridge と vlan を
+#     両方書くとどうなるのか、ドラフトは触れていない。本ファイルでは vlan-100 はそのまま
+#     残し、bridge-we100 を独立に追加した。
+#     bridge と vlan の役割の違い (bridge = L2 透過の宣言、vlan = 802.1Q 番号を持つドメイン) を
+#     ドラフト本文は暗黙にしているので、両方書く構成の意味は読み手の解釈に委ねられる。
+#   - 元ファイルの tokyo-core-te3 / nagoya-sw-ge48 の L3 側 (= 広域イーサに BGP を張るための
+#     L3 IF) が未定義だった。追加する際、ノードの立場 (SW が BGP を話すか) に違和感がある。
+#     現実には拠点のルーターを広域イーサに繋ぎ替えるのが素直だが、L1 の書き換えは「差分」の
+#     範囲外とした。ここは example-author が本番ではなく「ドラフトを試す目的」として割り切り。
+
+ndl_version: "1.0"
+
+meta:
+  name: wan-sites
+  description: Four sites and AWS over leased lines, IP-VPN, wide-area Ethernet, Internet VPN and Direct Connect (ADR-0018 variant)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-core,  name: Tokyo-Core,  role: core,   implementation: physical, labels: {site: tokyo}}
+    - {id: tokyo-rtr1,  name: Tokyo-RTR-1, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: tokyo-rtr2,  name: Tokyo-RTR-2, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-core,  name: Osaka-Core,  role: core,   implementation: physical, labels: {site: osaka}}
+    - {id: osaka-rtr1,  name: Osaka-RTR-1, role: border, implementation: physical, labels: {site: osaka}}
+    - {id: osaka-rtr2,  name: Osaka-RTR-2, role: border, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-rtr,  name: Nagoya-RTR,  role: border, implementation: physical, labels: {site: nagoya}}
+    - {id: nagoya-sw,   name: Nagoya-SW,   role: access, implementation: physical, labels: {site: nagoya}}
+    - {id: fukuoka-rtr, name: Fukuoka-RTR, role: border, implementation: physical, labels: {site: fukuoka}}
+
+    - {id: net-ntt-ipvpn,       name: NTT IP-VPN,                role: provider-network,
+       description: "Arcstar Universal One, contract VPN-01"}
+    - {id: net-kddi-wideether,  name: KDDI Wide-Area Ethernet,   role: provider-network,
+       description: KDDI Wide-Area Ethernet WE-100}
+    - {id: net-iij-internet,    name: IIJ Internet,              role: provider-network,
+       description: IIJ business Internet}
+    - {id: net-aws-dx,          name: AWS Direct Connect,        role: provider-network,
+       description: Hosted connection dxcon-ab12cd34}
+
+  interfaces:
+    - {id: tokyo-core-te1,   node: tokyo-core,  name: Te1/1}
+    - {id: tokyo-core-te2,   node: tokyo-core,  name: Te1/2}
+    - {id: tokyo-core-te3,   node: tokyo-core,  name: Te1/3}
+    - {id: tokyo-rtr1-te0,   node: tokyo-rtr1,  name: Te0/0}
+    - {id: tokyo-rtr1-ge1,   node: tokyo-rtr1,  name: Ge0/1}
+    - {id: tokyo-rtr1-ge2,   node: tokyo-rtr1,  name: Ge0/2}
+    - {id: tokyo-rtr1-ge3,   node: tokyo-rtr1,  name: Ge0/3}
+    - {id: tokyo-rtr2-te0,   node: tokyo-rtr2,  name: Te0/0}
+    - {id: tokyo-rtr2-ge1,   node: tokyo-rtr2,  name: Ge0/1}
+    - {id: tokyo-rtr2-ge2,   node: tokyo-rtr2,  name: Ge0/2}
+    - {id: osaka-core-te1,   node: osaka-core,  name: Te1/1}
+    - {id: osaka-core-te2,   node: osaka-core,  name: Te1/2}
+    - {id: osaka-rtr1-te0,   node: osaka-rtr1,  name: Te0/0}
+    - {id: osaka-rtr1-ge1,   node: osaka-rtr1,  name: Ge0/1}
+    - {id: osaka-rtr2-te0,   node: osaka-rtr2,  name: Te0/0}
+    - {id: osaka-rtr2-ge1,   node: osaka-rtr2,  name: Ge0/1}
+    - {id: osaka-rtr2-ge2,   node: osaka-rtr2,  name: Ge0/2}
+    - {id: nagoya-rtr-ge0,   node: nagoya-rtr,  name: Ge0/0}
+    - {id: nagoya-rtr-ge1,   node: nagoya-rtr,  name: Ge0/1}
+    - {id: nagoya-sw-ge1,    node: nagoya-sw,   name: Gi1/0/1}
+    - {id: nagoya-sw-ge48,   node: nagoya-sw,   name: Gi1/0/48}
+    - {id: fukuoka-rtr-ge0,  node: fukuoka-rtr, name: Ge0/0}
+    - {id: fukuoka-rtr-ge1,  node: fukuoka-rtr, name: Ge0/1}
+    - {id: net-ntt-ipvpn-osaka,       node: net-ntt-ipvpn,      name: osaka}
+    - {id: net-ntt-ipvpn-nagoya,      node: net-ntt-ipvpn,      name: nagoya}
+    - {id: net-ntt-ipvpn-fukuoka,     node: net-ntt-ipvpn,      name: fukuoka}
+    - {id: net-ntt-ipvpn-tokyo,       node: net-ntt-ipvpn,      name: tokyo}
+    - {id: net-kddi-wideether-tokyo,  node: net-kddi-wideether, name: tokyo}
+    - {id: net-kddi-wideether-nagoya, node: net-kddi-wideether, name: nagoya}
+    - {id: net-iij-internet-tokyo,    node: net-iij-internet,   name: tokyo}
+    - {id: net-iij-internet-fukuoka,  node: net-iij-internet,   name: fukuoka}
+    - {id: net-aws-dx-tokyo,          node: net-aws-dx,         name: tokyo}
+
+  links:
+    - {id: link-tokyo-core-rtr1, endpoints: [tokyo-core-te1, tokyo-rtr1-te0], link_speed: 10G}
+    - {id: link-tokyo-core-rtr2, endpoints: [tokyo-core-te2, tokyo-rtr2-te0], link_speed: 10G}
+    - {id: link-osaka-core-rtr1, endpoints: [osaka-core-te1, osaka-rtr1-te0], link_speed: 10G}
+    - {id: link-osaka-core-rtr2, endpoints: [osaka-core-te2, osaka-rtr2-te0], link_speed: 10G}
+    - {id: link-nagoya-rtr-sw,   endpoints: [nagoya-rtr-ge1, nagoya-sw-ge1],  link_speed: 1G}
+    - {id: link-tokyo-osaka-kddi, endpoints: [tokyo-rtr1-ge1, osaka-rtr1-ge1], link_speed: 1G}
+    - {id: link-tokyo-osaka-ntt,  endpoints: [tokyo-rtr2-ge1, osaka-rtr2-ge1], link_speed: 1G}
+    - {id: link-tokyo-ipvpn,     endpoints: [tokyo-rtr1-ge2,   net-ntt-ipvpn-tokyo],   link_speed: 1G}
+    - {id: link-osaka-ipvpn,     endpoints: [osaka-rtr2-ge2,   net-ntt-ipvpn-osaka],   link_speed: 1G}
+    - {id: link-nagoya-ipvpn,    endpoints: [nagoya-rtr-ge0,   net-ntt-ipvpn-nagoya],  link_speed: 1G}
+    - {id: link-fukuoka-ipvpn,   endpoints: [fukuoka-rtr-ge0,  net-ntt-ipvpn-fukuoka], link_speed: 1G}
+    - {id: link-tokyo-wideether,  endpoints: [tokyo-core-te3,  net-kddi-wideether-tokyo],  link_speed: 10G}
+    - {id: link-nagoya-wideether, endpoints: [nagoya-sw-ge48,  net-kddi-wideether-nagoya], link_speed: 1G}
+    - {id: link-tokyo-internet,   endpoints: [tokyo-rtr2-ge2,  net-iij-internet-tokyo],    link_speed: 1G}
+    - {id: link-fukuoka-internet, endpoints: [fukuoka-rtr-ge1, net-iij-internet-fukuoka],  link_speed: 1G}
+    - {id: link-tokyo-dx,         endpoints: [tokyo-rtr1-ge3,  net-aws-dx-tokyo],          link_speed: 1G}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: office
+      trunk_ports:
+        - {interface: tokyo-core-te3}
+        - {interface: nagoya-sw-ge48}
+      access_ports:
+        - {interface: nagoya-sw-ge1}
+
+  # + ADR-0018 D1: 広域イーサの L2 透過を bridge で宣言する
+  # (元の wan-sites.yaml にはなかった)
+  bridges:
+    - id: bridge-we100
+      name: WE-100
+      description: KDDI Wide-Area Ethernet WE-100, L2-transparent between Tokyo and Nagoya
+      members:
+        - {interface: net-kddi-wideether-tokyo}
+        - {interface: net-kddi-wideether-nagoya}
+
+  subinterfaces:
+    - {id: subif-tokyo-rtr1-ge3-101, attaches_to: {interface: tokyo-rtr1-ge3}, vlan_id: 101, name: Ge0/3.101}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    - {id: tokyo-rtr1-lo,  node: tokyo-rtr1,  name: lo0, ip: 10.255.0.1/32}
+    - {id: tokyo-rtr2-lo,  node: tokyo-rtr2,  name: lo0, ip: 10.255.0.2/32}
+    - {id: osaka-rtr1-lo,  node: osaka-rtr1,  name: lo0, ip: 10.255.0.11/32}
+    - {id: osaka-rtr2-lo,  node: osaka-rtr2,  name: lo0, ip: 10.255.0.12/32}
+    - {id: tokyo-rtr1-ge1-l3, node: tokyo-rtr1, name: Ge0/1, ip: 10.0.0.1/30, attaches_to: {interface: tokyo-rtr1-ge1}}
+    - {id: osaka-rtr1-ge1-l3, node: osaka-rtr1, name: Ge0/1, ip: 10.0.0.2/30, attaches_to: {interface: osaka-rtr1-ge1}}
+    - {id: tokyo-rtr2-ge1-l3, node: tokyo-rtr2, name: Ge0/1, ip: 10.0.0.5/30, attaches_to: {interface: tokyo-rtr2-ge1}}
+    - {id: osaka-rtr2-ge1-l3, node: osaka-rtr2, name: Ge0/1, ip: 10.0.0.6/30, attaches_to: {interface: osaka-rtr2-ge1}}
+    - {id: tokyo-rtr1-ge2-l3,  node: tokyo-rtr1,  name: Ge0/2, ip: 100.64.0.2/30,  attaches_to: {interface: tokyo-rtr1-ge2}}
+    - {id: osaka-rtr2-ge2-l3,  node: osaka-rtr2,  name: Ge0/2, ip: 100.64.0.6/30,  attaches_to: {interface: osaka-rtr2-ge2}}
+    - {id: nagoya-rtr-ge0-l3,  node: nagoya-rtr,  name: Ge0/0, ip: 100.64.0.10/30, attaches_to: {interface: nagoya-rtr-ge0}}
+    - {id: fukuoka-rtr-ge0-l3, node: fukuoka-rtr, name: Ge0/0, ip: 100.64.0.14/30, attaches_to: {interface: fukuoka-rtr-ge0}}
+    - {id: tokyo-rtr2-ge2-l3,  node: tokyo-rtr2,  name: Ge0/2, ip: 203.0.113.2/30,  attaches_to: {interface: tokyo-rtr2-ge2}}
+    - {id: fukuoka-rtr-ge1-l3, node: fukuoka-rtr, name: Ge0/1, ip: 198.51.100.2/30, attaches_to: {interface: fukuoka-rtr-ge1}}
+    - {id: tokyo-rtr1-vif-prod, node: tokyo-rtr1, name: Ge0/3.101, ip: 169.254.100.1/30,
+       attaches_to: {subinterface: subif-tokyo-rtr1-ge3-101}}
+
+    # + ADR-0018: 広域イーサの L2 の上に SVI 相当の L3 IF を立てる
+    # (vlan-100 の SVI を tokyo-core / nagoya-sw に書く。bridge と SVI の重複は未解決)
+    - {id: tokyo-core-vlan-100,  node: tokyo-core, name: Vlan100, ip: 10.100.0.1/30, attaches_to: {vlan: vlan-100}}
+    - {id: nagoya-sw-vlan-100,   node: nagoya-sw,  name: Vlan100, ip: 10.100.0.2/30, attaches_to: {vlan: vlan-100}}
+
+  tunnel_interfaces:
+    - {id: tunnel-tokyo-fukuoka, node: tokyo-rtr2, type: gre, source: tokyo-rtr2-ge2-l3,
+       destination_interface: fukuoka-rtr-ge1-l3, ip: 172.31.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1400}
+    - {id: tunnel-fukuoka-tokyo, node: fukuoka-rtr, type: gre, source: fukuoka-rtr-ge1-l3,
+       destination_interface: tokyo-rtr2-ge2-l3, ip: 172.31.0.2/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1400}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr1,  local_as: 65001}
+        - {node: tokyo-rtr2,  local_as: 65001}
+        - {node: osaka-rtr1,  local_as: 65002}
+        - {node: osaka-rtr2,  local_as: 65002}
+        - {node: nagoya-rtr,  local_as: 65003}
+        - {node: fukuoka-rtr, local_as: 65004}
+        # + ADR-0018: 広域イーサの BGP に tokyo-core と nagoya-sw が参加するために追加
+        # (= 元の wan-sites.yaml では SW が BGP を話さなかった。example-author の技術疑問)
+        - {node: tokyo-core, local_as: 65001}
+        - {node: nagoya-sw,  local_as: 65003}
+
+  routing_neighbors:
+    - {id: bgp-peer-tokyo-rtr1-osaka-rtr1, type: bgp,
+       from: {node: tokyo-rtr1, update_source: tokyo-rtr1-ge1-l3},
+       to:   {node: osaka-rtr1, update_source: osaka-rtr1-ge1-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-rtr2-osaka-rtr2, type: bgp,
+       from: {node: tokyo-rtr2, update_source: tokyo-rtr2-ge1-l3},
+       to:   {node: osaka-rtr2, update_source: osaka-rtr2-ge1-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-rtr1-rtr2, type: bgp,
+       from: {node: tokyo-rtr1, update_source: tokyo-rtr1-lo},
+       to:   {node: tokyo-rtr2, update_source: tokyo-rtr2-lo}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-osaka-rtr1-rtr2, type: bgp,
+       from: {node: osaka-rtr1, update_source: osaka-rtr1-lo},
+       to:   {node: osaka-rtr2, update_source: osaka-rtr2-lo}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-ipvpn, type: bgp, from: {node: tokyo-rtr1, update_source: tokyo-rtr1-ge2-l3},
+       to: {address: 100.64.0.1, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-osaka-ipvpn, type: bgp, from: {node: osaka-rtr2, update_source: osaka-rtr2-ge2-l3},
+       to: {address: 100.64.0.5, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-nagoya-ipvpn, type: bgp, from: {node: nagoya-rtr, update_source: nagoya-rtr-ge0-l3},
+       to: {address: 100.64.0.9, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-fukuoka-ipvpn, type: bgp, from: {node: fukuoka-rtr, update_source: fukuoka-rtr-ge0-l3},
+       to: {address: 100.64.0.13, local_as: 65100}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-aws, type: bgp, from: {node: tokyo-rtr1, update_source: tokyo-rtr1-vif-prod},
+       to: {address: 169.254.100.2, local_as: 64512}, address_families: [ipv4_unicast]}
+
+    # + ADR-0018 D2: 広域イーサ (bridge-we100) 上の eBGP を両端 node で書く
+    - {id: bgp-peer-tokyo-nagoya-wideether, type: bgp,
+       from: {node: tokyo-core, update_source: tokyo-core-vlan-100},
+       to:   {node: nagoya-sw,  update_source: nagoya-sw-vlan-100},
+       address_families: [ipv4_unicast]}
+
+    # + ADR-0018 D3: GRE の上の eBGP を update_source: tunnel-* で書く
+    - {id: bgp-peer-tokyo-fukuoka-gre, type: bgp,
+       from: {node: tokyo-rtr2,  update_source: tunnel-tokyo-fukuoka},
+       to:   {node: fukuoka-rtr, update_source: tunnel-fukuoka-tokyo},
+       address_families: [ipv4_unicast]}

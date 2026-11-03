@@ -1,0 +1,97 @@
+# P5c (invalid): 両端 node なのに from だけ tunnel IF、to は L3 IF (= 対になっていない)
+#
+# 構成:
+#   hq-rtr と branch-rtr のあいだで BGP を張るつもりだが、
+#   from.update_source はトンネル IF (tunnel-hq-branch) で、
+#   to.update_source はループバック (branch-rtr-lo) になっている。
+#   = 「片方だけトンネル IF」の D3 の負のケース。
+#
+# ゼロから考えた判断:
+#   - 両端 node のときの通り道は以下のどれかに決まるはず:
+#     (a) 直結 (両端の update_source の attaches_to が同じ L1 リンクの両端)
+#     (b) 事業者網 (両端の L3 IF の L1 IF 対向が同じ bridge の ports にある)
+#     (c) トンネル (両端が tunnel IF で、source / destination_interface が互いに逆向きで対)
+#     (d) multihop (両端がループバック、または届かない。ADR-0010 の既存の挙動のまま)
+#   - from が tunnel IF (= (c) の候補)、to が通常の L3 IF (= (d) の候補) だと、
+#     (c) の対の判定が片端しかない状態になり、どの経路でも成立しない。
+#   - これは Pass B の B4c と同じパターン。Pass C でも「対になっていない」の判定を
+#     error として置くのが素直。D6 の新しいメッセージの案は Pass B のとおり。
+#
+# 試した論点 (Pass C Input サマリ):
+#   3. トンネル IF の対の判定 — 片方だけ tunnel IF の場合
+#   6. 食い違いのメッセージ — 「相手のトンネル IF が足りない」示唆
+#
+# 期待する validator の結果 (この設計で実装したら):
+#   - error: 「両端の update_source から導いた通り道が食い違います
+#      (from: tunnel-hq-branch → トンネルの対が未定義、to: branch-rtr-lo → multihop)。
+#      相手のトンネル IF (destination_interface が hq-rtr-wan を指す) も書くか、両端を
+#      同じ bridge / リンクに揃えてください」
+#   - severity: error
+#
+# 書きにくかった点:
+#   - Pass B の B4c と重複する内容。Pass C ではゼロから考えて同じ結論に至ることを
+#     確認する目的。
+#   - 「相手のトンネル IF が足りない」のメッセージは、validator が「書き手の意図を
+#     推測」する形になる。推測が外れると (= 書き手が本当は直結のつもりだった、など)
+#     助言が的外れになる。D6 のメッセージを「(a)(b)(c) のうちどれで通したいか」の
+#     選択肢を示す形にする提案は Pass B の方針どおり。
+#   - 片方だけが tunnel IF の警告は、「outside endpoint のとき」(P4) との区別が必要。
+#     outside endpoint は address しか持たないので「相手のトンネル IF の有無」は
+#     書けない (= 対の判定の対象外)。この線引きが D3 本文に書いてあることを再確認。
+
+ndl_version: "1.0"
+
+meta:
+  name: P5c-invalid-unpaired-tunnel
+  description: "from side uses a tunnel IF but to side uses a loopback (expected error, pair mismatch)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr,     name: HQ-RTR,     role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: branch-rtr, name: Branch-RTR, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-iij-internet
+      name: IIJ Internet
+      role: provider-network
+
+  interfaces:
+    - {id: hq-rtr-ge0,     node: hq-rtr,     name: Ge0/0}
+    - {id: branch-rtr-ge0, node: branch-rtr, name: Ge0/0}
+    - {id: net-iij-internet-hq,     node: net-iij-internet, name: hq}
+    - {id: net-iij-internet-branch, node: net-iij-internet, name: branch}
+
+  links:
+    - {id: link-hq-iij,     endpoints: [hq-rtr-ge0,     net-iij-internet-hq],     link_speed: 1G}
+    - {id: link-branch-iij, endpoints: [branch-rtr-ge0, net-iij-internet-branch], link_speed: 1G}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    - {id: hq-rtr-ge0-l3,     node: hq-rtr,     name: Ge0/0, ip: 203.0.113.1/30,
+       attaches_to: {interface: hq-rtr-ge0}}
+    - {id: branch-rtr-ge0-l3, node: branch-rtr, name: Ge0/0, ip: 198.51.100.1/30,
+       attaches_to: {interface: branch-rtr-ge0}}
+    # branch 側のループバック (to.update_source に使う → 片方だけ tunnel になる)
+    - {id: branch-rtr-lo, node: branch-rtr, name: lo0, ip: 10.255.0.2/32}
+
+  tunnel_interfaces:
+    # hq 側だけ tunnel IF がある。branch 側の対になる tunnel IF を書き忘れている
+    - {id: tunnel-hq-branch, node: hq-rtr, type: gre,
+       source: hq-rtr-ge0-l3, destination_interface: branch-rtr-ge0-l3,
+       ip: 172.31.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: hq-rtr,     local_as: 65001}
+        - {node: branch-rtr, local_as: 65002}
+
+  routing_neighbors:
+    # 期待: D3 の「片方だけ tunnel IF」で error
+    - {id: bgp-peer-hq-branch, type: bgp,
+       from: {node: hq-rtr,     update_source: tunnel-hq-branch},
+       to:   {node: branch-rtr, update_source: branch-rtr-lo},
+       address_families: [ipv4_unicast]}

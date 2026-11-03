@@ -1,0 +1,100 @@
+# P3: IS-IS を広域イーサ (bridge) をはさんで 2 拠点で張る
+#
+# 構成:
+#   tokyo-rtr --- [KDDI 広域イーサ (bridge-we)] --- osaka-rtr
+#
+#   IS-IS は L2 上で IIH を送るので、endpoint の `interface` は L1 IF を指す
+#   (ADR-0010 の既決。control_plane.py)。
+#
+# ゼロから考えた書き分け:
+#   - IS-IS 隣接の両端は L1 IF をとる。IS-IS の通り道導出は「L1 IF の対向が同じ
+#     bridge の ports に入っていれば届く」で終わる (サブ IF や L3 IF をはさまないので
+#     D2 の「1 ホップ」が最短の形になる)。
+#   - OSPF (= L3 IF から基盤をたどる) との差: OSPF は L3 IF → attaches_to の L1 IF →
+#     対向 → bridge の ports の 2 段。IS-IS は L1 IF → 対向 → bridge の ports の 1 段。
+#     D2 本文に「IS-IS は interface が L1 IF なので、その対向を見る (基盤の 1 層を省く)」
+#     と書く必要があることが Pass B の評価メモにあり、ここで確かめる。
+#
+# 試した論点 (Pass C Input サマリ):
+#   2. bridge に届くことの判定 — IS-IS の場合、endpoint の interface は L1 IF。
+#      通り道は L1 IF の対向を 1 ホップで見る (サブ IF をはさまない)
+#   4. OSPF / IS-IS の通り道 — 導くか、食い違いの severity
+#
+# 期待する validator の結果 (この設計で実装したら):
+#   - errors: 0
+#   - IS-IS の通り道: {bridge: bridge-we220}
+#   - 食い違いが起きない (両端の L1 IF の対向がどちらも bridge-we220 の ports) ので
+#     warning も出ない。もし食い違ったら OSPF / IS-IS は 1.x の間 warning、2.0 で error
+#     (D4)
+#
+# 書きにくかった点:
+#   - IS-IS の interface に書くのが L1 IF (= node 直下の物理ポート id) で、OSPF の
+#     interface は L3 IF (= node + name + attaches_to を持つ中間層) の id。この違いは
+#     ADR-0010 の既決だが、ADR-0018 の D2 の「1 ホップ」の数え方が IS-IS と OSPF で
+#     1 段違うことを明記する必要がある (Pass B の指摘)。
+#   - L1 IF に直接 IS-IS を張るので、L3 IF が同じ L1 IF の attaches_to に紐づいて
+#     いても IS-IS 側の経路導出には影響しない。L3 IF の ip (10.100.0.1/30) はエンドの
+#     データプレーンのためで、IS-IS 制御プレーンは L2 で動く。これを「同じリンクに
+#     複数のプロトコルが乗る」と書けること自体はドラフトの D3 (update_source /
+#     interface に tunnel IF を書けるようにする) の加算的な派生で、特別な構文は要らなかった。
+#   - level は RFC 9130 で必須。本件は L1/L2 両方 (= level-all) で書いた。
+
+ndl_version: "1.0"
+
+meta:
+  name: P3-isis-over-bridge
+  description: "IS-IS adjacency across a wide-area Ethernet (bridge-we220)"
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, name: Tokyo-RTR, role: core, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, name: Osaka-RTR, role: core, implementation: physical, labels: {site: osaka}}
+    - id: net-kddi-wideether
+      name: KDDI Wide-Area Ethernet
+      role: provider-network
+      description: "L2-transparent EPL, port-based WE-220"
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-kddi-wideether-tokyo, node: net-kddi-wideether, name: tokyo}
+    - {id: net-kddi-wideether-osaka, node: net-kddi-wideether, name: osaka}
+
+  links:
+    - {id: link-tokyo-wideether, endpoints: [tokyo-rtr-ge0, net-kddi-wideether-tokyo], link_speed: 1G}
+    - {id: link-osaka-wideether, endpoints: [osaka-rtr-ge0, net-kddi-wideether-osaka], link_speed: 1G}
+
+layer2:
+  bridges:
+    - id: bridge-we220
+      name: WE-220
+      description: "L2-transparent segment of KDDI Wide-Area Ethernet WE-220"
+      ports:
+        - {interface: net-kddi-wideether-tokyo}
+        - {interface: net-kddi-wideether-osaka}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # IS-IS 自体は L2 で動くが、ユーザートラフィック用の L3 IF は同じ物理ポート上に立てる
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30,
+       attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30,
+       attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  isis:
+    - id: isis-wan
+      nodes: [{node: tokyo-rtr}, {node: osaka-rtr}]
+
+  routing_neighbors:
+    # IS-IS: endpoint の interface は L1 IF
+    # D2 の判定は「L1 IF の対向 (net-kddi-wideether-*) が bridge-we220 の ports にある」で
+    # 1 段短く済む。通り道は {bridge: bridge-we220}
+    - {id: isis-adj-tokyo-osaka, type: isis,
+       instance: isis-wan, level: level-all,
+       from: {node: tokyo-rtr, interface: tokyo-rtr-ge0},
+       to:   {node: osaka-rtr, interface: osaka-rtr-ge0}}

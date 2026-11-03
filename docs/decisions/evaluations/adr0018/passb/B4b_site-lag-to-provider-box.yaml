@@ -1,0 +1,101 @@
+# B4b: 嫌なケース — 拠点側が LAG で箱につながる
+#
+# 構成:
+#   tokyo-rtr (ge0, ge1 の 2 本を LAG に束ねて) === net-ntt-wideether-tokyo-a, -b
+#   osaka-rtr --- net-ntt-wideether-osaka  (単独)
+#
+# 意図:
+#   D1 の「members は {interface:} か {lag:}」(ADR-0013 と同じ) を、拠点側が LAG の
+#   場合に試す。bridge の members は箱の L1 IF (単独) で書くことになる。
+#   D2 の 1 ホップ判定で「LAG のメンバーの対向のどれかが members にある、または
+#   対向の LAG が members にある」のうち、前者 (メンバーの対向) で届く。
+#
+# ドラフトのどの D を試すか:
+#   - D1 (members のキー形式): 箱側は 2 本の L1 IF を 1 つの bridge に入れる (= 箱の中で L2 で束ねられる)。
+#   - D2 (LAG を介した届き判定): 拠点ルーター側は LAG。members にはメンバー IF の対向が 2 本とも入る。
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - errors: 0
+#   - 通り道は {bridge: bridge-we220} に導かれる
+#   - 現状の mlndl では bridges 未実装 + 両端 node BGP が transport_mismatch
+#
+# 迷った箇所:
+#   - 「拠点の LAG が箱の 2 本の L1 IF にそれぞれつながる」場合、箱側の 2 本の
+#     L1 IF を 1 つの bridge に入れるのが正しいのか、拠点の LAG を箱側で終端する
+#     1 本の論理リンクとして見るのか、ドラフト本文からは明確でない。前者で書いた。
+#   - D2 本文の「LAG なら、メンバーの対向のどれかが members にあるか、対向の LAG が
+#     members にある」のうち、「対向の LAG」とは何を指すか曖昧。箱側の 2 L1 IF を
+#     LAG として束ねる書き方 (事業者網側の LACP 設定) は普通あるが、箱の中の設定を
+#     mlndl で書く意味はほぼないので、ここでは箱側に LAG を書かず、箱の 2 L1 IF が
+#     それぞれ members に入っているだけで届くと解釈した。
+#   - LAG を L3 IF の attaches_to: {lag: ...} に書くのは ADR-0001 D8 どおり。routed LAG。
+
+ndl_version: "1.0"
+
+meta:
+  name: B4b-site-lag-to-provider-box
+  description: Site side bonds two ports into a LAG to the provider box
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, name: Tokyo-RTR, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, name: Osaka-RTR, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-ntt-wideether
+      name: NTT Com Wide-Area Ethernet
+      role: provider-network
+      description: Wide-Area Ethernet WE-220, 2x1G LACP from Tokyo side
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: tokyo-rtr-ge1, node: tokyo-rtr, name: Ge0/1}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-ntt-wideether-tokyo-a, node: net-ntt-wideether, name: tokyo-a}
+    - {id: net-ntt-wideether-tokyo-b, node: net-ntt-wideether, name: tokyo-b}
+    - {id: net-ntt-wideether-osaka,   node: net-ntt-wideether, name: osaka}
+
+  links:
+    - {id: link-tokyo-wideether-a, endpoints: [tokyo-rtr-ge0, net-ntt-wideether-tokyo-a], link_speed: 1G}
+    - {id: link-tokyo-wideether-b, endpoints: [tokyo-rtr-ge1, net-ntt-wideether-tokyo-b], link_speed: 1G}
+    - {id: link-osaka-wideether,   endpoints: [osaka-rtr-ge0, net-ntt-wideether-osaka],   link_speed: 1G}
+
+  lag:
+    - id: lag-tokyo-rtr-po1
+      type: lacp
+      node: tokyo-rtr
+      members: [tokyo-rtr-ge0, tokyo-rtr-ge1]
+      lacp: {mode: active, min_links: 1}
+
+layer2:
+  bridges:
+    # 箱側は 2 L1 IF を同じ bridge の members に入れる。LAG の反対側の 2 メンバーの対向を
+    # D2 の「メンバーの対向のどれかが members にある」で bridge に届かせる。
+    - id: bridge-we220
+      name: WE-220
+      description: Wide-Area Ethernet WE-220 shared segment
+      members:
+        - {interface: net-ntt-wideether-tokyo-a}
+        - {interface: net-ntt-wideether-tokyo-b}
+        - {interface: net-ntt-wideether-osaka}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # 拠点側は routed LAG。L3 IF は {lag: ...} に attach
+    - {id: tokyo-rtr-po1-l3, node: tokyo-rtr, name: Port-Channel1, ip: 10.100.0.1/30, attaches_to: {lag: lag-tokyo-rtr-po1}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0,         ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-po1-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-l3},
+       address_families: [ipv4_unicast]}

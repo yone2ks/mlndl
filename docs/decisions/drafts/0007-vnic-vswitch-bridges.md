@@ -6,6 +6,9 @@
 
 > このファイルは確定 ADR ではなく、議論の散逸を防ぐための**整理メモ**である。
 > 確定事項・未確定論点・却下案・将来への申し送りを記録する。実装（pydantic/validator/exporter）は未着手。
+>
+> **ADR-0018 (2026-11-03) で `layer2.bridges` の最小の形 (`id` / `name` / `ports` / `description`) を先に確定した。** このメモの `members: [{node, interface}]` は
+> `ports: [{interface:} | {lag:}]` (node は書かない) に読み替える。vSwitch のための `type` / `nodes` / `uplinks` と VLAN との関係は、任意のフィールドとして加算する。
 
 ---
 

@@ -1,0 +1,85 @@
+# Q1 案 B: 広域イーサ上の 2 拠点 eBGP を layer2.bridges で書く (未実装の構文)
+#
+# 案 B の意図:
+#   drafts/0007 の layer2.bridges を先取りして、箱の L1 IF (と拠点側の L1 IF) を
+#   members に入れた bridge を「事業者網が L2 を透過する」の宣言に使う。
+#   vlan_id のようなダミー番号を書かずに済むのが案 V との違い。
+#   BGP の通り道導出を「両端の L3 IF が同じ bridge のメンバー IF の上にある」
+#   でも OK とする拡張を前提にする。
+#
+# validator の予想:
+#   - 現状: layer2.bridges は未定義のキー。pydantic の extra 検査で ERROR
+#     (unknown field: layer2.bridges) か、拡張不可フィールドとして弾かれる。
+#     加えて両端 node の BGP も transport_mismatch で ERROR。
+#   - 案 B 採用時: errors 0 で OK を期待。
+#
+# 嘘を書いた箇所:
+#   - なし (bridge の members に書き手が知っている L1 IF だけを並べる)。
+#   - vlan_id を推測しなくてよい点は案 V より素直。
+#
+# 迷った箇所:
+#   - 箱の両側の L1 IF (tokyo 側・osaka 側) は 1 つの bridge に入れていいのか、
+#     それとも「事業者網の中にある複数の bridge」として別エントリにするのか。
+#     ここでは「契約した広域イーサ 1 本 = bridge 1 つ」と解釈した。
+#   - bridge の id の推奨プレフィックス (bridge-?) は ADR-0002 D7 に未定義。
+#     ここでは bridge-* を仮に使った。
+#   - bridge は「どのノードに属するか」を書くか? 事業者網の箱ノードに属させる
+#     か、トポロジー全体の L2 装置として浮かせるか迷った。ここでは members の
+#     参照先からノードを導出できるので node は書かない (ADR-0005 D6)。
+
+ndl_version: "1.0"
+
+meta:
+  name: Q1-B-wideether-ebgp-via-bridge
+  description: 広域イーサ越しの 2 拠点 eBGP を layer2.bridges で表現する試し書き (未実装)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-ntt-wideether
+      name: NTT Com 広域イーサ (WE-220)
+      role: provider-network
+      description: 2 拠点を結ぶ広域イーサ。契約 WE-220
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-ntt-wideether-tokyo, node: net-ntt-wideether, name: tokyo}
+    - {id: net-ntt-wideether-osaka, node: net-ntt-wideether, name: osaka}
+
+  links:
+    - {id: link-tokyo-wideether, endpoints: [tokyo-rtr-ge0, net-ntt-wideether-tokyo], link_speed: 1G}
+    - {id: link-osaka-wideether, endpoints: [osaka-rtr-ge0, net-ntt-wideether-osaka], link_speed: 1G}
+
+layer2:
+  bridges:
+    # 1 つの契約 = 1 つの bridge。members にはこの L2 セグメントに参加する L1 IF を書く。
+    # 箱の両側の L1 IF を含めることで「事業者網の中で透過する」を宣言する。
+    - id: bridge-we220
+      name: WE-220 L2 segment
+      description: Wide-area Ethernet contract WE-220, L2-transparent between the two sites
+      members:
+        - {interface: tokyo-rtr-ge0}
+        - {interface: osaka-rtr-ge0}
+        - {interface: net-ntt-wideether-tokyo}
+        - {interface: net-ntt-wideether-osaka}
+
+layer3:
+  interfaces:
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-l3},
+       address_families: [ipv4_unicast]}

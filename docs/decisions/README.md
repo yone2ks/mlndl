@@ -135,3 +135,15 @@ ADR-0015 では、参照先をスキーマに `Ref` で宣言し、参照の存�
 ndl-viz が `link_role: wan` のリンクを除いた連結成分を「サイト」と推定して描いていたことから始まった。
 サイトは `labels.site`、2 点間の回線は `L1Link`、事業者網は `role: provider-network` の箱ノード、回線 ID などは `description` に書き、構文は足さない。
 広域イーサ越しに自社の機器どうしが張るセッション (事業者網が L2 を透過する場合) は書き切れず、次の ADR で扱う (ADR-0017 D5-2)。
+
+### ラウンド7: 事業者網やトンネルを越えるセッション (2026-11-03)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [0018](0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 (実装は未着手) | **Accepted** | C |
+| [drafts/0018](drafts/0018-sessions-across-bridges-and-tunnels.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0018 | A |
+| [evaluations/adr0018](evaluations/adr0018/evaluation.md) | 横断評価メモ (Pass B) と Pass C の結果。試し書き `passa/` Q1〜Q4、`passb/` B1〜B5、`passc/` P1〜P5c | — | — |
+
+ADR-0017 D5-2 の 5 つの問いを受けた。事業者網の中の L2 の転送は `layer2.bridges` (drafts/0007 の先取り。`ports` は箱のポートだけ) に書き、
+両端が同じ bridge に届けば通り道は `{bridge:}`。`update_source` と OSPF の `interface` はトンネル IF も指せ、対になるトンネルなら通り道は `{tunnel: [from, to]}`。
+OSPF / IS-IS にも通り道を導く (食い違いは 1.x の間 warning、2.0 で error)。マルチアクセスの隣接は次の ADR。

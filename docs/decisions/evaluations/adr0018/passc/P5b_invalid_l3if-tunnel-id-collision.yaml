@@ -1,0 +1,71 @@
+# P5b (invalid): L3 IF の id とトンネル IF の id が重複している
+#
+# 構成:
+#   hq-rtr-wan が layer3.interfaces と layer3.tunnel_interfaces の両方に書かれている。
+#
+# ゼロから考えた判断:
+#   - ADR-0018 D3 で update_source / OSPF の interface の Ref を
+#     layer3.interfaces と layer3.tunnel_interfaces の 2 コレクションに広げる。
+#     「2 つのコレクションの和集合」で id を引くので、同じ id が両方にあると
+#     どちらを指しているか決まらない。
+#   - ADR-0002 D5 「ID のグローバル一意性」の範囲にトンネル IF の id が入っていない
+#     (現状の validator は L1 IF / LAG / VLAN / サブ IF しか見ない) ことに気づく。
+#     ADR-0018 で tunnel_interfaces を Ref の対象に加えるときに、ID 空間重複の
+#     検査も加算する必要がある。
+#
+# 試した論点 (Pass C Input サマリ):
+#   3. トンネル IF を update_source に — id の一意性、Ref を複数コレクションに広げるときの形
+#
+# 期待する validator の結果 (この設計で実装したら):
+#   - error: 「ID 'hq-rtr-wan' が L3 インターフェース と トンネルインターフェース の両方で
+#      使われています。ID はグローバルに一意である必要があります (ADR-0002 D5)」
+#   - severity: error (既存の _check_interface_id_spaces の拡張)
+#
+# 書きにくかった点:
+#   - 現状の validator は _check_interface_id_spaces で L1 IF / LAG / VLAN / サブ IF の
+#     4 空間しか見ていない。L3 IF と tunnel IF の id 空間は見ていない (= 名前空間を
+#     どこまで広げるかは Ref の広がりに連動すべき)。
+#   - ADR-0018 で tunnel IF を Ref 対象に加えるなら、
+#     spaces に "L3 インターフェース" と "トンネルインターフェース" を加算する形になる。
+#     これは ADR-0002 D5 の既存ポリシーの未実装分の先取り (Pass B の評価メモ記載) で
+#     あって新しい制約ではないと読む。
+#   - 本件は「id の重複だけで error を期待する」最小構成。update_source: hq-rtr-wan は
+#     「どちらを指しているか」が決まらないので、Ref の検査 (ADR-0015) の段階で
+#     「複数のコレクションに該当」を error として報告する形でもよい。
+#     検査の名目はどちらでも結果は同じだが、「id の一意性」側で検出する方が
+#     根本原因を示せる (= 修正は id を変える 1 つの方向に収束する)。
+
+ndl_version: "1.0"
+
+meta:
+  name: P5b-invalid-l3if-tunnel-id-collision
+  description: "L3 interface id and tunnel interface id collide (expected error)"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr, name: HQ-RTR, role: border, implementation: physical, labels: {site: tokyo}}
+    - id: net-iij-internet
+      name: IIJ Internet
+      role: provider-network
+
+  interfaces:
+    - {id: hq-rtr-ge0, node: hq-rtr, name: Ge0/0}
+    - {id: net-iij-internet-hq, node: net-iij-internet, name: hq}
+
+  links:
+    - {id: link-hq-iij, endpoints: [hq-rtr-ge0, net-iij-internet-hq], link_speed: 1G}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # 同じ id 'hq-rtr-wan' を L3 IF にも tunnel IF にも使う (invalid)
+    - {id: hq-rtr-wan, node: hq-rtr, name: Ge0/0, ip: 203.0.113.1/30,
+       attaches_to: {interface: hq-rtr-ge0}}
+
+  tunnel_interfaces:
+    - {id: hq-rtr-wan, node: hq-rtr, type: gre,
+       source: hq-rtr-wan, destination_ip: 203.0.113.100,
+       ip: 169.254.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}

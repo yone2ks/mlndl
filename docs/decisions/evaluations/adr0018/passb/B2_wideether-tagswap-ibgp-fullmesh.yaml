@@ -1,0 +1,126 @@
+# B2: 3 拠点の広域イーサ (タグ変換 EVPL: 東京=100 / 大阪=200 / 名古屋=300) 上の iBGP フルメッシュ
+#
+# 意図:
+#   タグ変換のある契約 (EVPL / EVP-LAN) で、拠点ごとに違うサブ IF タグが振られている状況。
+#   同じ L2 セグメントの上で iBGP フルメッシュ (RR なし 3 本) を張る。
+#
+# ドラフトのどの D を試すか:
+#   - D1 (bridges 最小形): 3 拠点でも members の数が増えるだけ、同じ構文。
+#   - D2 (サブ IF のタグは bridge をはさむと比べない): 拠点ごとに tag が
+#     100 / 200 / 300 と違っても、bridge を 1 つにまとめられることが重要。
+#     Pass A の案 V (layer2.vlans) で詰まった最大の点。
+#   - Pass B 評価の問 3 (サブ IF のタグを比べないこと。info で見せるか)。
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - errors: 0 (iBGP フルメッシュ 3 本すべて通り道が {bridge: bridge-we300} に導かれる)
+#   - 問 3 を info にするなら、「bridge-we300 の members に異なる vlan_id のサブ IF が
+#     attach している (100, 200, 300)」の info が 3 件出る (タグ変換の宣言とみなす)
+#   - 現状の mlndl では bridges 未実装 + 両端 node iBGP が transport_mismatch で error
+#
+# 迷った箇所:
+#   - サブ IF の attaches_to は L1 IF ({interface:}) のまま。bridge の members が
+#     「転送する側 = 箱の L1 IF」なので、拠点のサブ IF は bridge とは直接関係しない。
+#     読み手に「なぜサブ IF と bridge をどこでつなぐと言っているのか」が自明でない。
+#     ドラフト D2 の本文は L3 IF の基盤を 1 ホップたどって bridge members と照合する
+#     と書いてあるので、L3 IF → サブ IF → L1 IF → 対向 (箱) で届く、と導ける。
+#     ただし「サブ IF ならその基盤」の 1 ホップが「L3 → サブ → L1 → 対向」の 2 ホップに
+#     見えるので、D2 の「1 ホップ」の定義 (サブ IF は圧縮して数えない) をドラフト本文に
+#     明記してほしい。
+#   - iBGP フルメッシュで loopback を update_source にする運用は普通だが、ここでは
+#     「bridge の上の直結セッション」を試したいので、あえてサブ IF 上の L3 IF を
+#     update_source にした。loopback で張ると multihop になり D2 の bridge 導出が
+#     走らない (= 今の BGP の挙動のまま)。この書き分けは example-author には明らかだが
+#     ドラフト本文は触れていない。
+#   - vlan_id は「このリンク上の 802.1Q タグ番号。VLAN 参照ではない」(ADR-0012 D3) に
+#     従って書いたが、layer2.vlans に vlan-100 等を書いていないことに不安が残る。
+#     ドラフトは bridges と vlans の関係に触れておらず、「bridges を書いたら
+#     vlans は書かない」のか「両方書いてもよい」のかが決まらない。
+
+ndl_version: "1.0"
+
+meta:
+  name: B2-wideether-tagswap-ibgp-fullmesh
+  description: EVPL with tag swap (Tokyo=100, Osaka=200, Nagoya=300), iBGP full mesh over the shared L2 segment
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr,  name: Tokyo-RTR,  role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr,  name: Osaka-RTR,  role: border, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-rtr, name: Nagoya-RTR, role: border, implementation: physical, labels: {site: nagoya}}
+    - id: net-kddi-wideether
+      name: KDDI Wide-Area Ethernet (EVP-LAN)
+      role: provider-network
+      description: KDDI Wide-Area Ethernet EVP-LAN WE-300. Tag swap per site (Tokyo=100, Osaka=200, Nagoya=300)
+
+  interfaces:
+    - {id: tokyo-rtr-ge0,  node: tokyo-rtr,  name: Ge0/0}
+    - {id: osaka-rtr-ge0,  node: osaka-rtr,  name: Ge0/0}
+    - {id: nagoya-rtr-ge0, node: nagoya-rtr, name: Ge0/0}
+    - {id: net-kddi-wideether-tokyo,  node: net-kddi-wideether, name: tokyo}
+    - {id: net-kddi-wideether-osaka,  node: net-kddi-wideether, name: osaka}
+    - {id: net-kddi-wideether-nagoya, node: net-kddi-wideether, name: nagoya}
+
+  links:
+    - {id: link-tokyo-wideether,  endpoints: [tokyo-rtr-ge0,  net-kddi-wideether-tokyo],  link_speed: 1G,
+       description: "Access line WE-300-T, 300 Mbps, S-VID 100"}
+    - {id: link-osaka-wideether,  endpoints: [osaka-rtr-ge0,  net-kddi-wideether-osaka],  link_speed: 1G,
+       description: "Access line WE-300-O, 300 Mbps, S-VID 200"}
+    - {id: link-nagoya-wideether, endpoints: [nagoya-rtr-ge0, net-kddi-wideether-nagoya], link_speed: 1G,
+       description: "Access line WE-300-N, 100 Mbps, S-VID 300"}
+
+layer2:
+  bridges:
+    # D1: 3 拠点でも members の個数が違うだけ。
+    - id: bridge-we300
+      name: WE-300
+      description: Shared L2 segment of EVP-LAN WE-300 (Tokyo / Osaka / Nagoya)
+      members:
+        - {interface: net-kddi-wideether-tokyo}
+        - {interface: net-kddi-wideether-osaka}
+        - {interface: net-kddi-wideether-nagoya}
+
+  subinterfaces:
+    # 各拠点のルーターのサブ IF。vlan_id は「このリンク上の 802.1Q タグ番号」(ADR-0012 D3)。
+    # 拠点ごとに違う番号。bridge をはさむので D2 により互いのタグは比較されない。
+    - {id: subif-tokyo-rtr-ge0-100,  attaches_to: {interface: tokyo-rtr-ge0},  vlan_id: 100, name: Ge0/0.100}
+    - {id: subif-osaka-rtr-ge0-200,  attaches_to: {interface: osaka-rtr-ge0},  vlan_id: 200, name: Ge0/0.200}
+    - {id: subif-nagoya-rtr-ge0-300, attaches_to: {interface: nagoya-rtr-ge0}, vlan_id: 300, name: Ge0/0.300}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # サブ IF の上の L3。同じ /24 を 3 拠点で共有する (= 同じ L2 セグメント)
+    - {id: tokyo-rtr-ge0-100-l3,  node: tokyo-rtr,  name: Ge0/0.100, ip: 10.200.0.1/24,
+       attaches_to: {subinterface: subif-tokyo-rtr-ge0-100}}
+    - {id: osaka-rtr-ge0-200-l3,  node: osaka-rtr,  name: Ge0/0.200, ip: 10.200.0.2/24,
+       attaches_to: {subinterface: subif-osaka-rtr-ge0-200}}
+    - {id: nagoya-rtr-ge0-300-l3, node: nagoya-rtr, name: Ge0/0.300, ip: 10.200.0.3/24,
+       attaches_to: {subinterface: subif-nagoya-rtr-ge0-300}}
+
+control_plane:
+  bgp:
+    # iBGP フルメッシュなので全ノード同一 AS
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr,  local_as: 65000}
+        - {node: osaka-rtr,  local_as: 65000}
+        - {node: nagoya-rtr, local_as: 65000}
+
+  routing_neighbors:
+    # iBGP フルメッシュ (RR なし) 3 本。それぞれ両端のサブ IF 上の L3 IF を指す。
+    # 通り道はいずれも {bridge: bridge-we300} に導かれる。
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-100-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-200-l3},
+       address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-nagoya, type: bgp,
+       from: {node: tokyo-rtr,  update_source: tokyo-rtr-ge0-100-l3},
+       to:   {node: nagoya-rtr, update_source: nagoya-rtr-ge0-300-l3},
+       address_families: [ipv4_unicast]}
+    - {id: bgp-peer-osaka-nagoya, type: bgp,
+       from: {node: osaka-rtr,  update_source: osaka-rtr-ge0-200-l3},
+       to:   {node: nagoya-rtr, update_source: nagoya-rtr-ge0-300-l3},
+       address_families: [ipv4_unicast]}

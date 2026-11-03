@@ -1,0 +1,77 @@
+# P5a (invalid): 同じ L1 IF を 2 つの bridge の ports に書いた
+#
+# 構成:
+#   net-provider-tokyo を bridge-we-a と bridge-we-b の両方の ports に入れる (= 1 つの
+#   物理ポートが同時に 2 つの L2 セグメントに所属する、は意味的に成立しない)。
+#
+# ゼロから考えた判断:
+#   - bridge の ports は「転送する側のポート」(D1)。1 つの物理ポートが同時に 2 つの
+#     L2 セグメントに所属するのは、L2 透過の宣言としては意味が成立しない (= フレームが
+#     どちらに流れるかが決まらない)。これは VLAN の trunk_ports とは違う (VLAN は
+#     タグで多重化できるが、bridge は「番号を持たない」ので多重化できない)。
+#   - よって同じ L1 IF を複数の bridge の ports に書くのは error。
+#     ADR-0013 の「同じ VLAN に LAG とそのメンバーを併記していないか (error)」と似た
+#     検査が bridge にも必要。
+#
+# 試した論点 (Pass C Input サマリ):
+#   1. bridge の最小の形 — ports の重複宣言は error
+#
+# 期待する validator の結果 (この設計で実装したら):
+#   - error: 「L1 IF 'net-provider-tokyo' が複数の bridge の ports に書かれています
+#      (bridge-we-a / bridge-we-b)。1 つの物理ポートは 1 つの L2 セグメントにしか
+#      所属できません」
+#   - severity: error (ADR-0013 の類似ケースにそろえる)
+#
+# 書きにくかった点:
+#   - 検査の対象は「L1 IF の重複」。bridge の ports のキー形式は {interface:} / {lag:} なので、
+#     LAG を 2 つの bridge に書いたら error、LAG のメンバー IF と LAG を別々の bridge に
+#     書いたら error (= LAG を介した間接的な重複)、までを ADR-0018 で網羅するか迷った。
+#     本件は最小形 (直接の L1 IF の重複) のみを示す。LAG を介した重複は ADR-0013 の
+#     類似検査を bridges にも拡張する形で足せばよい (= Pass C の提案)。
+#   - 「どちらの bridge が正しいか」を validator は決めない。書き手が片方を消す。
+
+ndl_version: "1.0"
+
+meta:
+  name: P5a-invalid-same-port-in-two-bridges
+  description: "Same L1 interface appears in two bridges' ports (expected error)"
+  network_types: [l1-physical, l2-network]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, name: Tokyo-RTR, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, name: Osaka-RTR, role: border, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-rtr, name: Nagoya-RTR, role: border, implementation: physical, labels: {site: nagoya}}
+    - id: net-provider
+      name: Provider WAN
+      role: provider-network
+      description: "Hypothetical provider (invalid topology)"
+
+  interfaces:
+    - {id: tokyo-rtr-ge0,  node: tokyo-rtr,  name: Ge0/0}
+    - {id: osaka-rtr-ge0,  node: osaka-rtr,  name: Ge0/0}
+    - {id: nagoya-rtr-ge0, node: nagoya-rtr, name: Ge0/0}
+    - {id: net-provider-tokyo,  node: net-provider, name: tokyo}
+    - {id: net-provider-osaka,  node: net-provider, name: osaka}
+    - {id: net-provider-nagoya, node: net-provider, name: nagoya}
+
+  links:
+    - {id: link-tokyo-provider,  endpoints: [tokyo-rtr-ge0,  net-provider-tokyo],  link_speed: 1G}
+    - {id: link-osaka-provider,  endpoints: [osaka-rtr-ge0,  net-provider-osaka],  link_speed: 1G}
+    - {id: link-nagoya-provider, endpoints: [nagoya-rtr-ge0, net-provider-nagoya], link_speed: 1G}
+
+layer2:
+  bridges:
+    - id: bridge-we-a
+      name: WE-A
+      description: "First L2 segment"
+      ports:
+        - {interface: net-provider-tokyo}       # ← ここで登場
+        - {interface: net-provider-osaka}
+
+    - id: bridge-we-b
+      name: WE-B
+      description: "Second L2 segment (illegally shares a port with bridge-we-a)"
+      ports:
+        - {interface: net-provider-tokyo}       # ← ここでも登場 (invalid)
+        - {interface: net-provider-nagoya}

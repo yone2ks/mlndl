@@ -1,0 +1,112 @@
+# Q4 (嫌なケース、案 F で書く): 2 回線冗長 + LAG + 片側だけタグ付きサブ IF
+#
+# 構成:
+#   - 拠点 A (tokyo-rtr): 広域イーサの箱 (KDDI WE-220) に 2 本のアクセス回線を
+#     束ねて LAG (LACP) で接続。LAG の上に L3 IF 1 つ (untagged)。
+#   - 拠点 B (osaka-rtr): 広域イーサの箱に 1 本のアクセス回線で接続。
+#     802.1Q タグ 500 のサブ IF を切り、そこに L3 IF を載せる (拠点 B 側では
+#     他の L2 と相乗りしているため)。
+#   - 両端で eBGP。
+#
+# この案を選んだ理由:
+#   - 案 V は VLAN に vlan_id のダミーを書く問題が LAG / subif が増えても消えない。
+#     加えて trunk_ports に LAG を書くときのタグと、サブ IF 側の tag 500 の
+#     「どちらが VLAN の vlan_id なのか」が曖昧になる (事業者網の中は見えない)。
+#   - 案 B (bridges) は未実装の構文を 1 つ丸ごと先取りするので、LAG のメンバーや
+#     subif を members にできるか別途設計が要る。
+#   - 案 F は箱に provider_transport: l2 を 1 行書くだけで済み、拠点側は
+#     LAG も subif も既存の構文のまま書ける。L3 IF の attaches_to が LAG / subif
+#     どちらでも通り道導出のロジックは変わらない (箱の反対側を越えるだけ)。
+#
+# validator の予想:
+#   - 現状: provider_transport は未定義 → ERROR。
+#              加えて両端 node BGP も transport_mismatch で ERROR。
+#   - 案 F 採用時: errors 0 を期待。
+#     - L3 IF の attaches_to が LAG を指す側 → 通り道の起点は LAG のメンバー IF
+#       のうち箱に向かうもの (複数)。箱に provider_transport: l2 があるので
+#       「箱の中は L2 透過」として、箱の反対側 (osaka-rtr-ge0 の subif) にたどり着く。
+#     - 片端が LAG、片端が subif でも、両端が同じ箱の反対側であれば OK。
+#
+# 迷った箇所:
+#   - LAG のメンバーの L1 IF 2 本は、それぞれ別の access 回線 (別の L1Link) で
+#     箱の違う L1 IF (net-kddi-we220-tokyo-a / -b) につながる。箱の中では
+#     1 つの EVC に束ねられている (想定)。この「箱の中で束ねられている」ことを
+#     どう書くか迷った。provider_transport: l2 だけでは「箱側の 2 本の L1 IF が
+#     同じセグメント」までは言えていない。実機では事業者が EVC で束ねるが、
+#     mlndl には EVC の表現がない。ここでは「同じ箱の L1 IF は同じセグメント」
+#     という緩い解釈に委ねている。これは案 F の限界。
+#   - 拠点 B の subif は「VLAN 500」をリンク上で張る (802.1Q)。この 500 は
+#     拠点 B の機器と事業者側の間の約束で、拠点 A 側では見えない (事業者が落とす)。
+#     構文上は subif.vlan_id = 500 だけで足り、layer2.vlans にエントリは不要。
+#   - 拠点 A の LAG と箱の 2 本の L1 IF の関係: 箱側で LACP が動いているかは
+#     見えない。拠点側だけで LAG。箱側の 2 本の L1 IF はただのポートとして書いた。
+#     これは実機の事業者サービス仕様に沿う (事業者側では EVC で束ねるが
+#     LACP ではない場合もある)。
+
+ndl_version: "1.0"
+
+meta:
+  name: Q4-F-wideether-lag-subif-redundant
+  description: 広域イーサに拠点 A は LAG + 2 回線冗長、拠点 B は subif で接続する試し書き (案 F 前提)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-kddi-we220
+      name: KDDI 広域イーサ (WE-220)
+      role: provider-network
+      provider_transport: l2    # ← 未実装: 案 F の要
+      description: 2 拠点を結ぶ広域イーサ。契約 WE-220
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: tokyo-rtr-ge1, node: tokyo-rtr, name: Ge0/1}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-kddi-we220-tokyo-a, node: net-kddi-we220, name: tokyo-a}
+    - {id: net-kddi-we220-tokyo-b, node: net-kddi-we220, name: tokyo-b}
+    - {id: net-kddi-we220-osaka,   node: net-kddi-we220, name: osaka}
+
+  links:
+    - {id: link-tokyo-we220-a, endpoints: [tokyo-rtr-ge0, net-kddi-we220-tokyo-a], link_speed: 1G,
+       description: "東京 アクセス回線 A (異経路)"}
+    - {id: link-tokyo-we220-b, endpoints: [tokyo-rtr-ge1, net-kddi-we220-tokyo-b], link_speed: 1G,
+       description: "東京 アクセス回線 B (異経路)"}
+    - {id: link-osaka-we220,   endpoints: [osaka-rtr-ge0, net-kddi-we220-osaka],   link_speed: 1G}
+
+  lag:
+    - id: lag-tokyo-rtr-bond0
+      type: lacp
+      node: tokyo-rtr
+      members: [tokyo-rtr-ge0, tokyo-rtr-ge1]
+      lacp: {mode: active, min_links: 1}
+
+layer2:
+  subinterfaces:
+    # 拠点 B 側だけタグ付き (802.1Q VLAN 500)
+    - {id: subif-osaka-rtr-ge0-500, attaches_to: {interface: osaka-rtr-ge0}, vlan_id: 500, name: Ge0/0.500}
+
+layer3:
+  interfaces:
+    # 拠点 A: LAG の上に untagged な L3 IF
+    - {id: tokyo-rtr-bond0-l3, node: tokyo-rtr, name: Bundle-Ether0, ip: 10.100.0.1/30,
+       attaches_to: {lag: lag-tokyo-rtr-bond0}}
+    # 拠点 B: subif の上に L3 IF
+    - {id: osaka-rtr-ge0-500-l3, node: osaka-rtr, name: Ge0/0.500, ip: 10.100.0.2/30,
+       attaches_to: {subinterface: subif-osaka-rtr-ge0-500}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    # 両端を node で書く。案 F の拡張で、箱の provider_transport: l2 を介して
+    # 通り道が導けるので OK を期待。
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-bond0-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-500-l3},
+       address_families: [ipv4_unicast]}

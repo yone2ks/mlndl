@@ -1,0 +1,95 @@
+# B1: 2 拠点の広域イーサ (ポートベース = タグなしルーテッドポート) 上の eBGP
+#
+# 意図:
+#   ADR-0017 P2b と同じ構成 (ポートベース EPL) をドラフト D1・D2 で素直に書き、
+#   両端 node で BGP が張れることを確認する。
+#   拠点のルーターは物理 IF をそのままルーテッドポートにする (サブ IF なし)。
+#
+# ドラフトのどの D を試すか:
+#   - D1 (bridges 最小形): members は転送する側 = 箱の 2 本の L1 IF のみ。
+#     拠点のルーターの IF は書かない (Pass A の Q1_B はここを間違えた)。
+#   - D2 (通り道を bridge に延ばす): 両端の L3 IF の基盤 (= 拠点ルーターの L1 IF)
+#     の L1 リンクの対向が bridge の members にあるので、両端が同じ bridge に
+#     届き {bridge: bridge-we220} が通り道になる。
+#   - D5 (エクスポーター transport_link): {"bridge": "bridge-we220"} が出る想定。
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - errors: 0
+#   - BGP セッションの通り道が {bridge: bridge-we220} に導出される
+#   - 現状の mlndl では layer2.bridges 未実装のため schema error と、両端 node BGP が
+#     transport_mismatch (ADR-0010 D7) で error。これは「未実装」であって書き方の問題ではない。
+#
+# 迷った箇所:
+#   - D1 本文の「members に書くのは転送する側のポート」を読み落として、拠点の
+#     ルーターの IF (tokyo-rtr-ge0) も members に入れたくなる。意味 (ルーターは
+#     フレームを転送しない) を思い出さないと書けない点が、文のみでは読み手に
+#     要求が強い。ドラフト本文のかっこ書きがなければ Pass A と同じ間違いをしていた。
+#   - bridge の name と description と provider-network の箱の description の
+#     どちらに回線 ID を書くか迷った (ADR-0017 D4 は L1Link.description に書く
+#     とある)。ここでは L1Link.description を正とし、bridge の description は
+#     「どの契約を表すか」の人間向け注釈とした。
+
+ndl_version: "1.0"
+
+meta:
+  name: B1-wideether-portbased-ebgp
+  description: Port-based wide-area Ethernet (EPL) between two sites, eBGP on top
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, name: Tokyo-RTR, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, name: Osaka-RTR, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-ntt-wideether
+      name: NTT Com Wide-Area Ethernet
+      role: provider-network
+      description: Wide-Area Ethernet contract WE-220, port-based EPL
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    # 事業者網の箱の L1 IF。name は接続する拠点名 (ADR-0017 D3)
+    - {id: net-ntt-wideether-tokyo, node: net-ntt-wideether, name: tokyo}
+    - {id: net-ntt-wideether-osaka, node: net-ntt-wideether, name: osaka}
+
+  links:
+    - {id: link-tokyo-wideether, endpoints: [tokyo-rtr-ge0, net-ntt-wideether-tokyo], link_speed: 1G,
+       description: "Access line WE-220-T, 500 Mbps contracted"}
+    - {id: link-osaka-wideether, endpoints: [osaka-rtr-ge0, net-ntt-wideether-osaka], link_speed: 1G,
+       description: "Access line WE-220-O, 500 Mbps contracted"}
+
+layer2:
+  bridges:
+    # D1: members は「転送する側」= 箱の L1 IF だけ。拠点のルーター IF は書かない。
+    - id: bridge-we220
+      name: WE-220
+      description: NTT Com Wide-Area Ethernet WE-220, L2-transparent between two sites
+      members:
+        - {interface: net-ntt-wideether-tokyo}
+        - {interface: net-ntt-wideether-osaka}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # ルーテッドポート (タグなし)。L3 IF は L1 IF に attaches_to
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    # 両端の update_source は直結ポートの L3 IF。
+    # D2 により tokyo-rtr-ge0 と osaka-rtr-ge0 の L1 リンクの対向 (net-ntt-wideether-*)
+    # がともに bridge-we220 の members に入っているので「両端が同じ bridge に届く」。
+    # 通り道は {bridge: bridge-we220} として導出される。
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-l3},
+       address_families: [ipv4_unicast]}

@@ -1,0 +1,124 @@
+# Q3 案 T: 2 本のインターネット回線上の GRE と、その上の eBGP (update_source が
+#          tunnel_interfaces を指せる拡張)
+#
+# 案 T の意図:
+#   examples/wan-sites.yaml は GRE トンネルを tunnel_interfaces で書けるが、
+#   その上の BGP は書けていない (update_source は layer3.interfaces しか指せない)。
+#   案 T は update_source の型を layer3.interfaces | layer3.tunnel_interfaces に広げる。
+#   「箱やトンネルを越える通り道」は BGP の両端の transport_vrf と source の
+#   L3 IF をたどることで導ける (ADR-0017 D5-2 の問い 4)。
+#
+# validator の予想:
+#   - 現状: update_source は Ref("layer3.interfaces") なので tunnel-* の id を
+#     指すと参照整合性で ERROR (unknown id in layer3.interfaces)。
+#   - 案 T 採用時: update_source が Ref("layer3.interfaces", "layer3.tunnel_interfaces")
+#     になり、tunnel-* を指せる。transport の導出は tunnel の source → L3 IF の
+#     attaches_to → L1 リンク (ISP の箱経由) までたどる。両端の transport_vrf が
+#     一致しているかを合わせて検査する。
+#   - 両端ともトポロジー外の相手なら one_end_inside で弾かれる。この例は両端
+#     自社の機器なので two inside。
+#
+# 嘘を書いた箇所:
+#   - なし (トンネルの source / destination は examples/wan-sites.yaml と同じ要領)。
+#
+# 迷った箇所:
+#   - tunnel_interfaces の両端を書くか (正方向と逆方向で 2 本)、片方だけで足りるか。
+#     mlndl は 1.x で両方書く慣例 (wan-sites.yaml にそう書いてある)。
+#     対向チェックは info レベル (CLAUDE.md バリデーション項目 "トンネル" 行)。
+#     ここでは両方書いた。
+#   - BGP セッションの ebgp / ibgp 判定は両端の local_as から導く (ADR-0010 D6)。
+#     local_as は 65001 と 65004 で eBGP。multihop の指定は構文に入れない前提。
+#   - 「GRE の上の BGP」は tokyo-rtr2 と fukuoka-rtr の間に 1 セッション。
+#     tokyo-rtr2 のトンネル IF は tunnel-tokyo-fukuoka (ip 172.31.0.1)、
+#     fukuoka-rtr のトンネル IF は tunnel-fukuoka-tokyo (ip 172.31.0.2)。
+#     update_source にそれぞれを書く。この書き方で「tunnel 2 本 ≠ 1 セッション」の
+#     不整合が validator から見えるか迷った (トンネルは単方向、BGP は双方向)。
+#     どちらを「このセッションの」トンネルと見なすかは「from 側のノードの source」で
+#     決まるのが素直か。
+
+ndl_version: "1.0"
+
+meta:
+  name: Q3-T-internet-gre-ebgp
+  description: 2 本のインターネット回線を 2 つの ISP の箱で書き、GRE トンネルを張り、その上で eBGP (案 T 前提)
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr,   role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: fukuoka-rtr, role: border, implementation: physical, labels: {site: fukuoka}}
+
+    - id: net-iij-internet
+      name: IIJ Internet
+      role: provider-network
+      description: IIJ ビジネスインターネット、固定 IP
+    - id: net-ocn-internet
+      name: OCN Internet
+      role: provider-network
+      description: OCN ビジネスインターネット、固定 IP
+
+  interfaces:
+    - {id: tokyo-rtr-ge0,   node: tokyo-rtr,   name: Ge0/0}
+    - {id: tokyo-rtr-ge1,   node: tokyo-rtr,   name: Ge0/1}
+    - {id: fukuoka-rtr-ge0, node: fukuoka-rtr, name: Ge0/0}
+    - {id: fukuoka-rtr-ge1, node: fukuoka-rtr, name: Ge0/1}
+    - {id: net-iij-internet-tokyo,   node: net-iij-internet, name: tokyo}
+    - {id: net-iij-internet-fukuoka, node: net-iij-internet, name: fukuoka}
+    - {id: net-ocn-internet-tokyo,   node: net-ocn-internet, name: tokyo}
+    - {id: net-ocn-internet-fukuoka, node: net-ocn-internet, name: fukuoka}
+
+  links:
+    - {id: link-tokyo-iij,   endpoints: [tokyo-rtr-ge0,   net-iij-internet-tokyo],   link_speed: 1G}
+    - {id: link-fukuoka-iij, endpoints: [fukuoka-rtr-ge0, net-iij-internet-fukuoka], link_speed: 1G}
+    - {id: link-tokyo-ocn,   endpoints: [tokyo-rtr-ge1,   net-ocn-internet-tokyo],   link_speed: 1G}
+    - {id: link-fukuoka-ocn, endpoints: [fukuoka-rtr-ge1, net-ocn-internet-fukuoka], link_speed: 1G}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # ISP 側のグローバル IP
+    - {id: tokyo-rtr-ge0-l3,   node: tokyo-rtr,   name: Ge0/0, ip: 203.0.113.2/30,  attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: fukuoka-rtr-ge0-l3, node: fukuoka-rtr, name: Ge0/0, ip: 198.51.100.2/30, attaches_to: {interface: fukuoka-rtr-ge0}}
+    - {id: tokyo-rtr-ge1-l3,   node: tokyo-rtr,   name: Ge0/1, ip: 203.0.113.6/30,  attaches_to: {interface: tokyo-rtr-ge1}}
+    - {id: fukuoka-rtr-ge1-l3, node: fukuoka-rtr, name: Ge0/1, ip: 198.51.100.6/30, attaches_to: {interface: fukuoka-rtr-ge1}}
+    - {id: tokyo-rtr-lo,       node: tokyo-rtr,   name: lo0,   ip: 10.255.0.1/32}
+    - {id: fukuoka-rtr-lo,     node: fukuoka-rtr, name: lo0,   ip: 10.255.0.4/32}
+
+  tunnel_interfaces:
+    # 2 本の ISP 経路の上に GRE トンネルを 1 本ずつ張る (冗長)
+    - {id: tunnel-tokyo-fukuoka-iij,   node: tokyo-rtr,   type: gre,
+       source: tokyo-rtr-ge0-l3,   destination_interface: fukuoka-rtr-ge0-l3,
+       ip: 172.31.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1400}
+    - {id: tunnel-fukuoka-tokyo-iij,   node: fukuoka-rtr, type: gre,
+       source: fukuoka-rtr-ge0-l3, destination_interface: tokyo-rtr-ge0-l3,
+       ip: 172.31.0.2/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1400}
+    - {id: tunnel-tokyo-fukuoka-ocn,   node: tokyo-rtr,   type: gre,
+       source: tokyo-rtr-ge1-l3,   destination_interface: fukuoka-rtr-ge1-l3,
+       ip: 172.31.0.5/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1400}
+    - {id: tunnel-fukuoka-tokyo-ocn,   node: fukuoka-rtr, type: gre,
+       source: fukuoka-rtr-ge1-l3, destination_interface: tokyo-rtr-ge1-l3,
+       ip: 172.31.0.6/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1400}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr,   local_as: 65001}
+        - {node: fukuoka-rtr, local_as: 65004}
+    # ISP (IIJ / OCN) の BGP セッションは D5-1 で address + local_as のため bgp.nodes には要らない
+
+  routing_neighbors:
+    # 案 T の要: update_source に tunnel-* の id を書けるようにする
+    - {id: bgp-peer-tokyo-fukuoka-via-iij, type: bgp,
+       from: {node: tokyo-rtr,   update_source: tunnel-tokyo-fukuoka-iij},
+       to:   {node: fukuoka-rtr, update_source: tunnel-fukuoka-tokyo-iij},
+       address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-fukuoka-via-ocn, type: bgp,
+       from: {node: tokyo-rtr,   update_source: tunnel-tokyo-fukuoka-ocn},
+       to:   {node: fukuoka-rtr, update_source: tunnel-fukuoka-tokyo-ocn},
+       address_families: [ipv4_unicast]}
+
+    # 参考: インターネット側で ISP への eBGP (ある場合) は D5-1 のとおり外として書く。
+    # ここでは省略 (GRE の上の BGP が本題)。

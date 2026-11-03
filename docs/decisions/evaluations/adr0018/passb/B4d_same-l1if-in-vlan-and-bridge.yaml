@@ -1,0 +1,67 @@
+# B4d: 嫌なケース — 同じ L1 IF を VLAN のポートと bridge の members の両方に書いた
+#
+# 構成:
+#   vSwitch 的な使い方で、access-sw-ge48 が vlan-100 の trunk_ports にも、
+#   bridge-dvs-prod (dvSwitch 的な L2 セグメント) の members にも書かれている。
+#
+# 意図:
+#   Pass B 評価の問 8。vSwitch の uplink では「同じ L1 IF が VLAN のトランクポート
+#   でもあり、bridge のメンバーでもある」は実在する (dvSwitch のアップリンクが
+#   VLAN 100 を tag で運ぶ)。これを validator がどう扱うべきか。
+#
+# ドラフトのどの D を試すか:
+#   - D1 本文は bridge の members のポート重複 (同じポートを 2 つの bridge に) は error と
+#     するが、「同じポートを VLAN と bridge の両方に」は触れていない。
+#   - D8 「vSwitch としての bridge は扱わない」とあるので、本件はドラフトの範囲外に
+#     見えるが、Pass B の評価項目に挙がっている (= drafts/0007 と関係する)。
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - error でも warning でもないか、warning (「同じ L1 IF が VLAN と bridge の両方に書かれています。
+#     drafts/0007 の vSwitch 構文で統合予定」) になりそう。ドラフトからは判定できない。
+#   - 書き手の意図 (dvSwitch のアップリンクで VLAN と bridge を同時に表現) が成立するなら
+#     valid、成立しないなら error、を決める判断材料が drafts にない。
+#   - 現状の mlndl: bridges 未実装で schema error (= この問いにそもそも到達しない)。
+#
+# 迷った箇所:
+#   - 本ファイルは「正しいか誤りか」の判断がドラフトからつかないケース。
+#     drafts/0007 を待たず ADR-0018 の D1 の検査に書き足すなら、
+#     「同じ L1 IF を VLAN のポートと bridge の members に書くのは error / warning / 許容」
+#     のどれかを明示する必要がある。
+#   - 直感的には warning が妥当 (vSwitch の実在パターンだが、ADR-0018 の最小 bridge では
+#     サポート外)。drafts/0007 の設計次第で後から変わる可能性がある。
+
+ndl_version: "1.0"
+
+meta:
+  name: B4d-same-l1if-in-vlan-and-bridge
+  description: Same L1 interface appears in a VLAN trunk port and a bridge member (vSwitch-like usage)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: esxi-01,  name: ESXi-01,  role: hypervisor, implementation: physical, labels: {site: tokyo}}
+    - {id: access-sw, name: Access-SW, role: access,   implementation: physical, labels: {site: tokyo}}
+
+  interfaces:
+    - {id: esxi-01-vmnic0,    node: esxi-01,  name: vmnic0}
+    - {id: access-sw-ge48,    node: access-sw, name: Gi1/0/48}
+
+  links:
+    - {id: link-esxi-01-access-sw, endpoints: [esxi-01-vmnic0, access-sw-ge48], link_speed: 10G}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: prod
+      trunk_ports:
+        - {interface: access-sw-ge48}       # ← ここで登場
+
+  bridges:
+    # dvSwitch を bridges で表現する試み (drafts/0007 の範囲外だが Pass B 問 8 用)
+    - id: bridge-dvs-prod
+      name: dvs-prod uplink segment
+      description: dvSwitch dvs-prod uplink segment
+      members:
+        - {interface: access-sw-ge48}       # ← ここでも登場 (同じ L1 IF)
+        - {interface: esxi-01-vmnic0}

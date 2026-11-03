@@ -1,0 +1,142 @@
+# P2: IPsec VTI の上の OSPF と BGP、VRF 分離 (vrf != transport_vrf)
+#
+# 構成:
+#   hq-rtr --- [IIJ Internet] --- branch-rtr
+#       │                              │
+#       └── IPsec VTI (vrf-tenant-a) ──┘
+#            (transport は vrf-internet)
+#
+#   物理 IF (Ge0/0) は vrf-internet (= インターネット側)。
+#   トンネル IF は vrf-tenant-a (= 中身を運ぶテナント VRF)。
+#   トンネルの上に OSPF (area 0) と BGP (vrf-tenant-a のインスタンス) を張る。
+#
+# ゼロから考えた書き分け:
+#   - トンネル IF の vrf (overlay) と transport_vrf (underlay) は違ってよい、を試す。
+#     ADR-0011 D6 のとおり tunnel_interfaces は両方のフィールドを持つ。
+#   - BGP セッションは vrf-tenant-a のインスタンスに所属。update_source は tunnel IF。
+#     ADR-0010 D3 の「update_source の VRF がインスタンスの VRF と一致する」の検査は、
+#     tunnel IF の vrf (= overlay) と BGP インスタンスの vrf が一致するかを見る。
+#     transport_vrf は見ない (= underlay は BGP のインスタンスには出てこない) と読む。
+#   - OSPF の interface も tunnel IF を指す。instance 側に vrf を書く機能は OSPF にはない
+#     (ADR-0010 の既決の範囲では。本 ADR で OSPF の VRF 対応を広げる話は Pass B の
+#      B3 と同じく範囲外)。
+#
+# 試した論点 (Pass C Input サマリ):
+#   3. トンネル IF を update_source / OSPF の interface に — Ref を複数コレクションに
+#      拡張して tunnel_interfaces も指せること。vrf と transport_vrf が違うときの扱い
+#   4. OSPF / IS-IS の通り道 — トンネル IF を interface に書ける、area は OSPF のまま
+#
+# 期待する validator の結果 (この設計で実装したら):
+#   - errors: 0
+#   - BGP の通り道: {tunnel: [tunnel-hq-branch, tunnel-branch-hq]}
+#     (D3 のとおり from/to の順)
+#   - OSPF の通り道: 同上。OSPF/IS-IS の通り道導出は warning 緩和 (D4)。tunnel IF 上の
+#     ポイントツーポイント隣接は食い違いが起きない (= warning も出ない)
+#   - 検査: update_source (tunnel-hq-branch) の vrf (vrf-tenant-a) が BGP インスタンス
+#     bgp-tenant-a の vrf (vrf-tenant-a) と一致 → ok
+#     transport_vrf (vrf-internet) は BGP インスタンスの vrf とは比べない → ok
+#
+# 書きにくかった点:
+#   - 「物理 IF が vrf-internet、トンネル IF が vrf-tenant-a」の 2 層構造は、L3 IF の
+#     vrf フィールドが単数なので素直に書ける。ただし「どの VRF が underlay / overlay か」
+#     を validator が理解するのは tunnel IF の vrf / transport_vrf の 2 フィールドだけで、
+#     L3 IF 側に「これは underlay 用」のマーカーはない。L3 IF の vrf (vrf-internet) と
+#     トンネル IF の transport_vrf が一致することを validator が検査するかは、ADR-0011 D6
+#     本文にも明記されていない。この ADR で踏み込むべきか迷った (結論: 踏み込まない。
+#     tunnel IF の transport_vrf は書き手の宣言、物理 IF の vrf も書き手の宣言、
+#     食い違いが起きたら実機で動かない。ADR-0018 の範囲外)。
+#   - OSPF のインスタンスに vrf を書くかどうか。bgp 側は instance.vrf があるが、
+#     ospf 側はない (B3 でも触れた)。本 ADR の範囲外として、ospf-wan インスタンスは
+#     vrf を持たないまま書いた。将来 OSPF の VRF 対応を広げるときに加算的に書けるはず。
+#   - BGP セッションの instance は bgp-tenant-a。OSPF の instance は ospf-wan。
+#     どちらも「tunnel IF の上」で張るが、トンネル IF の vrf が overlay を示している
+#     ので、BGP インスタンスの vrf-tenant-a との一致で overlay の帰属が決まる。
+#   - Pass B との差: Pass B の B3 ではインターネットの箱を介するが vrf は全部 default
+#     だった。本件で vrf と transport_vrf を違えても、構文上の変更はなく、validator の
+#     検査が「update_source の VRF と BGP インスタンスの VRF の一致」で済むことを確認。
+
+ndl_version: "1.0"
+
+meta:
+  name: P2-ipsec-vti-vrf-separated
+  description: "IPsec VTI with vrf (overlay) != transport_vrf (underlay); OSPF and BGP on top"
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: hq-rtr,     name: HQ-RTR,     role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: branch-rtr, name: Branch-RTR, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-iij-internet
+      name: IIJ Internet
+      role: provider-network
+      description: "Business Internet (transport for IPsec VTI)"
+
+  interfaces:
+    - {id: hq-rtr-ge0,     node: hq-rtr,     name: Ge0/0}
+    - {id: branch-rtr-ge0, node: branch-rtr, name: Ge0/0}
+    - {id: net-iij-internet-hq,     node: net-iij-internet, name: hq}
+    - {id: net-iij-internet-branch, node: net-iij-internet, name: branch}
+
+  links:
+    - {id: link-hq-iij,     endpoints: [hq-rtr-ge0,     net-iij-internet-hq],     link_speed: 1G}
+    - {id: link-branch-iij, endpoints: [branch-rtr-ge0, net-iij-internet-branch], link_speed: 1G}
+
+layer3:
+  vrfs:
+    - {id: vrf-internet, rd: "65001:0"}
+    - {id: vrf-tenant-a, rd: "65001:100"}
+
+  interfaces:
+    # インターネット側の物理 IF: underlay (= transport_vrf 相当) に属する
+    - {id: hq-rtr-ge0-l3,     node: hq-rtr,     name: Ge0/0, ip: 203.0.113.1/30,
+       vrf: vrf-internet, attaches_to: {interface: hq-rtr-ge0}}
+    - {id: branch-rtr-ge0-l3, node: branch-rtr, name: Ge0/0, ip: 198.51.100.1/30,
+       vrf: vrf-internet, attaches_to: {interface: branch-rtr-ge0}}
+
+    # overlay 側のループバック (tenant-a VRF)。将来 iBGP の update_source に使えるが
+    # 本件では tunnel IF 上の直結セッションを試すので使わない
+    - {id: hq-rtr-lo-tenant,     node: hq-rtr,     name: lo100, ip: 10.100.255.1/32, vrf: vrf-tenant-a}
+    - {id: branch-rtr-lo-tenant, node: branch-rtr, name: lo100, ip: 10.100.255.2/32, vrf: vrf-tenant-a}
+
+  tunnel_interfaces:
+    # IPsec VTI 2 本 (双方向、1 対)。
+    # vrf (overlay) = vrf-tenant-a、transport_vrf (underlay) = vrf-internet。
+    # source / destination_interface は underlay 側 (vrf-internet) の L3 IF を指す。
+    - {id: tunnel-hq-branch, node: hq-rtr, type: ipsec_vti,
+       source: hq-rtr-ge0-l3, destination_interface: branch-rtr-ge0-l3,
+       ip: 172.31.0.1/30, vrf: vrf-tenant-a, transport_vrf: vrf-internet, mtu: 1400}
+    - {id: tunnel-branch-hq, node: branch-rtr, type: ipsec_vti,
+       source: branch-rtr-ge0-l3, destination_interface: hq-rtr-ge0-l3,
+       ip: 172.31.0.2/30, vrf: vrf-tenant-a, transport_vrf: vrf-internet, mtu: 1400}
+
+control_plane:
+  bgp:
+    # tenant-a の VRF の BGP インスタンス。vrf フィールドで overlay を示す
+    - id: bgp-tenant-a
+      vrf: vrf-tenant-a
+      nodes:
+        - {node: hq-rtr,     local_as: 65001}
+        - {node: branch-rtr, local_as: 65002}
+
+  ospf:
+    # OSPF には instance.vrf がない (ADR-0010 の既決)。本 ADR の範囲外として、
+    # インスタンスは vrf を持たないまま書く
+    - id: ospf-tenant-a
+      nodes: [{node: hq-rtr}, {node: branch-rtr}]
+
+  routing_neighbors:
+    # BGP: update_source はトンネル IF。両端 node なので D3 の対の判定が走る。
+    # tunnel-hq-branch と tunnel-branch-hq は source / destination_interface が互いに逆向きで
+    # 対になっているので通り道は {tunnel: [tunnel-hq-branch, tunnel-branch-hq]}。
+    - {id: bgp-peer-hq-branch, type: bgp,
+       instance: bgp-tenant-a,
+       from: {node: hq-rtr,     update_source: tunnel-hq-branch},
+       to:   {node: branch-rtr, update_source: tunnel-branch-hq},
+       address_families: [ipv4_unicast]}
+
+    # OSPF: interface にトンネル IF を指す (D3 の Ref 拡張)。
+    # ポイントツーポイントなので area は tunnel 1 本につき 1 つ
+    - {id: ospf-adj-hq-branch, type: ospf,
+       instance: ospf-tenant-a, area: "0.0.0.0",
+       from: {node: hq-rtr,     interface: tunnel-hq-branch},
+       to:   {node: branch-rtr, interface: tunnel-branch-hq}}

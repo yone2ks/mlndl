@@ -265,6 +265,9 @@ overlay と呼ぶのは運ぶ中身が overlay を作る情報 (EVPN 経路) だ
 - 導出は `derive.py` の 1 つの関数で行い、validator (D10 の通り道の検査) とエクスポーター (D11) が共有する
 - SVI 上のセッション (vPC ペア間の iBGP 等) が peer-link の LAG の上を流れることは、VLAN のポートからたどれば分かる (ADR-0013 D7) が、セッションの通り道としては出さない
 
+> **ADR-0018 で拡張** (2026-11-03): 両端が同じ `layer2.bridges` に届けば `{bridge:}`、両端が対になるトンネル IF なら `{tunnel: [<from>, <to>]}` を通り道とする。
+> OSPF / IS-IS にも同じ規則で通り道を導く (食い違いは 1.x の間 warning)。食い違いのメッセージも改める。実装は未着手。
+
 ### D8. OSPF / IS-IS
 
 - OSPF / IS-IS も D5 と同じくインスタンスのエントリ (`control_plane.ospf` / `isis`) とセッション (`routing_neighbors` の `ospf` / `isis`) に分ける

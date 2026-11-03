@@ -1,0 +1,87 @@
+# Q2 案 M: 3 拠点 E-LAN の OSPF を「セグメント単位の 1 エントリ」で書く (未実装)
+#
+# 案 M の意図:
+#   routing_neighbors の形を 2 端点に固定せず、broadcast / NBMA の
+#   マルチアクセスセグメントを 1 エントリで表す。
+#   type: ospf-segment の members に、同じセグメントに属する L3 IF の id を
+#   並べる。ADR-0010 D8 の「ポイントツーポイント前提」を超える拡張。
+#
+# validator の予想:
+#   - 現状: routing_neighbors のエントリは BgpSession / OspfAdjacency など
+#     type ごとに決まっており、ospf-segment は未定義 → ERROR
+#     (discriminated union の type が合わない)。
+#   - 案 M 採用時: members の L3 IF がすべて 1 つの L2 セグメント上にあることを
+#     どう検査するかは別論点 (案 V と組み合わせるか、OSPF 隣接から導くか)。
+#     とりあえず参照整合性だけなら errors 0。
+#
+# 嘘を書いた箇所:
+#   - なし (vlan_id のダミーは不要。「どの IF が同じセグメントか」は members で宣言)。
+#
+# 迷った箇所:
+#   - members の順序に意味を持たせない。DR / BDR の指定を書くか否か。
+#     ADR-0005 D4 補則「方式名は構文に入れない」に沿うなら書かない。
+#     ただし運用上 DR 優先度は設計情報なので書きたくなる可能性はある。
+#     ここでは書かない (運用側の責務)。
+#   - segment の id のプレフィックスをどうするか (ospf-seg-? ospf-adj-?)。
+#     ADR-0002 D7 の推奨プレフィックスに新しい語を足す必要がある。
+#     ここでは ospf-adj-* に 1 本化した (隣接関係の集合として扱う)。
+#   - broadcast / NBMA / point-to-multipoint の違いを書くか。
+#     方式名を構文に入れない原則に従って書かない方針。
+#   - instance (ospf-default) の表現: nodes には 3 ノードが並ぶが
+#     members (L3 IF) との整合は validator が後で見る前提。
+
+ndl_version: "1.0"
+
+meta:
+  name: Q2-M-elan-ospf-segment
+  description: 3 拠点 E-LAN の OSPF をセグメント単位エントリで表現する試し書き (未実装)
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr,  role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr,  role: border, implementation: physical, labels: {site: osaka}}
+    - {id: nagoya-rtr, role: border, implementation: physical, labels: {site: nagoya}}
+    - id: net-kddi-elan
+      name: KDDI 広域イーサ (WE-LAN-300)
+      role: provider-network
+      description: マルチポイント型 E-LAN。契約 WE-LAN-300
+
+  interfaces:
+    - {id: tokyo-rtr-ge0,  node: tokyo-rtr,  name: Ge0/0}
+    - {id: osaka-rtr-ge0,  node: osaka-rtr,  name: Ge0/0}
+    - {id: nagoya-rtr-ge0, node: nagoya-rtr, name: Ge0/0}
+    - {id: net-kddi-elan-tokyo,  node: net-kddi-elan, name: tokyo}
+    - {id: net-kddi-elan-osaka,  node: net-kddi-elan, name: osaka}
+    - {id: net-kddi-elan-nagoya, node: net-kddi-elan, name: nagoya}
+
+  links:
+    - {id: link-tokyo-elan,  endpoints: [tokyo-rtr-ge0,  net-kddi-elan-tokyo],  link_speed: 1G}
+    - {id: link-osaka-elan,  endpoints: [osaka-rtr-ge0,  net-kddi-elan-osaka],  link_speed: 1G}
+    - {id: link-nagoya-elan, endpoints: [nagoya-rtr-ge0, net-kddi-elan-nagoya], link_speed: 500M}
+
+layer3:
+  interfaces:
+    - {id: tokyo-rtr-ge0-l3,  node: tokyo-rtr,  name: Ge0/0, ip: 10.100.0.1/29, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3,  node: osaka-rtr,  name: Ge0/0, ip: 10.100.0.2/29, attaches_to: {interface: osaka-rtr-ge0}}
+    - {id: nagoya-rtr-ge0-l3, node: nagoya-rtr, name: Ge0/0, ip: 10.100.0.3/29, attaches_to: {interface: nagoya-rtr-ge0}}
+
+control_plane:
+  ospf:
+    - id: ospf-default
+      nodes:
+        - {node: tokyo-rtr}
+        - {node: osaka-rtr}
+        - {node: nagoya-rtr}
+
+  routing_neighbors:
+    # 1 エントリで 3 拠点の E-LAN 上の OSPF を表す。
+    # 2 端点ではないので from/to ではなく members にする。
+    - id: ospf-adj-elan-we300
+      type: ospf-segment       # ← 未実装の type
+      area: "0.0.0.0"
+      instance: ospf-default
+      members:
+        - {node: tokyo-rtr,  interface: tokyo-rtr-ge0-l3}
+        - {node: osaka-rtr,  interface: osaka-rtr-ge0-l3}
+        - {node: nagoya-rtr, interface: nagoya-rtr-ge0-l3}

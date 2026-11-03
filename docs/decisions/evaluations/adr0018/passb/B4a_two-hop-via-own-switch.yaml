@@ -1,0 +1,101 @@
+# B4a: 嫌なケース — 拠点のルーターと箱のあいだに自社の L2 スイッチが挟まる (2 ホップ)
+#
+# 構成:
+#   tokyo-rtr --- tokyo-sw --- net-wideether-tokyo
+#                       (自社の L2 SW をはさむ)
+#   osaka-rtr --- net-wideether-osaka  (直結)
+#
+# 意図:
+#   D2 (bridge への届き判定は 1 ホップのみ) を確認する。
+#   tokyo-rtr-ge0 の L1 リンクの対向は tokyo-sw-ge0 であり、net-wideether-tokyo ではない。
+#   よって tokyo-rtr は bridge-we220 に「届かない」。
+#
+# ドラフトのどの D を試すか:
+#   - D2 (1 ホップで判定): 2 ホップ目は見ない。
+#   - Pass B 評価の問 2 (bridge 届き判定の 1 ホップ)。
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - BGP の両端から導いた通り道が食い違う (from 側: tokyo-rtr → tokyo-sw-ge0 の
+#     対向、to 側: osaka-rtr → bridge-we220) で error (ADR-0010 D7)。
+#   - D6 の新しいメッセージ:
+#       「両端の update_source から導いた通り道が食い違います
+#        (from: tokyo-rtr-ge0-l3 → link-tokyo-sw-rtr、to: osaka-rtr-ge0-l3 → bridge-we220)。
+#        直結なら…、事業者網をはさむなら…、トンネルの上なら…」
+#   - 書き手は tokyo-sw にも bridge を書くか (自社 SW の L2 透過を明示するか)、
+#     bridge-we220 の members に tokyo-sw-ge-up を足すか (= 書き手の意思で 2 ホップを
+#     1 ホップに畳む) で解決。前者は「自社 SW も 1 つの L2 セグメント」の宣言。
+#     後者は「拠点から箱までの一本道を 1 つの bridge とみなす」宣言。
+#
+# 迷った箇所:
+#   - 現実の運用で自社 SW の L2 透過を bridge で宣言する習慣があるかは微妙。
+#     ドラフトは「書かなければ透過しない」(D1) と決めているので、素直に書くなら
+#     自社 SW も bridge の members に入る (= bridge が 2 つ、または L2 セグメントが
+#     L1 リンクでつながる構造になる)。
+#   - D2 の「同じ bridge に届く」の 1 ホップ判定だと、tokyo-sw の両側で bridge が
+#     分かれる (bridge-tokyo-sw と bridge-we220 の 2 つ)。この 2 つを「同じ L2 セグメント」
+#     と validator が自動で解決するかどうかは、D2 本文からは読めない。
+#     ここでは「書き手がどちらの bridge に tokyo-sw-ge-up を入れるか選ぶ」解釈をとり、
+#     本ファイルでは bridge を 1 つしか書かず、意図的に食い違いを起こさせる構成とした。
+
+ndl_version: "1.0"
+
+meta:
+  name: B4a-two-hop-via-own-switch
+  description: Own L2 switch sits between the site router and the provider box (expected error)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, name: Tokyo-RTR, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: tokyo-sw,  name: Tokyo-SW,  role: access, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, name: Osaka-RTR, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-ntt-wideether
+      name: NTT Com Wide-Area Ethernet
+      role: provider-network
+      description: Wide-Area Ethernet WE-220
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: tokyo-sw-ge0,  node: tokyo-sw,  name: Gi1/0/1}       # 拠点ルーターとの対向
+    - {id: tokyo-sw-ge48, node: tokyo-sw,  name: Gi1/0/48}      # 箱へのアップリンク
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-ntt-wideether-tokyo, node: net-ntt-wideether, name: tokyo}
+    - {id: net-ntt-wideether-osaka, node: net-ntt-wideether, name: osaka}
+
+  links:
+    - {id: link-tokyo-sw-rtr,    endpoints: [tokyo-rtr-ge0,  tokyo-sw-ge0],  link_speed: 1G}
+    - {id: link-tokyo-wideether, endpoints: [tokyo-sw-ge48,  net-ntt-wideether-tokyo], link_speed: 1G}
+    - {id: link-osaka-wideether, endpoints: [osaka-rtr-ge0,  net-ntt-wideether-osaka], link_speed: 1G}
+
+layer2:
+  bridges:
+    # 箱の中だけを 1 つの bridge とした。tokyo-sw-ge48 は意図的に members に入れていない。
+    # → tokyo-rtr-ge0 の対向 (tokyo-sw-ge0) は bridge-we220 の members にないので「届かない」。
+    - id: bridge-we220
+      name: WE-220
+      description: Wide-Area Ethernet WE-220
+      members:
+        - {interface: net-ntt-wideether-tokyo}
+        - {interface: net-ntt-wideether-osaka}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    # 期待: 食い違いで error (D6 のメッセージ)
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-l3},
+       address_families: [ipv4_unicast]}

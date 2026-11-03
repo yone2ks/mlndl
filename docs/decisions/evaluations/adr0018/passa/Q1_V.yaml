@@ -1,0 +1,79 @@
+# Q1 案 V: 広域イーサ上の 2 拠点 eBGP を layer2.vlans で書く
+#
+# 案 V の意図:
+#   箱 (role: provider-network) の L1 IF と拠点ルーターの L1 IF を同じ
+#   layer2.vlans の access_ports に入れることで、「事業者網の中は L2 で透過する」
+#   を既存の VLAN 構造で表現する。
+#   BGP の通り道導出 (ADR-0010 D7) を「両端の L3 IF が同じ VLAN の端点
+#   (ADR-0013 D7)」の場合も OK とする拡張を前提にする。
+#
+# validator の予想:
+#   - 現状の実装: transport_mismatch で ERROR (P2b と同型。VLAN は通り道の導出で
+#     参照されない。validator.py の _transport は L3 IF が L1 IF / LAG / サブ IF
+#     の上にあることしか見ない)。
+#   - 拡張後 (案 V 採用): errors 0 で OK になる想定。
+#
+# 嘘を書いた箇所:
+#   - vlan_id: 999 は書き手の推測。広域イーサの事業者が内部で使うタグは
+#     ユーザーには見えない (多くの場合アクセス回線は untagged で、事業者側で
+#     EVC に紐付く)。層としての「事業者網の中の L2 セグメント」を名乗るための
+#     ダミーで、実機の設定に対応しない。これは案 V の構造的な問題。
+
+ndl_version: "1.0"
+
+meta:
+  name: Q1-V-wideether-ebgp-via-vlan
+  description: 広域イーサ越しの 2 拠点 eBGP を layer2.vlans で表現する試し書き
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr, role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: osaka-rtr, role: border, implementation: physical, labels: {site: osaka}}
+    - id: net-ntt-wideether
+      name: NTT Com 広域イーサ (WE-220)
+      role: provider-network
+      description: 2 拠点を結ぶ広域イーサ。契約 WE-220
+
+  interfaces:
+    - {id: tokyo-rtr-ge0, node: tokyo-rtr, name: Ge0/0}
+    - {id: osaka-rtr-ge0, node: osaka-rtr, name: Ge0/0}
+    - {id: net-ntt-wideether-tokyo, node: net-ntt-wideether, name: tokyo}
+    - {id: net-ntt-wideether-osaka, node: net-ntt-wideether, name: osaka}
+
+  links:
+    - {id: link-tokyo-wideether, endpoints: [tokyo-rtr-ge0, net-ntt-wideether-tokyo], link_speed: 1G}
+    - {id: link-osaka-wideether, endpoints: [osaka-rtr-ge0, net-ntt-wideether-osaka], link_speed: 1G}
+
+layer2:
+  vlans:
+    # 事業者網を貫く L2 セグメント。vlan_id は書き手の推測 (事業者網の中は
+    # 見えないため、ダミー値を書くしかない)。
+    - id: vlan-wideether-we220
+      vlan_id: 999
+      name: we220-segment
+      description: Wide-area Ethernet segment (vlan_id is a placeholder; carrier-side tag is not visible)
+      access_ports:
+        - {interface: tokyo-rtr-ge0}
+        - {interface: osaka-rtr-ge0}
+        - {interface: net-ntt-wideether-tokyo}  # 箱側の L1 IF もメンバーにする
+        - {interface: net-ntt-wideether-osaka}
+
+layer3:
+  interfaces:
+    - {id: tokyo-rtr-ge0-l3, node: tokyo-rtr, name: Ge0/0, ip: 10.100.0.1/30, attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: osaka-rtr-ge0-l3, node: osaka-rtr, name: Ge0/0, ip: 10.100.0.2/30, attaches_to: {interface: osaka-rtr-ge0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr, local_as: 65001}
+        - {node: osaka-rtr, local_as: 65002}
+
+  routing_neighbors:
+    # 両端を node で書く。拡張後は VLAN 経由で通り道が導けるので OK を期待。
+    - {id: bgp-peer-tokyo-osaka, type: bgp,
+       from: {node: tokyo-rtr, update_source: tokyo-rtr-ge0-l3},
+       to:   {node: osaka-rtr, update_source: osaka-rtr-ge0-l3},
+       address_families: [ipv4_unicast]}

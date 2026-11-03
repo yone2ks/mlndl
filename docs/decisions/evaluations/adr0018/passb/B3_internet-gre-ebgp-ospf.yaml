@@ -1,0 +1,129 @@
+# B3: インターネットの箱 2 つ + GRE 2 本 + その上の eBGP 2 本と OSPF 1 本
+#
+# 意図:
+#   2 社の ISP (= インターネットの箱 2 つ) を経由して GRE を 2 本張り、
+#   両方の GRE の上で eBGP (計 2 本)、1 本目の GRE の上で OSPF (1 本) を張る。
+#   OSPF の interface にトンネル IF を書けること (D3) を試す。
+#
+# ドラフトのどの D を試すか:
+#   - D3: update_source と OSPF の interface が tunnel_interfaces を指せる。
+#     Ref("layer3.interfaces", "layer3.tunnel_interfaces") に拡張。
+#   - D3 (トンネルの対の判定): source と destination_interface が対になっていれば
+#     通り道は {tunnel: [from 側, to 側]}。
+#   - D4 (OSPF にも通り道を導く): OSPF の adjacency にも transport_link が出る。
+#   - Pass B 評価の問 4 (トンネルの対の判定)。
+#
+# ドラフトどおり実装したときの validator の予想:
+#   - errors: 0
+#   - 2 本の eBGP の通り道はそれぞれ {tunnel: [tunnel-tokyo-fukuoka-isp-a, tunnel-fukuoka-tokyo-isp-a]}、
+#     {tunnel: [tunnel-tokyo-fukuoka-isp-b, tunnel-fukuoka-tokyo-isp-b]} に導かれる
+#   - OSPF の通り道も同じ ({tunnel: [...]})
+#   - 現状の mlndl では update_source が tunnel-* を指すと Ref の error、OSPF の interface も同じ
+#
+# 迷った箇所:
+#   - トンネルは有向 (ADR-0011 D6)。BGP の from/to の update_source は 2 本の
+#     トンネル IF を別々に指す。ドラフト D3 の例は「対」のつくり方を示しているが、
+#     1 セッション = 2 トンネル IF の対応関係が ID の命名だけで読めるかは微妙。
+#     tunnel-tokyo-fukuoka-isp-a と tunnel-fukuoka-tokyo-isp-a が「同じ契約の
+#     往復」という区別は、source / destination_interface をたどって validator に
+#     導かせることになる (D3 本文のとおり)。
+#   - OSPF の area をどこに書くかはドラフトに記載がない。ここでは
+#     routing_neighbors のエントリ側に area を書いたが、OSPF の instance 側に
+#     書くのか、neighbor ごとに書くのかは本 ADR の範囲外 (ADR-0010 の既決と理解)。
+#   - 2 本の eBGP で同じ両端 (tokyo-rtr / fukuoka-rtr) に 2 本のセッションを張る
+#     場合、id をどう分けるかは命名規約だけで衝突しないが、ADR-0010 D7 の「同じ
+#     両端のセッションの重複」検査が通り道で区別するか id で区別するかはドラフトに
+#     明示されていない。ここでは通り道 (tunnel) で区別される前提で 2 本書いた。
+
+ndl_version: "1.0"
+
+meta:
+  name: B3-internet-gre-ebgp-ospf
+  description: Two Internet providers, two GRE tunnels, eBGP on both and OSPF on one
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: tokyo-rtr,   name: Tokyo-RTR,   role: border, implementation: physical, labels: {site: tokyo}}
+    - {id: fukuoka-rtr, name: Fukuoka-RTR, role: border, implementation: physical, labels: {site: fukuoka}}
+    - id: net-iij-internet
+      name: IIJ Internet
+      role: provider-network
+      description: IIJ business Internet, static IP on both sites
+    - id: net-ocn-internet
+      name: OCN Internet
+      role: provider-network
+      description: OCN business Internet, static IP on both sites
+
+  interfaces:
+    - {id: tokyo-rtr-ge0,   node: tokyo-rtr,   name: Ge0/0}
+    - {id: tokyo-rtr-ge1,   node: tokyo-rtr,   name: Ge0/1}
+    - {id: fukuoka-rtr-ge0, node: fukuoka-rtr, name: Ge0/0}
+    - {id: fukuoka-rtr-ge1, node: fukuoka-rtr, name: Ge0/1}
+    - {id: net-iij-internet-tokyo,   node: net-iij-internet, name: tokyo}
+    - {id: net-iij-internet-fukuoka, node: net-iij-internet, name: fukuoka}
+    - {id: net-ocn-internet-tokyo,   node: net-ocn-internet, name: tokyo}
+    - {id: net-ocn-internet-fukuoka, node: net-ocn-internet, name: fukuoka}
+
+  links:
+    - {id: link-tokyo-iij,   endpoints: [tokyo-rtr-ge0,   net-iij-internet-tokyo],   link_speed: 1G}
+    - {id: link-fukuoka-iij, endpoints: [fukuoka-rtr-ge0, net-iij-internet-fukuoka], link_speed: 1G}
+    - {id: link-tokyo-ocn,   endpoints: [tokyo-rtr-ge1,   net-ocn-internet-tokyo],   link_speed: 1G}
+    - {id: link-fukuoka-ocn, endpoints: [fukuoka-rtr-ge1, net-ocn-internet-fukuoka], link_speed: 1G}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # ISP の払い出すグローバル IP (= トンネルの source / destination_interface の下地)
+    - {id: tokyo-rtr-ge0-l3,   node: tokyo-rtr,   name: Ge0/0, ip: 203.0.113.1/30,  attaches_to: {interface: tokyo-rtr-ge0}}
+    - {id: fukuoka-rtr-ge0-l3, node: fukuoka-rtr, name: Ge0/0, ip: 198.51.100.1/30, attaches_to: {interface: fukuoka-rtr-ge0}}
+    - {id: tokyo-rtr-ge1-l3,   node: tokyo-rtr,   name: Ge0/1, ip: 192.0.2.1/30,    attaches_to: {interface: tokyo-rtr-ge1}}
+    - {id: fukuoka-rtr-ge1-l3, node: fukuoka-rtr, name: Ge0/1, ip: 192.0.2.5/30,    attaches_to: {interface: fukuoka-rtr-ge1}}
+
+  tunnel_interfaces:
+    # ISP A (IIJ) の上の GRE。双方向で 2 本 1 対。
+    - {id: tunnel-tokyo-fukuoka-isp-a,   node: tokyo-rtr,   type: gre,
+       source: tokyo-rtr-ge0-l3,   destination_interface: fukuoka-rtr-ge0-l3,
+       ip: 172.31.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}
+    - {id: tunnel-fukuoka-tokyo-isp-a,   node: fukuoka-rtr, type: gre,
+       source: fukuoka-rtr-ge0-l3, destination_interface: tokyo-rtr-ge0-l3,
+       ip: 172.31.0.2/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}
+    # ISP B (OCN) の上の GRE。もう 1 対。
+    - {id: tunnel-tokyo-fukuoka-isp-b,   node: tokyo-rtr,   type: gre,
+       source: tokyo-rtr-ge1-l3,   destination_interface: fukuoka-rtr-ge1-l3,
+       ip: 172.31.1.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}
+    - {id: tunnel-fukuoka-tokyo-isp-b,   node: fukuoka-rtr, type: gre,
+       source: fukuoka-rtr-ge1-l3, destination_interface: tokyo-rtr-ge1-l3,
+       ip: 172.31.1.2/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1476}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: tokyo-rtr,   local_as: 65001}
+        - {node: fukuoka-rtr, local_as: 65002}
+
+  ospf:
+    - id: ospf-wan
+      nodes: [{node: tokyo-rtr}, {node: fukuoka-rtr}]
+
+  routing_neighbors:
+    # D3: update_source にトンネル IF (layer3.tunnel_interfaces の id) を書ける。
+    # 対 (source ↔ destination_interface が互いに逆向き) なので通り道は tunnel。
+    - {id: bgp-peer-tokyo-fukuoka-isp-a, type: bgp,
+       from: {node: tokyo-rtr,   update_source: tunnel-tokyo-fukuoka-isp-a},
+       to:   {node: fukuoka-rtr, update_source: tunnel-fukuoka-tokyo-isp-a},
+       address_families: [ipv4_unicast]}
+    - {id: bgp-peer-tokyo-fukuoka-isp-b, type: bgp,
+       from: {node: tokyo-rtr,   update_source: tunnel-tokyo-fukuoka-isp-b},
+       to:   {node: fukuoka-rtr, update_source: tunnel-fukuoka-tokyo-isp-b},
+       address_families: [ipv4_unicast]}
+
+    # D3 + D4: OSPF の interface もトンネル IF を指せる。通り道も導かれる (warning 緩和)。
+    - {id: ospf-adj-tokyo-fukuoka-isp-a, type: ospf,
+       instance: ospf-wan,
+       area: "0.0.0.0",
+       from: {node: tokyo-rtr,   interface: tunnel-tokyo-fukuoka-isp-a},
+       to:   {node: fukuoka-rtr, interface: tunnel-fukuoka-tokyo-isp-a}}
