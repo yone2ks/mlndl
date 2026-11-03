@@ -52,6 +52,8 @@ l3vni: Annotated[str | None, Ref("layer2.vxlan", where=("type", "l3vni"))] = Non
 - **参照先が 1 つに決まる参照には、例外なく `Ref` を付ける**。「フィールド名から参照先が分かるものは省略してよい」という案
   (linguist) は採らなかった。省略すると機械に読めない参照が残り、書き忘れ防止にならない
 - 参照先の呼び名 (エラーメッセージ用) は `schema/refs.py` の `COLLECTION_LABELS` に置く
+- **複数のコレクション** (ADR-0018 D3 で追加): `Ref("layer3.interfaces", "layer3.tunnel_interfaces")` と並べると、各コレクションの id の和集合を参照先にする。
+  id から種類が決まり (ADR-0002 D5)、種類で意味が変わらない参照 (`update_source`・OSPF の `interface`) に使う。呼び名は「L3 インターフェース / トンネル」と連結する。`where` は 1 つのパスのときだけ
 
 ### D3. 汎用の参照検査
 

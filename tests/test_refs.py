@@ -36,7 +36,7 @@ NOT_REFERENCES = {
 # 参照先の種類をキーで選ぶ参照 (ADR-0001 D8 / ADR-0013 D1)。_resolve_ref が検査する
 KEYED_REFERENCES = {
     ("AttachesToObj", name) for name in ("node", "interface", "lag", "vlan", "subinterface")
-} | {("PortRef", "interface"), ("PortRef", "lag")} | {
+} | {(model, key) for model in ("PortTarget", "PortRef", "BridgePort") for key in ("interface", "lag")} | {
     # attaches_to は文字列 (ノード id の糖衣構文) か AttachesToObj。_check_attaches_to が検査する
     # (セッションは attaches_to を持たない。ADR-0010 D7)
     (model, "attaches_to") for model in ("L1Node", "L1Interface")
@@ -97,15 +97,17 @@ def test_ref_paths_exist_in_schema():
     """Ref のパスは、スキーマにある id 付きのコレクションを指していること"""
     sections = {name: topology_mod.MLNDLTopology.model_fields[name].annotation for name in SECTIONS}
     for model, field, ref in _refs():
-        section, collection = ref.path.split(".")
-        section_type = typing.get_args(sections[section])[0]          # L1Layer | None → L1Layer
-        assert collection in section_type.model_fields, f"{model.__name__}.{field}: {ref.path}"
+        for path in ref.paths:
+            section, collection = path.split(".")
+            section_type = typing.get_args(sections[section])[0]          # L1Layer | None → L1Layer
+            assert collection in section_type.model_fields, f"{model.__name__}.{field}: {path}"
 
 
 def test_ref_paths_have_labels():
     """エラーメッセージで使う呼び名が登録されていること"""
     for model, field, ref in _refs():
-        assert ref.path in COLLECTION_LABELS, f"{model.__name__}.{field}: {ref.path} の呼び名がありません"
+        for path in ref.paths:
+            assert path in COLLECTION_LABELS, f"{model.__name__}.{field}: {path} の呼び名がありません"
 
 
 def test_no_reference_is_left_in_comments():

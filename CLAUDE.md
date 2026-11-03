@@ -271,7 +271,7 @@ informative な指針とし、必要が明確になった時点で構造化構�
 - **事業者の機器**（PE・クラウドのルーター）との BGP は、相手をトポロジー外 `{address, local_as}` で書く
 - **広域イーサ越しに自社の機器どうしが張る BGP** は、当面は片側をトポロジー外として書く（両端 `node` は ADR-0010 D7 で error）。
   3 拠点以上の広域イーサの OSPF / IS-IS は範囲外。構文は次の ADR で決める
-- **→ ADR-0018 で決着（実装は未着手）**: 箱の中の L2 の転送は `layer2.bridges`（`ports` は箱のポートだけ）に書き、両端 `node` で書く。トンネルの上のセッションは `update_source` / OSPF の `interface` にトンネル IF を書く
+- **→ ADR-0018 で決着**: 箱の中の L2 の転送は `layer2.bridges`（`ports` は箱のポートだけ）に書き、両端 `node` で書く。トンネルの上のセッションは `update_source` / OSPF の `interface` にトンネル IF を書く
 
 ---
 
@@ -337,6 +337,14 @@ layer2:
         - {interface: leaf1-swp4}          # node は書かない（参照先から導出。ADR-0005 D6）
       access_ports:
         - {interface: server1-eth0}
+
+  bridges:                       # ADR-0018。番号を持たない L2 セグメント（事業者網の箱の中の転送）
+    - id: bridge-wideether       # 推奨プレフィックス bridge-。回線 ID は id に埋めず name / description に
+      name: WE-220
+      ports:                     # 転送する側（箱）のポートだけ。{interface:} か {lag:}。拠点のルーターのポートは書かない
+        - {interface: net-wideether-tokyo}
+        - {interface: net-wideether-osaka}
+      # 方式名（E-LINE / VPLS 等）は書かない。bridge を書かない箱は L2 で透過しない
 
   vteps:                         # ADR-0014。VXLAN のトンネル端点。方式名（anycast 等）は構文に出さない
     - id: vtep-leaf1-leaf2       # 推奨プレフィックス vtep-
@@ -458,6 +466,11 @@ control_plane:                   # ADR-0010。書かなくてもよい（デー�
       instance: bgp-default
       from: {node: border1, update_source: border1-lo}
       to: {address: 203.0.113.1, local_as: 64500}       # トポロジー外の相手は address + local_as
+    - id: bgp-peer-border1-dc2-gre
+      type: bgp
+      from: {node: border1, update_source: tunnel-border1-dc2}   # トンネル IF も書ける（ADR-0018 D3。OSPF の interface も同じ）
+      to:   {node: dc2-border1, update_source: tunnel-dc2-border1}
+      # 通り道は対になるトンネル {tunnel: [from, to]}。箱をはさむ両端が同じ bridge に届けば {bridge: <id>}（ADR-0018 D2）
     # unnumbered: update_source が ip も ipv6 も持たない L3 IF を指す（ADR-0010 D4）
     # RR: クライアント側の端点に route_reflector_client: true（iBGP のみ）
     # eBGP / iBGP は両端の local_as から導く。underlay / overlay は書かず AF と VRF から導く（ADR-0010 D6）
@@ -474,13 +487,13 @@ mlndl/
 │       ├── __init__.py
 │       ├── schema/
 │       │   ├── layer1.py       # L1Node, L1Interface, L1Link, LacpLag, MlagLag
-│       │   ├── layer2.py       # VLAN, VxLAN (l2vni/l3vni), Subinterface
+│       │   ├── layer2.py       # VLAN, Bridge, VxLAN (l2vni/l3vni), Subinterface
 │       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface
 │       │   ├── control_plane.py # BGP / OSPF / IS-IS のインスタンス、BFD、routing_neighbors（ADR-0010）
 │       │   ├── refs.py         # Ref（参照先の宣言。ADR-0015）
 │       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
 │       ├── index.py            # IdIndex（id → エンティティの索引）
-│       ├── derive.py           # 参照をたどって求める関係（VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010）
+│       ├── derive.py           # 参照をたどって求める関係（VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
 │       ├── validator.py        # 整合性チェック
 │       └── exporter/
@@ -510,7 +523,9 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | カテゴリ | チェック内容 | Severity |
 |---------|------------|---------|
 | 参照整合性 | スキーマで `Ref` を宣言したフィールドが、参照先に実在する id を指しているか（汎用の検査。ADR-0015）。別の種類の id を指したら何であるかを添える | error |
-| 制御プレーン | `instance` の省略は同じ type のエントリが 1 つのときだけ。端の機器がインスタンスの `nodes` にあるか。`update_source`（OSPF / IS-IS は `interface`）の機器が端の機器と一致するか。`update_source` の VRF がインスタンスの VRF と一致するか。両端から導いた通り道が食い違わないか。トランスポートのアドレスファミリーが一致するか。同じ両端のセッションの重複。`route_reflector_client` は iBGP だけ。同一ノード・同一 VRF で AS は 1 つ、同一 VRF に BGP エントリは 1 つ。`bfd: true` の両端がタイマーの `nodes` にあるか。端点の形・両端ともトポロジー外は型で弾く（ADR-0010 D10） | error |
+| 制御プレーン | `instance` の省略は同じ type のエントリが 1 つのときだけ。端の機器がインスタンスの `nodes` にあるか。`update_source`（OSPF / IS-IS は `interface`）の機器が端の機器と一致するか。`update_source` の VRF がインスタンスの VRF と一致するか。両端から導いた通り道が食い違わないか。トランスポートのアドレスファミリーが一致するか。同じ両端のセッションの重複。`route_reflector_client` は iBGP だけ。同一ノード・同一 VRF で AS は 1 つ、同一 VRF に BGP エントリは 1 つ。`bfd: true` の両端がタイマーの `nodes` にあるか。端点の形・両端ともトポロジー外は型で弾く（ADR-0010 D10）。通り道は同じリンク / LAG、同じ bridge に届く（1 ホップ）、対になるトンネル IF のどれか。食い違いのメッセージは両端の通り道と直し方 (a)(b)(c) を示す（ADR-0018 D2・D3・D6） | error |
+| 制御プレーンの通り道（OSPF / IS-IS） | BGP と同じ規則で両端の `interface` から導いた通り道が食い違わないか。ndl_version 1.x の間は warning、2.0 で error（ADR-0018 D4） | warning |
+| bridge | `ports` は `{interface:}` か `{lag:}`（型）。参照先がそのキーの種類で定義されているか。同じポートを 2 つの bridge に・同じ bridge に 2 回・LAG とそのメンバーを併記（error）。ポートが 1 つ、ポートの対向も同じ bridge のポート（ルーターのポートを書いた疑い）、VLAN のポートにもある、LAG のメンバーだけ（warning）（ADR-0018 D1） | error / warning |
 | 制御プレーンの注意 | default 以外の VRF のセッションに `l2vpn_evpn` / `vpnv4` / `vpnv6` | warning |
 | 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12） | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
@@ -521,7 +536,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | VLAN のポート | `{interface:}` か `{lag:}` のどちらか一方（型）。同じ VLAN に LAG とそのメンバーを併記していないか（error）。同じ VLAN に同じ端点を 2 回書いていないか（error）。LAG のメンバーだけを書いていたら `{lag:}` を促す（warning）（ADR-0013） | error / warning |
 | 参照キー | `attaches_to` のキーがそのエンティティに書けるものか（型。ADR-0001 D8）。参照先がそのキーの種類で定義されているか。キーの取り違え（`{lag: vlan-100}` 等）には正しいキーを示す | error |
 | ID の文法 | すべてのエンティティの `id` が `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` に従い、63 文字以内か（ADR-0002 D1）。違反理由をまとめて示す | error |
-| ID の一意性 | L1 IF / LAG / VLAN / サブ IF の ID が互いに重複していないか（ADR-0002 D5） | error |
+| ID の一意性 | L1 IF / LAG / VLAN / サブ IF の ID が互いに重複していないか。L3 IF とトンネルの ID が重複していないか（ADR-0002 D5・ADR-0018 D3） | error |
 | サブ IF | `vlan_id` が 1..4094 か。同じ基盤の上でタグが重複していないか。`attaches_to` が `{interface:}` か `{lag:}` か。タグと `layer2.vlans` の照合は**しない**（ADR-0012 D3） | error |
 | L3 IF 重複 | 同一 `(node, name)` の L3Interface が重複していないか | error |
 | IP アドレス | `ip` は IPv4、`ipv6` は IPv6 の CIDR（型で検証。`ip` に IPv6 を書くと移動先を示すエラー） | error |
@@ -535,7 +550,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | 同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。MLAG に載せた VLAN は両ノードで数える） | error |
-| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
+| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
 | SVI の紐づけ忘れ | `name` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
 | ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0016 の一意性チェックに置き換え予定（ADR-0010 D9 で委譲。router_id は control_plane.bgp[].nodes[] に置く） |
@@ -579,7 +594,7 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 | [ADR-0014](docs/decisions/drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) | A (Draft) | `layer2.vteps`（`sources` = 終端するノードの L3 IF、`address` / `address_v6`）。VNI は `vteps` で参照。方式中立（anycast / vPC / BGW を構文に出さない）。アドレス省略は `sources` が 1 つのときだけ。旧 `vtep_source` / `members` は 1.x の間 warning（**実装済み**） |
 | [ADR-0015](docs/decisions/drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する | A (Draft) | 参照先が 1 つに決まる参照は `Annotated[str, Ref("layer2.vlans")]` と型に書き、汎用の検査が全参照を検査する。キーで選ぶ参照（attaches_to 等）と意味の検査は別。`topology.resolve(id)` で id から実体を引く（**実装済み**） |
 | [ADR-0017](docs/decisions/0017-sites-and-wan.md) | サイト・事業者網・回線情報の書き分け | **C** | スキーマ・validator は変えない。サイトは `labels.site`（値は `tokyo`）。2 点間の回線は `L1Link`、事業者網は `role: provider-network` の箱 + 箱への `L1Link`（契約の形で分ける）。回線 ID 等は `description`（書式なし、パースしない）。`link_role` に WAN の推奨値は足さない。事業者の機器はトポロジー外の相手。広域イーサ越しの自社機器どうしのセッションは次の ADR（D5-2） |
-| [ADR-0018](docs/decisions/0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 | **C**（実装は未着手） | `layer2.bridges` を最小の形（`id` / `name` / `ports` / `description`）で先取り。`ports` は転送する側（箱）のポートだけ、`{interface:}` / `{lag:}`、方式名は書かない、書かなければ透過しない。両端が同じ bridge に届けば通り道は `{bridge:}`（1 ホップ）。`update_source` / OSPF の `interface` はトンネル IF も指せ（`Ref` の複数コレクション）、対になれば `{tunnel: [from, to]}`。OSPF / IS-IS も通り道を導き、食い違いは 1.x warning・2.0 error。マルチアクセスは次の ADR |
+| [ADR-0018](docs/decisions/0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 | **C**（2026-11-03 実装） | `layer2.bridges` を最小の形（`id` / `name` / `ports` / `description`）で先取り。`ports` は転送する側（箱）のポートだけ、`{interface:}` / `{lag:}`、方式名は書かない、書かなければ透過しない。両端が同じ bridge に届けば通り道は `{bridge:}`（1 ホップ）。`update_source` / OSPF の `interface` はトンネル IF も指せ（`Ref` の複数コレクション）、対になれば `{tunnel: [from, to]}`。OSPF / IS-IS も通り道を導き、食い違いは 1.x warning・2.0 error。マルチアクセスは次の ADR |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

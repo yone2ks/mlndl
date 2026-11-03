@@ -104,7 +104,7 @@ class BgpInsideEndpoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node: Annotated[str, Ref("layer1.nodes")]
-    update_source: Annotated[str, Ref("layer3.interfaces")]
+    update_source: Annotated[str, Ref("layer3.interfaces", "layer3.tunnel_interfaces")]   # トンネル IF も書ける (ADR-0018 D3)
     route_reflector_client: bool = False     # この端が RR クライアント (RFC 4456。neighbor 単位)
 
 
@@ -134,7 +134,7 @@ class OspfEndpoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node: Annotated[str, Ref("layer1.nodes")]
-    interface: Annotated[str, Ref("layer3.interfaces")]     # OSPF は IP 上で hello を送る
+    interface: Annotated[str, Ref("layer3.interfaces", "layer3.tunnel_interfaces")]   # OSPF は IP 上で hello を送る。トンネル IF も書ける (ADR-0018 D3)
 
 
 class IsisEndpoint(BaseModel):

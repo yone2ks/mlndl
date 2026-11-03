@@ -5,6 +5,11 @@
   l3_attachments(topology)    L3 IF が何の上に載るか (ADR-0011 D11)
   l3_roles(topology)          L3 IF がほかから参照されている役割 (ADR-0011 D11)
   bgp_session_views(topology) BGP セッションの両端・AS・eBGP / iBGP・通り道 (ADR-0010 D7・D11)
+  igp_adjacency_views(topology) OSPF / IS-IS の隣接の通り道 (ADR-0018 D4)
+  end_path_labels(topology)   セッションの端ごとの通り道の呼び名 (食い違いのメッセージ用。ADR-0018 D6)
+
+通り道は、両端の基盤が同じリンク / LAG でつながるか、同じ bridge に届くか (ADR-0018 D2)、
+対になるトンネル IF か (ADR-0018 D3) で決める。
 
 エクスポーターと validator が同じ関数を使う。参照先が存在しない id は黙って飛ばす
 (存在の検査は validator の _check_refs が行う)。
@@ -17,8 +22,8 @@ from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from typing import Literal
 
-from .schema.control_plane import BgpInsideEndpoint, BgpInstance, BgpSession
-from .schema.layer3 import L3Interface
+from .schema.control_plane import BgpInsideEndpoint, BgpInstance, BgpSession, IsisAdjacency, OspfAdjacency
+from .schema.layer3 import L3Interface, TunnelInterface
 from .schema.topology import MLNDLTopology
 
 Resolution = Literal["direct", "tag_match", "ambiguous", "no_l3"]
@@ -203,10 +208,13 @@ def l3_roles(topology: MLNDLTopology) -> dict[str, list[Role]]:
 
 @dataclass
 class SessionEnd:
-    """セッションの片端。トポロジー外の相手は node と l3_interface が None で、address を持つ"""
+    """セッションの片端。トポロジー外の相手は node と l3_interface が None で、address を持つ
+
+    l3_interface: update_source が指す L3 IF かトンネル IF (ADR-0018 D3)。どちらも id / node / ip / ipv6 / vrf を持つ
+    """
 
     node: str | None
-    l3_interface: L3Interface | None
+    l3_interface: L3Interface | TunnelInterface | None
     address: IPv4Address | IPv6Address | None
     local_as: int | None
     route_reflector_client: bool = False
@@ -228,10 +236,28 @@ class SessionEnd:
 
 @dataclass
 class TransportLink:
-    """single-hop のセッションが流れる L1 の通り道。リンク 1 本か、両端の LAG"""
+    """single-hop のセッションが流れる通り道。どれか 1 つだけを持つ
+
+    - link: リンク 1 本
+    - lags: 両端の LAG (from 側, to 側)
+    - bridge: 両端が届く bridge (ADR-0018 D2)
+    - tunnels: 対になるトンネル IF (from 側, to 側) (ADR-0018 D3)
+    """
 
     link: str | None = None
     lags: list[str] = field(default_factory=list)
+    bridge: str | None = None
+    tunnels: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        """エクスポーターの transport_link の値 (ADR-0010 D11・ADR-0018 D5)"""
+        if self.link:
+            return {"link": self.link}
+        if self.lags:
+            return {"lag": list(self.lags)}
+        if self.bridge:
+            return {"bridge": self.bridge}
+        return {"tunnel": list(self.tunnels)}
 
 
 @dataclass
@@ -266,10 +292,9 @@ def bgp_session_views(topology: MLNDLTopology) -> list[BgpSessionView]:
         return []
     instances = {b.id: b for b in cp.bgp}
     only = cp.bgp[0] if len(cp.bgp) == 1 else None
-    l3ifs = {i.id: i for i in topology.layer3.interfaces} if topology.layer3 else {}
+    l3ifs = l3_and_tunnels(topology)
     basis = _l3_basis(topology)
-    peer, link_of = _l1_peers(topology)
-    lag_members = {g.id: set(g.members) for g in topology.layer1.lag} if topology.layer1 else {}
+    fabric = _Fabric(topology)
 
     views: list[BgpSessionView] = []
     for i, session in enumerate(cp.routing_neighbors):
@@ -290,18 +315,60 @@ def bgp_session_views(topology: MLNDLTopology) -> list[BgpSessionView]:
             bgp_type = "ibgp" if a.local_as == b.local_as else "ebgp"
         transport, mismatch = None, False
         if a.l3_interface is not None and b.l3_interface is not None:
-            transport, mismatch = _transport(basis.get(a.l3_interface.id), basis.get(b.l3_interface.id),
-                                             peer, link_of, lag_members)
+            transport, mismatch = _transport(basis.get(a.l3_interface.id), basis.get(b.l3_interface.id), fabric)
         views.append(BgpSessionView(i, session, inst, a, b, bgp_type, transport, mismatch))
     return views
 
 
-# L3 IF の基盤: ("l1", L1 IF id, タグ) / ("lag", LAG id, タグ) / ("vlan", VLAN id, None)。タグはサブ IF の vlan_id
+@dataclass
+class AdjacencyView:
+    """OSPF / IS-IS の隣接の通り道 (ADR-0018 D4)。両端は interface の id (OSPF は L3 IF かトンネル IF、IS-IS は L1 IF)"""
+
+    index: int
+    session: OspfAdjacency | IsisAdjacency
+    transport: TransportLink | None
+    transport_mismatch: bool
+
+
+def igp_adjacency_views(topology: MLNDLTopology) -> list[AdjacencyView]:
+    """control_plane.routing_neighbors の OSPF / IS-IS の隣接ごとに、通り道を求める (BGP と同じ規則)"""
+    cp = topology.control_plane
+    if cp is None:
+        return []
+    basis = _l3_basis(topology)
+    fabric = _Fabric(topology)
+    l1ifs = {i.id for i in topology.layer1.interfaces} if topology.layer1 else set()
+    views: list[AdjacencyView] = []
+    for i, session in enumerate(cp.routing_neighbors):
+        if isinstance(session, OspfAdjacency):
+            a, b = basis.get(session.from_.interface), basis.get(session.to.interface)
+        elif isinstance(session, IsisAdjacency):
+            # IS-IS の interface は L1 IF。L3 IF から基盤をたどる 1 段を省く (ADR-0018 D2)
+            a, b = (("l1", ep.interface, None) if ep.interface in l1ifs else None for ep in (session.from_, session.to))
+        else:
+            continue
+        transport, mismatch = _transport(a, b, fabric)
+        views.append(AdjacencyView(i, session, transport, mismatch))
+    return views
+
+
+def l3_and_tunnels(topology: MLNDLTopology) -> dict[str, L3Interface | TunnelInterface]:
+    """update_source / OSPF の interface が指せるもの: L3 IF とトンネル IF (ADR-0018 D3)"""
+    if not topology.layer3:
+        return {}
+    return {i.id: i for i in [*topology.layer3.interfaces, *topology.layer3.tunnel_interfaces]}
+
+
+# L3 IF の基盤: ("l1", L1 IF id, タグ) / ("lag", LAG id, タグ) / ("vlan", VLAN id, None) / ("tunnel", トンネル IF id, None)。
+# タグはサブ IF の vlan_id
 _Basis = tuple[str, str, int | None]
 
 
 def _l3_basis(topology: MLNDLTopology) -> dict[str, _Basis]:
-    """L3 IF の id → 何の上に載るか。サブ IF はその基盤 (L1 IF / LAG) とタグに展開する"""
+    """L3 IF / トンネル IF の id → 何の上に載るか。サブ IF はその基盤 (L1 IF / LAG) とタグに展開する
+
+    トンネル IF は 4 つ目の種類として足す (ADR-0018 D3)。l3_attachments (ADR-0011 D11) には入れない
+    """
     if not topology.layer3:
         return {}
     attachments = l3_attachments(topology)
@@ -319,6 +386,8 @@ def _l3_basis(topology: MLNDLTopology) -> dict[str, _Basis]:
             out[iface.id] = ("l1", ref, None)
         elif kind in ("lag", "vlan"):
             out[iface.id] = (kind, ref, None)
+    for tun in topology.layer3.tunnel_interfaces:
+        out[tun.id] = ("tunnel", tun.id, None)
     return out
 
 
@@ -334,23 +403,110 @@ def _l1_peers(topology: MLNDLTopology) -> tuple[dict[str, str], dict[frozenset[s
     return peer, link_of
 
 
-def _transport(a: _Basis | None, b: _Basis | None, peer, link_of, lag_members) -> tuple[TransportLink | None, bool]:
-    """両端の L3 IF の基盤から通り道を導く (ADR-0010 D7)。戻り値は (通り道, 食い違い)
+def end_path_labels(topology: MLNDLTopology) -> dict[str, str]:
+    """セッションの端 (L3 IF / トンネル IF / L1 IF) の id → その端から見た通り道の呼び名
 
+    通り道の食い違いのメッセージで、両端がそれぞれ何の上にあるかを示すのに使う (ADR-0018 D6)
+    """
+    fabric = _Fabric(topology)
+    bases: dict[str, _Basis | None] = {}
+    if topology.layer1:
+        bases.update({i.id: ("l1", i.id, None) for i in topology.layer1.interfaces})
+    basis = _l3_basis(topology)
+    bases.update({i: basis.get(i) for i in l3_and_tunnels(topology)})
+
+    def label(b: _Basis | None) -> str:
+        if b is None:
+            return "なし (ループバック等)"
+        kind, ref, tag = b
+        if kind == "tunnel":
+            return f"トンネル {ref}"
+        if kind == "vlan":
+            return f"VLAN {ref}"
+        if kind == "lag":
+            text = f"LAG {ref}"
+        else:
+            other = fabric.peer.get(ref)
+            text = f"リンク {fabric.link_of[frozenset((ref, other))]}" if other else f"{ref} (リンクなし)"
+        if tag is not None:
+            text += f" のタグ {tag}"
+        reached = sorted(fabric.reached_bridges(b))
+        if reached:
+            text += f" (bridge {' / '.join(reached)} に届く)"
+        return text
+
+    return {i: label(b) for i, b in bases.items()}
+
+
+class _Fabric:
+    """通り道を導くのに使う L1 のつながり・bridge・トンネル"""
+
+    def __init__(self, topology: MLNDLTopology) -> None:
+        self.peer, self.link_of = _l1_peers(topology)
+        l1 = topology.layer1
+        self.lag_members = {g.id: set(g.members) for g in l1.lag} if l1 else {}
+        # L1 IF id → それをポートに持つ bridge (LAG のポートはメンバーに展開する)
+        self.bridges_of: dict[str, set[str]] = defaultdict(set)
+        if topology.layer2:
+            for br in topology.layer2.bridges:
+                for port in br.ports:
+                    legs = self.lag_members.get(port.lag, set()) if port.lag is not None else {port.interface}
+                    for leg in legs:
+                        self.bridges_of[leg].add(br.id)
+        self.tunnels = {t.id: t for t in topology.layer3.tunnel_interfaces} if topology.layer3 else {}
+
+    def reached_bridges(self, basis: _Basis) -> set[str]:
+        """基盤の L1 リンクの対向がポートになっている bridge (1 ホップ。ADR-0018 D2)"""
+        legs = self.lag_members.get(basis[1], set()) if basis[0] == "lag" else {basis[1]}
+        out: set[str] = set()
+        for leg in legs:
+            out |= self.bridges_of.get(self.peer.get(leg, ""), set())
+        return out
+
+
+def _transport(a: _Basis | None, b: _Basis | None, fabric: _Fabric) -> tuple[TransportLink | None, bool]:
+    """両端の基盤から通り道を導く (ADR-0010 D7・ADR-0018 D2 / D3)。戻り値は (通り道, 食い違い)
+
+    - トンネル IF: 両端が対になるトンネル IF なら通り道。片方だけトンネル IF、または対になっていなければ食い違い。
+      どちらかが destination_ip (相手がトポロジー外) なら対を確かめられないので、導かず食い違いともしない
     - どちらかが基盤なし (ループバック等): multihop。食い違いとはしない
     - SVI: 通り道は決めない。両端とも SVI なら同じ VLAN でなければ食い違い (片方だけ SVI は、ルーテッド IF との接続として正当)
-    - 直結の IF / LAG / サブ IF: 両端が同じリンク (または LAG のメンバーどうし) でつながり、タグが一致すれば single-hop。そうでなければ食い違い
+    - 直結の IF / LAG / サブ IF: 両端が同じリンク (または LAG のメンバーどうし) でつながり、タグが一致すれば single-hop。
+      そうでなくても両端が同じ bridge に届けば single-hop (タグは比べない。タグ変換のある契約では違うのが正しい)。
+      どちらでもなければ食い違い
     """
+    if (a is not None and a[0] == "tunnel") or (b is not None and b[0] == "tunnel"):
+        if a is None or b is None or a[0] != b[0]:
+            return None, True
+        x, y = fabric.tunnels.get(a[1]), fabric.tunnels.get(b[1])
+        if x is None or y is None or x.destination_interface is None or y.destination_interface is None:
+            return None, False
+        if x.destination_interface == y.source and y.destination_interface == x.source:
+            return TransportLink(tunnels=[a[1], b[1]]), False
+        return None, True
     if a is None or b is None:
         return None, False
     if a[0] == "vlan" or b[0] == "vlan":
         return None, a[0] == b[0] == "vlan" and a[1] != b[1]
-    if a[2] != b[2] or a[0] != b[0]:
-        return None, True
-    if a[0] == "l1":
-        link = link_of.get(frozenset((a[1], b[1]))) if peer.get(a[1]) == b[1] else None
-        return (TransportLink(link=link), False) if link else (None, True)
-    members_b = lag_members.get(b[1], set())
-    if any(peer.get(m) in members_b for m in lag_members.get(a[1], set())):
-        return TransportLink(lags=[a[1], b[1]]), False
+    direct = _direct(a, b, fabric)
+    if direct is not None:
+        return direct, False
+    common = fabric.reached_bridges(a) & fabric.reached_bridges(b)
+    if common:
+        return TransportLink(bridge=sorted(common)[0]), False
     return None, True
+
+
+def _direct(a: _Basis, b: _Basis, fabric: _Fabric) -> TransportLink | None:
+    """両端が同じリンク (または LAG のメンバーどうし) でつながり、タグが一致すれば通り道"""
+    if a[2] != b[2] or a[0] != b[0]:
+        return None
+    if a[0] == "l1":
+        if fabric.peer.get(a[1]) != b[1]:
+            return None
+        link = fabric.link_of.get(frozenset((a[1], b[1])))
+        return TransportLink(link=link) if link else None
+    members_b = fabric.lag_members.get(b[1], set())
+    if any(fabric.peer.get(m) in members_b for m in fabric.lag_members.get(a[1], set())):
+        return TransportLink(lags=[a[1], b[1]])
+    return None

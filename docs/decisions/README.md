@@ -140,7 +140,7 @@ ndl-viz が `link_role: wan` のリンクを除いた連結成分を「サイト
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [0018](0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 (実装は未着手) | **Accepted** | C |
+| [0018](0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 (2026-11-03 実装) | **Accepted** | C |
 | [drafts/0018](drafts/0018-sessions-across-bridges-and-tunnels.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0018 | A |
 | [evaluations/adr0018](evaluations/adr0018/evaluation.md) | 横断評価メモ (Pass B) と Pass C の結果。試し書き `passa/` Q1〜Q4、`passb/` B1〜B5、`passc/` P1〜P5c | — | — |
 

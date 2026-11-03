@@ -124,6 +124,8 @@ layer3:
 
 対向がトポロジー内なら、**両ノードに 1 本ずつ (計 2 本) 書く**。片側しかなければ info で知らせる。
 
+> **ADR-0018 D3 で追記** (2026-11-03): BGP の `update_source` と OSPF の `interface` はトンネル IF も指せる。両端が対になるトンネル IF なら、セッションの通り道は `{tunnel: [<from>, <to>]}`。
+
 ### D7. `description`
 
 すべてのエンティティに任意の自由記述 `description` を置く。`labels` (ADR-0009) と違い、分類には使わない。
@@ -181,6 +183,7 @@ validator で読み替える 2 つ (ID の種類に依存するもの) は、war
 
 L3 IF が何の上に載るかの分類は、**`attaches_to` のキーで決まる**。`name` では決めない (D3)。
 ツールが表示や集計のために L3 IF を分類するときも、これに従う。
+トンネル IF は L3 IF とは別のコレクションなので、この分類には入れない (ADR-0018 D3)。
 
 Cytoscape エクスポーターは、L3 IF を `name` の正規表現 (`lo` / `loopback0` 等) でループバックと判定し、
 `loopback` / `svi` / `subinterface` / `routed` に分けていた。5 エージェントで評価し、次の問題から作り直した。

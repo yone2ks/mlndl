@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, l3_attachments, l3_roles,
-                      outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
+from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, igp_adjacency_views, l3_and_tunnels,
+                      l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
 from ..schema.control_plane import BgpSession
 from ..schema.layer1 import LacpLag, MlagLag
 from ..schema.layer2 import L2VxLAN, L3VxLAN
@@ -34,6 +34,7 @@ def export(topology: MLNDLTopology) -> dict:
     _export_nodes(topology, elements)
     _export_l1_edges(topology, if_to_node, if_to_name, elements)
     _export_l2_overlay(topology, if_to_name, elements)
+    _export_bridges(topology, elements)
     _export_tunnels(topology, elements)
     _export_routing_neighbors(topology, elements)
 
@@ -455,6 +456,30 @@ def _export_l2_overlay(topology, if_to_name, elements):
         elements["nodes"].append({"data": data})
 
 
+def _export_bridges(topology, elements):
+    """bridge を要素として出す (ADR-0018 D5)。番号を持たない L2 セグメント。描き方はビューワが決める"""
+    if not topology.layer2:
+        return
+    interface_nodes = _interface_nodes(topology)
+    for br in topology.layer2.bridges:
+        ports = []
+        for port in br.ports:
+            entry = {"interface": port.interface} if port.interface is not None else {"lag": port.lag}
+            entry["nodes"] = interface_nodes.get(port.target, [])
+            ports.append(entry)
+        data: dict = {
+            "id":    br.id,
+            "label": br.name or br.id,
+            "layer": "layer2",
+            "type":  "bridge",
+            "ports": ports,
+            "nodes": list(dict.fromkeys(n for p in ports for n in p["nodes"])),
+        }
+        if br.name:        data["name"] = br.name
+        if br.description: data["description"] = br.description
+        elements["nodes"].append({"data": data})
+
+
 def _vlan_endpoint_data(topology) -> dict[tuple[str, str], list[dict]]:
     """(VLAN id, ポートのノード) → そのノードのポートの対向にいる VLAN の端点 (ADR-0013 D7)
 
@@ -538,8 +563,9 @@ def _end_data(end: SessionEnd) -> dict:
     if end.address is not None: data["address"] = str(end.address)
     iface = end.l3_interface
     if iface is not None:
-        data["l3_interface"] = iface.id
-        data["interface_name"] = iface.name
+        data["l3_interface"] = iface.id         # トンネル IF のこともある (ADR-0018 D3)
+        name = getattr(iface, "name", None)      # トンネル IF は name を持たない
+        if name: data["interface_name"] = name
         if iface.ip:   data["ip"]   = str(iface.ip)
         if iface.ipv6: data["ipv6"] = str(iface.ipv6)
         if end.unnumbered: data["unnumbered"] = True
@@ -556,7 +582,7 @@ def _session_data(v: BgpSessionView) -> dict:
     if v.bgp_type is not None: data["bgp_type"] = v.bgp_type
     data["address_families"] = list(v.session.address_families)
     if v.transport is not None:
-        data["transport_link"] = {"link": v.transport.link} if v.transport.link else {"lag": list(v.transport.lags)}
+        data["transport_link"] = v.transport.as_dict()
     data["bfd"] = v.session.bfd
     if v.session.description: data["description"] = v.session.description
     return data
@@ -584,9 +610,10 @@ def _export_routing_neighbors(topology, elements):
             "to":       _end_data(v.to),
         }})
 
-    l3ifs = {i.id: i for i in topology.layer3.interfaces} if topology.layer3 else {}
+    l3ifs = l3_and_tunnels(topology)        # OSPF の interface はトンネル IF も指せる (ADR-0018 D3)
     l1ifs = {i.id: i for i in topology.layer1.interfaces} if topology.layer1 else {}
-    for nb in topology.control_plane.routing_neighbors:
+    transports = {v.index: v.transport for v in igp_adjacency_views(topology)}
+    for index, nb in enumerate(topology.control_plane.routing_neighbors):
         if isinstance(nb, BgpSession):
             continue
         ifaces = l3ifs if nb.type == "ospf" else l1ifs
@@ -608,6 +635,7 @@ def _export_routing_neighbors(topology, elements):
             "bfd":      nb.bfd,
         }
         if nb.instance: data["instance"] = nb.instance
+        if transports.get(index) is not None: data["transport_link"] = transports[index].as_dict()   # ADR-0018 D4
         if nb.type == "ospf": data["area"] = nb.area
         else:                 data["level"] = nb.level
         if nb.description: data["description"] = nb.description

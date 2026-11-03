@@ -45,8 +45,10 @@ class IdIndex:
         """id を持つエンティティがあるパスの一覧"""
         return list(self._by_path)
 
-    def ids(self, path: str, where: tuple[str, str] | None = None) -> set[str]:
-        """path にある id の集合。where=(フィールド名, 値) なら、その値を持つものだけ"""
+    def ids(self, path: str | tuple[str, ...], where: tuple[str, str] | None = None) -> set[str]:
+        """path にある id の集合。path がタプルなら各パスの和集合。where=(フィールド名, 値) なら、その値を持つものだけ"""
+        if isinstance(path, tuple):
+            return set().union(*(self.ids(p, where) for p in path))
         entities = self._by_path.get(path, {})
         if where is None:
             return set(entities)

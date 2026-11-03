@@ -220,11 +220,12 @@ class TestChecks:
 
     def test_transport_mismatch(self):
         msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-eth1-l3}, to: {node: r2, update_source: r2-eth0-l3}}"))
-        assert len(msgs) == 1 and "同じリンク / LAG / VLAN の上にありません" in msgs[0]
+        assert len(msgs) == 1 and "通り道が食い違います" in msgs[0]
+        assert "リンク link-r1-r3" in msgs[0] and "リンク link-r1-r2" in msgs[0]
 
     def test_svi_on_different_vlans_is_mismatch(self):
         msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-vlan10}, to: {node: r2, update_source: r2-vlan20}}"))
-        assert len(msgs) == 1 and "同じリンク" in msgs[0]
+        assert len(msgs) == 1 and "VLAN vlan-10" in msgs[0] and "VLAN vlan-20" in msgs[0]
 
     def test_transport_af(self):
         msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-lo}, to: {node: r2, update_source: r2-lo6}}"))

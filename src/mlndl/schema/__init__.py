@@ -9,7 +9,7 @@ from .layer1 import (
     Lag,
     L1Layer,
 )
-from .layer2 import PortRef, VLAN, Vtep, L2VxLAN, L3VxLAN, VxLAN, Subinterface, L2Layer
+from .layer2 import PortTarget, PortRef, BridgePort, Bridge, VLAN, Vtep, L2VxLAN, L3VxLAN, VxLAN, Subinterface, L2Layer
 from .layer3 import (
     RouteTargets,
     VRF,
@@ -46,7 +46,7 @@ __all__ = [
     "AttachesToObj", "L1Node", "L1Interface", "L1Link",
     "LacpConfig", "LacpLag", "MlagLag", "Lag", "L1Layer",
     # layer2
-    "PortRef", "VLAN", "Vtep", "L2VxLAN", "L3VxLAN", "VxLAN", "Subinterface", "L2Layer",
+    "PortTarget", "PortRef", "BridgePort", "Bridge", "VLAN", "Vtep", "L2VxLAN", "L3VxLAN", "VxLAN", "Subinterface", "L2Layer",
     # layer3
     "RouteTargets", "VRF",
     "VrrpGateway", "HsrpGateway", "AnycastGateway", "GatewayRedundancy",

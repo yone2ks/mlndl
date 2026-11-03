@@ -1,4 +1,4 @@
-"""Layer 2 スキーマ定義 (VLAN / VTEP / VxLAN / Subinterface)"""
+"""Layer 2 スキーマ定義 (VLAN / bridge / VTEP / VxLAN / Subinterface)"""
 
 from __future__ import annotations
 
@@ -11,30 +11,23 @@ from .layer1 import AttachesToObj, restrict_attach_keys
 from .refs import Ref
 
 
-class PortRef(BaseModel):
-    """VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）
+class PortTarget(BaseModel):
+    """ポートへの参照の共通の形。VLAN のポート (ADR-0013) と bridge のポート (ADR-0018) が使う
 
     interface / lag: どちらか一方。参照先の種類をキーで示す (ADR-0001 D8)
                lag のときはメンバーではなく LAG を指す
-               (VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する)
-    node:      廃止予定。ノードは interface / lag から導出する (ADR-0013 D2)。
-               ndl_version 1.x の間は受け付け、validator が warning を出して照合する
-    native:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。
-               access_ports では常に untagged のため通常は未指定。
     """
 
     model_config = ConfigDict(extra="forbid")
 
     interface: str | None = None
     lag: str | None = None
-    node: Annotated[str | None, Ref("layer1.nodes")] = None   # 旧形式
-    native: bool = False
 
     @model_validator(mode="after")
-    def exactly_one_target(self) -> "PortRef":
+    def exactly_one_target(self) -> "PortTarget":
         if (self.interface is None) == (self.lag is None):
             raise ValueError(
-                "VLAN のポートは interface (L1 IF) か lag (LAG) のどちらか一方で指してください (ADR-0013 D1)"
+                "ポートは interface (L1 IF) か lag (LAG) のどちらか一方で指してください (ADR-0013 D1)"
             )
         return self
 
@@ -42,6 +35,24 @@ class PortRef(BaseModel):
     def target(self) -> str:
         """参照先の ID"""
         return self.interface if self.interface is not None else self.lag
+
+
+class PortRef(PortTarget):
+    """VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）
+
+    interface / lag: PortTarget。lag のときの VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する
+    node:      廃止予定。ノードは interface / lag から導出する (ADR-0013 D2)。
+               ndl_version 1.x の間は受け付け、validator が warning を出して照合する
+    native:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。
+               access_ports では常に untagged のため通常は未指定。
+    """
+
+    node: Annotated[str | None, Ref("layer1.nodes")] = None   # 旧形式
+    native: bool = False
+
+
+class BridgePort(PortTarget):
+    """bridge のポート (ADR-0018 D1)。フレームを転送する側 (事業者網なら箱) の L1 IF か LAG。native は持たない"""
 
 
 class VLAN(BaseModel):
@@ -54,6 +65,24 @@ class VLAN(BaseModel):
     name: str | None = None
     trunk_ports: list[PortRef] = []
     access_ports: list[PortRef] = []
+    description: str | None = None
+
+
+class Bridge(BaseModel):
+    """番号を持たない 1 つの L2 セグメント (ADR-0018 D1)
+
+    ports のあいだで Ethernet フレームが L2 のまま転送される。事業者網の中の転送 (広域イーサ) に使う。
+    - ports には転送する側 (箱) のポートを書く。拠点のルーターのポートは書かない (bridge を使う側)
+    - 方式名 (E-LINE / E-LAN / VPLS / EVPN) は書かない。name / description に書く
+    - node は持たない (ports から導出する。ADR-0005 D6)
+    - vSwitch のための type / uplinks などは drafts/0007 で任意のフィールドとして加算する
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str                                 # 推奨プレフィックス bridge- (ADR-0002 D7)
+    name: str | None = None
+    ports: list[BridgePort] = []
     description: str | None = None
 
 
@@ -183,6 +212,7 @@ class L2Layer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     vlans: list[VLAN] = []
+    bridges: list[Bridge] = []
     vteps: list[Vtep] = []
     vxlan: list[VxLAN] = []
     subinterfaces: list[Subinterface] = []

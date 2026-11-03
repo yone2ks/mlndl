@@ -1,6 +1,6 @@
 # ADR-0018: 事業者網やトンネルを越えるセッションの通り道
 
-- **Status**: Accepted (2026-11-03。スキーマ・derive・validator・エクスポーターの実装は未着手)
+- **Status**: Accepted (2026-11-03 に実装。スキーマ・derive・validator・エクスポーター・fixture・examples。ndl-viz は 2026-11-04 に対応: セッションの札に bridge の名前・トンネルの種類を添え、bridge は事業者網の箱に載せる)
 - **Date**: 2026-11-03
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、ユーザー (bridges の先取り・トンネルを同じ ADR で・マルチアクセスは次の ADR)
 - **Pass**: C (ラウンド7。[評価メモ](evaluations/adr0018/evaluation.md) を入力に再設計)
@@ -176,6 +176,7 @@ control_plane:
     - 片方だけがトンネル IF
     - 両方ともトンネル IF だが、対になっていない
   - 対の判定は両端が `node` のときだけ行う。相手がトポロジー外 (`{address, local_as}`) なら、`destination_ip` のトンネルでも今のとおり通り道を導かない。
+  - 両端が `node` でも、どちらかのトンネルが `destination_ip` なら対を確かめられないので、通り道を導かず食い違いともしない。
 - **VRF**: トンネル IF を指したとき、「`update_source` の VRF」はトンネル IF の `vrf` (overlay 側) である。`transport_vrf` ではない。
 - **トンネルの下の通り道は導かない**: セッションの通り道はトンネルで止める。外側のパケットの通り道は `source` の L3 IF から別にたどれる。
 - **実装**:

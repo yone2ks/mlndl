@@ -113,6 +113,8 @@ class TestPrefixWarnings:
             "isis": "from: {node: leaf1, interface: leaf1-swp1}, to: {node: leaf2, interface: leaf2-swp1}, level: level-2",
         }[adj_type]
         tmpl = L1_TWO_NODES + (
+            # IS-IS の両端は同じリンクに載せる (通り道の食い違いの warning を出さない。ADR-0018 D4)
+            "  links:\n    - {id: link-leaf1-leaf2, endpoints: [leaf1-swp1, leaf2-swp1]}\n"
             "layer3:\n  interfaces:\n"
             "    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}\n"
             "    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}\n"

@@ -67,6 +67,12 @@ D11 で `unattached` をループバックとみなさないと決めたので�
 
 `id` / `label` / `vlan_id` / `name`、SVI から求めた `subnet` / `subnet_v6` / `vrf_name`。
 
+### `type: bridge`
+
+番号を持たない L2 セグメント (`layer2.bridges`。[ADR-0018](decisions/0018-sessions-across-bridges-and-tunnels.md) D1・D5)。事業者網の箱の中の転送に使う。
+`id` / `label` (`name` がなければ id) / `name`、`ports` (`{"interface": <L1 IF>}` か `{"lag": <LAG>}` に、そのポートのノードを `nodes` として添えたもの)、
+`nodes` (ポートのノードを重複なく並べたもの。ふつうは事業者網の箱 1 つ)。辺は出さない。描き方 (箱の中に描くか、描かないか) はビューワが決める。
+
 ### `type: l2vni` / `type: l3vni`
 
 `id` / `label` / `vni`。L2VNI は `vlan` と `vteps` (書かれたもの)、L3VNI は `vrf` と `vteps`
@@ -75,7 +81,7 @@ D11 で `unattached` をループバックとみなさないと決めたので�
 ## `description`
 
 YAML に `description` があれば、人が読む補足としてそのまま出す (ADR-0011 D7)。出すのは、対応する要素があるもの:
-機器ノード、`vlan`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
+機器ノード、`vlan`、`bridge`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
 要素を持たないもの (L1 IF、LAG、VRF、VTEP、インスタンス) の `description` は出さない。
 受け取るツールは表示するだけで、パースせず、一部を取り出しもしない。回線 ID などを書く場所でもある ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
 `role: provider-network` (事業者網の箱) も、ほかの role と同じくそのまま出す。
@@ -101,17 +107,18 @@ YAML に `description` があれば、人が読む補足としてそのまま出
 | キー | 内容 |
 |---|---|
 | `id` / `instance` / `vrf` | セッションの id、属するインスタンス、その VRF (default VRF なら `vrf` を出さない) |
-| `from` / `to` (辺) ・ `local` / `peer` (ノードの `bgp_sessions`) | 端: `node`、`l3_interface` (update_source の L3 IF の id)、`interface_name` (その L3 IF の `name`)、`ip` / `ipv6`、`unnumbered: true` (L3 IF にアドレスがない。ADR-0010 D4)、`local_as`、`route_reflector_client`。トポロジー外の相手は `address` と `local_as` だけ |
+| `from` / `to` (辺) ・ `local` / `peer` (ノードの `bgp_sessions`) | 端: `node`、`l3_interface` (update_source の L3 IF かトンネル IF の id。ADR-0018 D3)、`interface_name` (その L3 IF の `name`。トンネル IF は `name` を持たないので出さない)、`ip` / `ipv6`、`unnumbered: true` (L3 IF にアドレスがない。ADR-0010 D4)、`local_as`、`route_reflector_client`。トポロジー外の相手は `address` と `local_as` だけ |
 | `bgp_type` | `ebgp` / `ibgp`。両端の AS が同じかどうか (AS が決まらなければ出さない) |
 | `address_families` | セッションに書かれた値 |
-| `transport_link` | single-hop の通り道: `{"link": <リンク id>}` か `{"lag": [<この端の LAG>, <相手の LAG>]}`。update_source の L3 IF から導いた値で、YAML の `attaches_to` ではない。multihop (ループバック等)・SVI 上・トポロジー外の相手では出さない (ADR-0010 D7) |
+| `transport_link` | single-hop の通り道。次のどれか 1 つ: `{"link": <リンク id>}`、`{"lag": [<from 側の LAG>, <to 側の LAG>]}`、`{"bridge": <bridge id>}` (両端が同じ bridge に届く。ADR-0018 D2)、`{"tunnel": [<from 側のトンネル IF>, <to 側のトンネル IF>]}` (対になるトンネル IF。ADR-0018 D3)。ノードの `bgp_sessions[]` でも from / to の順のまま。update_source から導いた値で、YAML の `attaches_to` ではない。multihop (ループバック等)・SVI 上・トポロジー外の相手では出さない (ADR-0010 D7) |
 | `bfd` | セッションに書かれた値 |
 
 underlay / overlay は出さない。知りたいときは次のように導く (informative。ADR-0010 D6):
 `l2vpn_evpn` / `vpnv4` / `vpnv6` を運べば overlay の情報を運ぶセッション、default VRF で `ipv4_unicast` / `ipv6_unicast` だけなら underlay の経路を運ぶセッション、
 両方なら両方、default 以外の VRF で `ipv4_unicast` / `ipv6_unicast` ならテナントの経路 (どちらでもない)。
 
-OSPF / IS-IS の辺は、`from` / `to` に `node`・`interface` (OSPF は L3 IF、IS-IS は L1 IF の id)・`interface_name` を持ち、`area` (OSPF。ドット区切り 4 オクテット) か `level` (IS-IS) を持つ。
+OSPF / IS-IS の辺は、`from` / `to` に `node`・`interface` (OSPF は L3 IF かトンネル IF、IS-IS は L1 IF の id)・`interface_name` (トンネル IF なら出さない) を持ち、`area` (OSPF。ドット区切り 4 オクテット) か `level` (IS-IS) を持つ。
+`transport_link` は BGP と同じ規則で両端の `interface` から導いた値 (ADR-0018 D4。IS-IS は L1 IF の対向を直接見る)。
 
 ### VLAN の端点 (`vlan_member.endpoints[]`)
 

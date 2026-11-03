@@ -5,6 +5,8 @@
 #   role: provider-network の箱ノードで書く (D3)
 # - 回線 ID や契約帯域は description に書く (D4)
 # - 事業者の機器 (IP-VPN の PE、AWS のルーター) との BGP は、相手をトポロジー外として書く (D5-1)
+# - 広域イーサの箱の中の L2 の転送は layer2.bridges に書く。インターネット VPN の上の BGP は、
+#   update_source にトンネル IF を書く (ADR-0018)
 #
 # 回線:
 #   東京 - 大阪   専用線 2 本 (事業者別)
@@ -152,8 +154,16 @@ layer1:
       description: Cross-connect at Equinix TY2, rack A3 patch 12
 
 layer2:
+  bridges:
+    # 広域イーサの箱の中で、東京と名古屋のあいだでフレームを転送する (ADR-0018 D1)。ポートは箱のポートだけ
+    - id: bridge-kddi-wideether
+      name: WE-100
+      ports:
+        - {interface: net-kddi-wideether-tokyo}
+        - {interface: net-kddi-wideether-nagoya}
+
   vlans:
-    # 広域イーサで東京と名古屋に延ばす VLAN。ポートは拠点側だけを書く (事業者網の中は書かない)
+    # 広域イーサで東京と名古屋に延ばす VLAN。ポートは拠点側だけを書く (事業者網の中は上の bridge に書く)
     - id: vlan-100
       vlan_id: 100
       name: office
@@ -195,8 +205,7 @@ layer3:
        attaches_to: {subinterface: subif-tokyo-rtr1-ge3-101}}
 
   tunnel_interfaces:
-    # インターネット VPN (GRE over IPsec)。トンネルの上の BGP は書いていない: update_source は
-    # layer3.interfaces しか指せず、トンネル IF を指せない (ADR-0017 D5-2 の次の ADR で扱う)
+    # インターネット VPN (GRE over IPsec)。トンネルの上の BGP は update_source にトンネル IF を書く (ADR-0018 D3)
     - {id: tunnel-tokyo-fukuoka, node: tokyo-rtr2, type: gre, source: tokyo-rtr2-ge2-l3,
        destination_interface: fukuoka-rtr-ge1-l3, ip: 172.31.0.1/30, vrf: vrf-default, transport_vrf: vrf-default, mtu: 1400}
     - {id: tunnel-fukuoka-tokyo, node: fukuoka-rtr, type: gre, source: fukuoka-rtr-ge1-l3,
@@ -237,6 +246,10 @@ control_plane:
        to: {address: 100.64.0.9, local_as: 65100}, address_families: [ipv4_unicast]}
     - {id: bgp-peer-fukuoka-ipvpn, type: bgp, from: {node: fukuoka-rtr, update_source: fukuoka-rtr-ge0-l3},
        to: {address: 100.64.0.13, local_as: 65100}, address_families: [ipv4_unicast]}
+    # インターネット VPN の GRE の上。通り道は {tunnel: [tunnel-tokyo-fukuoka, tunnel-fukuoka-tokyo]} と導かれる
+    - {id: bgp-peer-tokyo-rtr2-fukuoka-gre, type: bgp,
+       from: {node: tokyo-rtr2,  update_source: tunnel-tokyo-fukuoka},
+       to:   {node: fukuoka-rtr, update_source: tunnel-fukuoka-tokyo}, address_families: [ipv4_unicast]}
     # AWS のルーターもトポロジー外の相手 (D5-1)
     - {id: bgp-peer-tokyo-aws, type: bgp, from: {node: tokyo-rtr1, update_source: tokyo-rtr1-vif-prod},
        to: {address: 169.254.100.2, local_as: 64512}, address_families: [ipv4_unicast]}
