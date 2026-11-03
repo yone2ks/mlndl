@@ -143,6 +143,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     for si in subifs.values():
         entry = {"id": si.id, "parent": si.attaches_to.target, "vlan_id": si.vlan_id}
         if si.name: entry["name"] = si.name
+        if si.description: entry["description"] = si.description
         for nid in parent_nodes.get(si.attaches_to.target, []):
             node_subifs[nid].append(entry)
     lag_ids = {lag.id for lag in topology.layer1.lag}
@@ -167,6 +168,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
                 if iface.ipv6: entry["ipv6"] = str(iface.ipv6)
                 if iface.vrf:  entry["vrf"]  = iface.vrf
                 if vlan:       entry["vlan"] = vlan
+                if iface.description: entry["description"] = iface.description
                 if subif:
                     entry["subinterface"] = subif.id
                     entry["vlan_id"]      = subif.vlan_id
@@ -237,6 +239,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         if node.implementation: data["implementation"] = node.implementation
         if node.device_type:    data["device_type"] = node.device_type
         if node.labels:         data["labels"] = dict(node.labels)  # ADR-0009 多軸分類
+        if node.description:    data["description"] = node.description
 
         # L3 データを埋め込む（overlay 有効時に参照）
         if lo_ip.get(node.id):        data["lo_ip"]          = lo_ip[node.id]
@@ -293,6 +296,7 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
         if link.link_speed: data["link_speed"] = link.link_speed
         if link.mtu:        data["mtu"]        = link.mtu
         if link.link_role:  data["link_role"]  = link.link_role
+        if link.description: data["description"] = link.description
 
         lag_info = lag_membership.get(ep0) or lag_membership.get(ep1)
         if lag_info:
@@ -395,6 +399,8 @@ def _export_l2_overlay(topology, if_to_name, elements):
         }
         if vlan.name:
             data["name"] = vlan.name
+        if vlan.description:
+            data["description"] = vlan.description
         seg = vlan_segment.get(vlan.id, {})
         if seg.get("subnet"):  data["subnet"]  = seg["subnet"]
         if seg.get("subnet_v6"): data["subnet_v6"] = seg["subnet_v6"]
@@ -444,6 +450,8 @@ def _export_l2_overlay(topology, if_to_name, elements):
             derived = _l3vni_vteps(topology, vx, vteps)
             if derived:
                 data["vteps"] = derived              # ADR-0014 D3
+        if vx.description:
+            data["description"] = vx.description
         elements["nodes"].append({"data": data})
 
 
@@ -515,6 +523,7 @@ def _export_tunnels(topology, elements):
             "tunnel_type": tun.type,
         }
         if tun.vrf: data["vrf"] = tun.vrf
+        if tun.description: data["description"] = tun.description
         elements["edges"].append({"data": data})
 
 
@@ -549,6 +558,7 @@ def _session_data(v: BgpSessionView) -> dict:
     if v.transport is not None:
         data["transport_link"] = {"link": v.transport.link} if v.transport.link else {"lag": list(v.transport.lags)}
     data["bfd"] = v.session.bfd
+    if v.session.description: data["description"] = v.session.description
     return data
 
 
@@ -600,4 +610,5 @@ def _export_routing_neighbors(topology, elements):
         if nb.instance: data["instance"] = nb.instance
         if nb.type == "ospf": data["area"] = nb.area
         else:                 data["level"] = nb.level
+        if nb.description: data["description"] = nb.description
         elements["edges"].append({"data": data})
