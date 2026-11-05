@@ -33,7 +33,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | **参照**: 参照のキー ([各ページの表の「参照先」](README.ja.md#表の読み方)) が、参照先に実在する id を指している。別の種類の id を指したら何であるかを添える | error |
 | **参照のキー**: `attaches_to` などのキーが、そのエンティティに書けるものである。参照先がそのキーの種類で定義されている。取り違え (`{lag: vlan-100}`) には正しいキーを示す | error |
 | **id の文法**: すべての `id` が [id の文法](types.ja.md#id) に従う | error |
-| **id の一意性**: L1 IF・LAG・VLAN・サブ IF の間、L3 IF とトンネル IF の間で id が重複しない | error |
+| **id の一意性**: すべての `id` がファイル全体で一意。同じ一覧の中の重複も、別の一覧との重複も誤り | error |
 | **推奨プレフィックス** ([types.md](types.ja.md#推奨プレフィックス)) | warning |
 
 ## layer1 ([layer1.md](layer1.ja.md))
@@ -52,7 +52,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 |---|---|
 | **VLAN のポート**: `{interface:}` か `{lag:}` のどちらか一方。同じ VLAN に LAG とそのメンバーを併記していない。同じ VLAN に同じポートを 2 回書いていない | error |
 | **VLAN のポート**: LAG のメンバーだけを書いている (`{lag:}` を促す) | warning |
-| **VLAN ID**: 同じ機器の上で、別の VLAN のエントリが同じ `vlan_id` を使っていない (別の機器での番号の再利用はよい。MLAG に載せた VLAN は両方の機器で数える) | error |
+| **VLAN ID**: `vlan_id` が 1〜4094。同じ機器の上で、別の VLAN のエントリが同じ `vlan_id` を使っていない (別の機器での番号の再利用はよい。MLAG に載せた VLAN は両方の機器で数える) | error |
 | **bridge**: 同じポートを 2 つの bridge に、同じ bridge に 2 回、LAG とそのメンバーを併記して書いていない | error |
 | **bridge**: ポートが 1 つ。ポートの対向も同じ bridge のポート (ルーターのポートを書いた疑い)。ポートが VLAN のポートにもある。LAG のメンバーだけを書いている | warning |
 | **VTEP**: 同じ L3 IF を 2 つの VTEP に・1 つの VTEP に 2 回書いていない。1 つの VTEP に同じ機器の L3 IF を 2 つ書いていない。`sources` が複数なら `address` がある。アドレスが決まり、VTEP の間で重複しない | error |

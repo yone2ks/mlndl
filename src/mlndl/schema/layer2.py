@@ -61,7 +61,7 @@ class VLAN(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    vlan_id: int
+    vlan_id: int = Field(ge=1, le=4094)     # IEEE 802.1Q VID。0 と 4095 は予約
     name: str | None = None
     trunk_ports: list[PortRef] = []
     access_ports: list[PortRef] = []

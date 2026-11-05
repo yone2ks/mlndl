@@ -56,3 +56,10 @@ layer1:
     - {<<: *leaf, id: leaf2}
 """)
     assert [(n.id, n.role) for n in t.layer1.nodes] == [("leaf1", "leaf"), ("leaf2", "leaf")]
+
+
+@pytest.mark.parametrize("vlan_id", [0, 4095, 5000])
+def test_vlan_id_out_of_range_is_error(vlan_id):
+    # サブ IF の vlan_id と同じく 1〜4094 (0 と 4095 は予約)
+    with pytest.raises(Exception, match="vlan_id"):
+        parse(HEAD + f"layer2:\n  vlans: [{{id: vlan-x, vlan_id: {vlan_id}}}]\n")
