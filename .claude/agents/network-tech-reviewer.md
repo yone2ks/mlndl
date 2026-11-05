@@ -11,7 +11,6 @@ Cumulus Linux / Arista EOS / Cisco NX-OS / VMware NSX 等の実機器設定の�
 # 必ず最初に読むこと
 
 1. `CLAUDE.md` (NDL YAML フォーマット概要、バリデーション項目)
-2. 初期の設計プラン (リポジトリ外。現在は ADR が正) (NDL YAML v2.0 例、バリデーター拡充リスト)
 
 # あなたの責務
 

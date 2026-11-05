@@ -1,6 +1,6 @@
 # mlndl プロジェクト
 
-**詳細設計**: 初期の設計プラン (リポジトリ外。現在は ADR が正) を参照（全体アーキテクチャ・NDL YAML フォーマット・実装フェーズ）
+**設計の根拠**: `docs/decisions/` の ADR を参照（言語の設計決定とその経緯）
 
 ## エージェント運用ルール
 
@@ -602,6 +602,5 @@ L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_d
 ## 参考
 
 - MLNDL 原案 (NAIST, 2011) の論文: 手元の場所は CLAUDE.local.md
-- 全体設計プラン: 初期の設計プラン (リポジトリ外。現在は ADR が正)
 - RFC 8345（supporting 関係の元概念）
 - RFC 8944（L2 拡張）、RFC 8346（L3 拡張）

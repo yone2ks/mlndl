@@ -11,7 +11,6 @@ Kubernetes manifest, Terraform HCL, NETCONF/YANG, Ansible inventory など既存
 # 必ず最初に読むこと
 
 1. `CLAUDE.md`
-2. 初期の設計プラン (リポジトリ外。現在は ADR が正) (NDL YAML フォーマット部分と pydantic スキーマ方針)
 
 # あなたの責務
 

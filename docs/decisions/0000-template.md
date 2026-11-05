@@ -48,6 +48,5 @@ Pass A のドラフト (`drafts/NNNN-xxx.md`) からの変更点と理由。
 
 - 関連 ADR: ADR-XXXX
 - CLAUDE.md: 「重要な設計決定」セクション
-- 設計プラン: 初期の設計プラン (リポジトリ外。現在は ADR が正)
 - 原案の論文: 手元の場所は CLAUDE.local.md
 - 外部資料: (RFC 番号, GitHub リンク 等)
