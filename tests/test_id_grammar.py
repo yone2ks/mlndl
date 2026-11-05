@@ -147,3 +147,42 @@ def test_expected_paths_cover_schema():
         for name in model.model_fields
     }
     assert schema_lists == {p.removesuffix("[0].id") for p in EXPECTED_PATHS}
+
+
+# ---------------------------------------------------------------------------
+# 一意性 (ADR-0002 D5): 同じ一覧の中も、別の一覧とも重複できない
+# ---------------------------------------------------------------------------
+
+def _uniqueness_errors(body: str) -> list:
+    errs = validate(parse('ndl_version: "1.0"\n' + body))
+    return [e for e in errs if "ADR-0002 D5" in e.message]
+
+
+def test_duplicate_in_same_list_is_error():
+    # 以前は OK と出て、後に書いた機器が参照から見えなくなっていた
+    errs = _uniqueness_errors("layer1:\n  nodes: [{id: leaf1}, {id: leaf1}]\n")
+    assert [e.path for e in errs] == ["layer1.nodes[1].id"]
+    assert "ノード の中で 2 回使われています (layer1.nodes[0] と layer1.nodes[1])" in errs[0].message
+
+
+def test_duplicate_l1_interface_is_error():
+    errs = _uniqueness_errors(
+        "layer1:\n  nodes: [{id: a}]\n"
+        "  interfaces: [{id: a-e1, node: a}, {id: a-e1, node: a}]\n")
+    assert [e.path for e in errs] == ["layer1.interfaces[1].id"]
+
+
+def test_duplicate_across_unrelated_lists_is_error():
+    # 機器と VLAN のように、参照のキーで区別できる組でも重複は誤り
+    errs = _uniqueness_errors("layer1:\n  nodes: [{id: x100}]\nlayer2:\n  vlans: [{id: x100, vlan_id: 100}]\n")
+    assert [e.path for e in errs] == ["layer2.vlans[0].id"]
+    assert "ノード と VLAN の両方で使われています" in errs[0].message
+
+
+def test_three_times_reports_each_extra():
+    errs = _uniqueness_errors("layer1:\n  nodes: [{id: a}, {id: a}, {id: a}]\n")
+    assert [e.path for e in errs] == ["layer1.nodes[1].id", "layer1.nodes[2].id"]
+
+
+def test_unique_ids_have_no_error():
+    assert _uniqueness_errors("layer1:\n  nodes: [{id: a}, {id: b}]\nlayer2:\n  vlans: [{id: vlan-1, vlan_id: 1}]\n") == []
