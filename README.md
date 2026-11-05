@@ -1,5 +1,7 @@
 # mlndl
 
+[![CI](https://github.com/yone2ks/mlndl/actions/workflows/ci.yml/badge.svg)](https://github.com/yone2ks/mlndl/actions/workflows/ci.yml)
+
 マルチレイヤのネットワーク記述言語 **MLNDL** (Multi-Layer Network Description Language) の Python 実装です。
 物理 (L1)・L2・L3・制御プレーンのトポロジーを 1 つの YAML に書き、層どうしのつながり (どの論理 IF がどの物理ポートの上にあるか等) を id の参照で表します。
 MLNDL 原案 (NAIST, 2011) を、RFC 8345 の supporting 関係を下敷きに pydantic v2 で再実装したものです。
