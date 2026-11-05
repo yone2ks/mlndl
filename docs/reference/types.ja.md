@@ -79,7 +79,7 @@ mlndl は値域を検査しません。`role` と `labels` の推奨値は [role
 
 | キー | 範囲 | 検査 |
 |---|---|---|
-| `layer2.vlans[].vlan_id` | 1〜4094 | 範囲は検査しない。同じ機器の上での重複は error |
+| `layer2.vlans[].vlan_id` | 1〜4094 | 範囲外は error。同じ機器の上での重複は error |
 | `layer2.subinterfaces[].vlan_id` | 1〜4094 | 範囲外は error |
 | `layer2.vxlan[].vni` | 1〜16777215 (24 ビット) | 範囲は検査しない。L2VNI と L3VNI を通して重複すると error |
 | `local_as` | 1〜4294967295 (4 バイト AS) | 範囲は検査しない |
