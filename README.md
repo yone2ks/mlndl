@@ -64,10 +64,12 @@ layer3:
 
 ## ドキュメント
 
-- `docs/decisions/` — 言語の設計決定 (ADR) とその評価の記録。フィールドの意味と、なぜそう決めたかはここが正です
-- `docs/exporter-cytoscape.md` — Cytoscape.js 出力の形
-- `docs/role-vocabulary.md` / `docs/label-vocabulary.md` — `role` と `labels` の推奨語彙
-- `CLAUDE.md` — 確定した設計の要約と、検査項目の一覧
+一覧は [docs/README.md](docs/README.ja.md) にあります。
+
+- [MLNDL の考え方](docs/concepts.ja.md) — MLNDL が何を書く言語で、どういう考え方で作られているか
+- [MLNDL 言語リファレンス](docs/reference/README.ja.md) — 書けるキーと規則、検査の一覧
+- [ADR](docs/decisions/README.md) — 言語の設計決定と、なぜそう決めたか
+- [Cytoscape.js 出力](docs/exporter-cytoscape.md) — mlndl のエクスポーターが出す形
 
 ## テスト
 

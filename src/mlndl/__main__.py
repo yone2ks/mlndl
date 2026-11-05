@@ -5,15 +5,18 @@
   python -m mlndl export --format yaml topology.yaml
   python -m mlndl validate topology.yaml
   python -m mlndl validate --strict topology.yaml   # warning も error として扱う
+  python -m mlndl schema > docs/reference/schema.json  # MLNDL の JSON Schema
 """
 
 import argparse
+import json
 import sys
 
 import pydantic
 import yaml
 
 from .parser import parse_file
+from .schema.topology import MLNDLTopology
 from .validator import validate_all
 from .exporter import cytoscape, yaml as yaml_exporter
 
@@ -65,6 +68,23 @@ def cmd_validate(args):
     print(f"OK — no validation errors{suffix}")
 
 
+def json_schema() -> str:
+    """MLNDL の JSON Schema (docs/reference/schema.json と同じもの)。旧形式の書き方は含まない"""
+    schema = MLNDLTopology.model_json_schema(by_alias=True)
+    schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "MLNDL",
+        "description": "Multi-Layer Network Description Language。mlndl のスキーマから生成したもの "
+                       "(python -m mlndl schema)。参照先の存在やエンティティをまたぐ規則は含まない",
+        **{k: v for k, v in schema.items() if k not in ("title", "description")},
+    }
+    return json.dumps(schema, ensure_ascii=False, indent=2) + "\n"
+
+
+def cmd_schema(args):
+    sys.stdout.write(json_schema())
+
+
 def main():
     parser = argparse.ArgumentParser(prog='python -m mlndl', description='mlndl CLI')
     sub = parser.add_subparsers(dest='command')
@@ -78,11 +98,15 @@ def main():
     p_validate.add_argument('--strict', action='store_true',
                             help='warning を error に昇格する (ADR-0002 D8)')
 
+    sub.add_parser('schema', help='MLNDL の JSON Schema を出力')
+
     args = parser.parse_args()
     if args.command == 'export':
         cmd_export(args)
     elif args.command == 'validate':
         cmd_validate(args)
+    elif args.command == 'schema':
+        cmd_schema(args)
     else:
         parser.print_help()
 

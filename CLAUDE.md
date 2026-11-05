@@ -2,9 +2,11 @@
 
 **設計の根拠**: `docs/decisions/` の ADR を参照（言語の設計決定とその経緯）
 
+**利用者向けの文書**: `docs/README.ja.md`（考え方 `docs/concepts.ja.md`、言語リファレンス `docs/reference/`）。構文や検査を変えたら、この CLAUDE.md の要約とあわせて `docs/reference/` も直すこと
+
 ## エージェント運用ルール
 
-**設計判断・仕様議論・ADR 作成・NDL YAML の設計に関する質問には、必ず以下の 5 エージェントを並列起動してから統合回答を作ること。**
+**設計判断・仕様議論・ADR 作成・MLNDL の設計に関する質問には、必ず以下の 5 エージェントを並列起動してから統合回答を作ること。**
 
 | エージェント | 役割 |
 |---|---|
@@ -275,7 +277,9 @@ informative な指針とし、必要が明確になった時点で構造化構�
 
 ---
 
-## NDL YAML フォーマット概要
+## MLNDL フォーマット概要
+
+各キーの正確な定義は `docs/reference/` にある。ここは設計の判断に使う要約。
 
 ```yaml
 ndl_version: "1.0"    # 必須
@@ -566,7 +570,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 - `model_validator` でクロスフィールド参照検証（リンクが未定義インターフェースを参照していないか）
 - `exporter/yaml.py` と `exporter/cytoscape.py`（L1 部分のみ）
 - pytest fixtures YAML によるユニットテスト
-- **成果物: L1 MLNDL YAML を parse・validate・export できる pip パッケージ**
+- **成果物: L1 MLMLNDL を parse・validate・export できる pip パッケージ**
 
 ### Phase 2 以降（全体プランを参照）
 L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_domain/blast_radius クエリ対応
