@@ -1,0 +1,2325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MLNDL",
+  "description": "Multi-Layer Network Description Language。mlndl のスキーマから生成したもの (python -m mlndl schema)。参照先の存在やエンティティをまたぐ規則は含まない",
+  "$defs": {
+    "AnycastGateway": {
+      "additionalProperties": false,
+      "description": "EVPN distributed anycast gateway (RFC 9135)\n\nプロトコル交換を持たず、全ノードが同時に active。VIP / group_id は持たない\n(L3Interface の ip / ipv6 自体が anycast アドレス)。",
+      "properties": {
+        "mode": {
+          "const": "anycast_gateway",
+          "title": "Mode",
+          "type": "string"
+        },
+        "anycast_mac": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anycast Mac"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "AnycastGateway",
+      "type": "object"
+    },
+    "AttachesToObj": {
+      "additionalProperties": false,
+      "description": "attaches_to のオブジェクト形式。ATTACH_KEYS のいずれか 1 キーだけを書く。\n\nキー名が参照先の種類を示す (ADR-0001 D2・D8):\n  node → layer1.nodes / interface → layer1.interfaces (L1 IF のみ) / lag → layer1.lag /\n  vlan → layer2.vlans / subinterface → layer2.subinterfaces",
+      "properties": {
+        "node": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node"
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interface"
+        },
+        "lag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lag"
+        },
+        "vlan": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vlan"
+        },
+        "subinterface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subinterface"
+        }
+      },
+      "title": "AttachesToObj",
+      "type": "object"
+    },
+    "BFDConfig": {
+      "additionalProperties": false,
+      "description": "BFD のタイマー。nodes はこのタイマーを使うノード (BFD を張るかはセッションの bfd で決める)",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "min_tx": {
+          "default": 300,
+          "title": "Min Tx",
+          "type": "integer"
+        },
+        "min_rx": {
+          "default": 300,
+          "title": "Min Rx",
+          "type": "integer"
+        },
+        "multiplier": {
+          "default": 3,
+          "title": "Multiplier",
+          "type": "integer"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "BFDConfig",
+      "type": "object"
+    },
+    "BgpInsideEndpoint": {
+      "additionalProperties": false,
+      "description": "トポロジー内の機器の端点。update_source は必須 (セッションのアドレスと通り道を決める)",
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "update_source": {
+          "title": "Update Source",
+          "type": "string"
+        },
+        "route_reflector_client": {
+          "default": false,
+          "title": "Route Reflector Client",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node",
+        "update_source"
+      ],
+      "title": "BgpInsideEndpoint",
+      "type": "object"
+    },
+    "BgpInstance": {
+      "additionalProperties": false,
+      "description": "1 つの VRF の BGP インスタンス (全ノード分)。vrf を省略すると default VRF",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "vrf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vrf"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BgpInstanceNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "BgpInstance",
+      "type": "object"
+    },
+    "BgpInstanceNode": {
+      "additionalProperties": false,
+      "description": "BGP インスタンスに参加するノードの設定",
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "local_as": {
+          "title": "Local As",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "local_as"
+      ],
+      "title": "BgpInstanceNode",
+      "type": "object"
+    },
+    "BgpOutsideEndpoint": {
+      "additionalProperties": false,
+      "description": "トポロジー外の相手 (IP と AS しか分からない)。local_as はその相手自身の AS",
+      "properties": {
+        "address": {
+          "anyOf": [
+            {
+              "format": "ipv4",
+              "type": "string"
+            },
+            {
+              "format": "ipv6",
+              "type": "string"
+            }
+          ],
+          "title": "Address"
+        },
+        "local_as": {
+          "title": "Local As",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "address",
+        "local_as"
+      ],
+      "title": "BgpOutsideEndpoint",
+      "type": "object"
+    },
+    "BgpSession": {
+      "additionalProperties": false,
+      "description": "BGP のセッション 1 本",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "bgp",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instance"
+        },
+        "from": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/BgpInsideEndpoint"
+            },
+            {
+              "$ref": "#/$defs/BgpOutsideEndpoint"
+            }
+          ],
+          "title": "From"
+        },
+        "to": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/BgpInsideEndpoint"
+            },
+            {
+              "$ref": "#/$defs/BgpOutsideEndpoint"
+            }
+          ],
+          "title": "To"
+        },
+        "address_families": {
+          "default": [],
+          "items": {
+            "enum": [
+              "ipv4_unicast",
+              "ipv6_unicast",
+              "l2vpn_evpn",
+              "vpnv4",
+              "vpnv6"
+            ],
+            "type": "string"
+          },
+          "title": "Address Families",
+          "type": "array"
+        },
+        "bfd": {
+          "default": false,
+          "title": "Bfd",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "from",
+        "to"
+      ],
+      "title": "BgpSession",
+      "type": "object"
+    },
+    "Bridge": {
+      "additionalProperties": false,
+      "description": "番号を持たない 1 つの L2 セグメント (ADR-0018 D1)\n\nports のあいだで Ethernet フレームが L2 のまま転送される。事業者網の中の転送 (広域イーサ) に使う。\n- ports には転送する側 (箱) のポートを書く。拠点のルーターのポートは書かない (bridge を使う側)\n- 方式名 (E-LINE / E-LAN / VPLS / EVPN) は書かない。name / description に書く\n- node は持たない (ports から導出する。ADR-0005 D6)\n- vSwitch のための type / uplinks などは drafts/0007 で任意のフィールドとして加算する",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "ports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BridgePort"
+          },
+          "title": "Ports",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Bridge",
+      "type": "object"
+    },
+    "BridgePort": {
+      "additionalProperties": false,
+      "description": "bridge のポート (ADR-0018 D1)。フレームを転送する側 (事業者網なら箱) の L1 IF か LAG。native は持たない",
+      "properties": {
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interface"
+        },
+        "lag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lag"
+        }
+      },
+      "title": "BridgePort",
+      "type": "object"
+    },
+    "ControlPlane": {
+      "additionalProperties": false,
+      "description": "制御プレーン全体。インスタンスごとの設定 → セッション の順に書くことを推奨する",
+      "properties": {
+        "bgp": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BgpInstance"
+          },
+          "title": "Bgp",
+          "type": "array"
+        },
+        "ospf": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OspfInstance"
+          },
+          "title": "Ospf",
+          "type": "array"
+        },
+        "isis": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IsisInstance"
+          },
+          "title": "Isis",
+          "type": "array"
+        },
+        "bfd": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BFDConfig"
+          },
+          "title": "Bfd",
+          "type": "array"
+        },
+        "routing_neighbors": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "bgp": "#/$defs/BgpSession",
+                "isis": "#/$defs/IsisAdjacency",
+                "ospf": "#/$defs/OspfAdjacency"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/BgpSession"
+              },
+              {
+                "$ref": "#/$defs/OspfAdjacency"
+              },
+              {
+                "$ref": "#/$defs/IsisAdjacency"
+              }
+            ]
+          },
+          "title": "Routing Neighbors",
+          "type": "array"
+        }
+      },
+      "title": "ControlPlane",
+      "type": "object"
+    },
+    "HsrpGateway": {
+      "additionalProperties": false,
+      "description": "HSRP によるゲートウェイ冗長 (Cisco)",
+      "properties": {
+        "mode": {
+          "const": "hsrp",
+          "title": "Mode",
+          "type": "string"
+        },
+        "group_id": {
+          "maximum": 4095,
+          "minimum": 0,
+          "title": "Group Id",
+          "type": "integer"
+        },
+        "vip": {
+          "anyOf": [
+            {
+              "format": "ipv4",
+              "type": "string"
+            },
+            {
+              "format": "ipv6",
+              "type": "string"
+            }
+          ],
+          "title": "Vip"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "preempt": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preempt"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "mode",
+        "group_id",
+        "vip"
+      ],
+      "title": "HsrpGateway",
+      "type": "object"
+    },
+    "IsisAdjacency": {
+      "additionalProperties": false,
+      "description": "IS-IS の隣接 1 本 (ポイントツーポイント)",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "isis",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instance"
+        },
+        "from": {
+          "$ref": "#/$defs/IsisEndpoint"
+        },
+        "to": {
+          "$ref": "#/$defs/IsisEndpoint"
+        },
+        "level": {
+          "enum": [
+            "level-1",
+            "level-2",
+            "level-all"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "bfd": {
+          "default": false,
+          "title": "Bfd",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "from",
+        "to",
+        "level"
+      ],
+      "title": "IsisAdjacency",
+      "type": "object"
+    },
+    "IsisEndpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "interface": {
+          "title": "Interface",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "interface"
+      ],
+      "title": "IsisEndpoint",
+      "type": "object"
+    },
+    "IsisInstance": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IsisInstanceNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "IsisInstance",
+      "type": "object"
+    },
+    "IsisInstanceNode": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "net": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Net"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "title": "IsisInstanceNode",
+      "type": "object"
+    },
+    "L1Interface": {
+      "additionalProperties": false,
+      "description": "Layer 1 インターフェース（物理ポート）",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "attaches_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/AttachesToObj"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attaches To"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "node"
+      ],
+      "title": "L1Interface",
+      "type": "object"
+    },
+    "L1Layer": {
+      "additionalProperties": false,
+      "description": "Layer 1 全体（nodes / interfaces / links / lag）",
+      "properties": {
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/L1Node"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "interfaces": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/L1Interface"
+          },
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/L1Link"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "lag": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "lacp": "#/$defs/LacpLag",
+                "mlag": "#/$defs/MlagLag"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LacpLag"
+              },
+              {
+                "$ref": "#/$defs/MlagLag"
+              }
+            ]
+          },
+          "title": "Lag",
+          "type": "array"
+        }
+      },
+      "title": "L1Layer",
+      "type": "object"
+    },
+    "L1Link": {
+      "additionalProperties": false,
+      "description": "Layer 1 物理リンク（ケーブル）\n\nADR-0006: 物理リンクは無向。endpoints は順序非依存の 2 要素リスト。",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "endpoints": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Endpoints",
+          "type": "array"
+        },
+        "link_speed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Speed"
+        },
+        "mtu": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mtu"
+        },
+        "link_role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Role"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "endpoints"
+      ],
+      "title": "L1Link",
+      "type": "object"
+    },
+    "L1Node": {
+      "additionalProperties": false,
+      "description": "Layer 1 ノード（物理・仮想を問わず「箱」を表す）",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "implementation": {
+          "anyOf": [
+            {
+              "enum": [
+                "vm",
+                "physical",
+                "container"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Implementation"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "device_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Type"
+        },
+        "attaches_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/AttachesToObj"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attaches To"
+        },
+        "labels": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Labels"
+        },
+        "overrides": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overrides"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "L1Node",
+      "type": "object"
+    },
+    "L2Layer": {
+      "additionalProperties": false,
+      "description": "Layer 2 全体",
+      "properties": {
+        "vlans": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VLAN"
+          },
+          "title": "Vlans",
+          "type": "array"
+        },
+        "bridges": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Bridge"
+          },
+          "title": "Bridges",
+          "type": "array"
+        },
+        "vteps": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Vtep"
+          },
+          "title": "Vteps",
+          "type": "array"
+        },
+        "vxlan": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "l2vni": "#/$defs/L2VxLAN",
+                "l3vni": "#/$defs/L3VxLAN"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/L2VxLAN"
+              },
+              {
+                "$ref": "#/$defs/L3VxLAN"
+              }
+            ]
+          },
+          "title": "Vxlan",
+          "type": "array"
+        },
+        "subinterfaces": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Subinterface"
+          },
+          "title": "Subinterfaces",
+          "type": "array"
+        }
+      },
+      "title": "L2Layer",
+      "type": "object"
+    },
+    "L2VxLAN": {
+      "additionalProperties": false,
+      "description": "L2VNI — VLAN を VxLAN セグメントにマッピング\n\nvteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014\nvtep_source / members: 旧形式。ndl_version 1.x の間だけ受け付け、validator が warning を出す",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "l2vni",
+          "title": "Type",
+          "type": "string"
+        },
+        "vni": {
+          "title": "Vni",
+          "type": "integer"
+        },
+        "vlan": {
+          "title": "Vlan",
+          "type": "string"
+        },
+        "vteps": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Vteps",
+          "type": "array"
+        },
+        "vtep_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vtep Source"
+        },
+        "members": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Members"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "vni",
+        "vlan"
+      ],
+      "title": "L2VxLAN",
+      "type": "object"
+    },
+    "L3Interface": {
+      "additionalProperties": false,
+      "description": "Layer 3 インターフェース（ループバック / SVI / ルーテッドポート / サブ IF / routed LAG）\n\n- name: 機器上の名前 (swp51 / Vlan100 / lo)。参照ではない\n- attaches_to: 参照の唯一の手段。参照先の種類をキーで示す (ADR-0001 D8)。\n  {interface: <L1 IF>} / {lag: <LAG>} / {vlan: <VLAN>} / {subinterface: <サブ IF>}。\n  ループバックのように基盤を持たない L3 IF では省略する\n- 旧形式 (`interface` キー、短縮形 `interface: vlan-N`) は ndl_version 1.x の間だけ受け付け、\n  新形式に読み替える。読み替えた内容は deprecations に残し、validator が warning にする (ADR-0011 D10)",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ip": {
+          "anyOf": [
+            {
+              "format": "ipv4interface",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ip"
+        },
+        "ipv6": {
+          "anyOf": [
+            {
+              "format": "ipv6interface",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ipv6"
+        },
+        "vrf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vrf"
+        },
+        "attaches_to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachesToObj"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gateway_redundancy": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "anycast_gateway": "#/$defs/AnycastGateway",
+                "hsrp": "#/$defs/HsrpGateway",
+                "vrrp": "#/$defs/VrrpGateway"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/VrrpGateway"
+              },
+              {
+                "$ref": "#/$defs/HsrpGateway"
+              },
+              {
+                "$ref": "#/$defs/AnycastGateway"
+              }
+            ]
+          },
+          "title": "Gateway Redundancy",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "node",
+        "name"
+      ],
+      "title": "L3Interface",
+      "type": "object"
+    },
+    "L3Layer": {
+      "additionalProperties": false,
+      "description": "Layer 3 全体",
+      "properties": {
+        "vrfs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VRF"
+          },
+          "title": "Vrfs",
+          "type": "array"
+        },
+        "interfaces": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/L3Interface"
+          },
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "tunnel_interfaces": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TunnelInterface"
+          },
+          "title": "Tunnel Interfaces",
+          "type": "array"
+        }
+      },
+      "title": "L3Layer",
+      "type": "object"
+    },
+    "L3VxLAN": {
+      "additionalProperties": false,
+      "description": "L3VNI — Symmetric IRB 用 VRF ↔ VNI バインディング",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "l3vni",
+          "title": "Type",
+          "type": "string"
+        },
+        "vni": {
+          "title": "Vni",
+          "type": "integer"
+        },
+        "vrf": {
+          "title": "Vrf",
+          "type": "string"
+        },
+        "irb_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "symmetric",
+                "asymmetric"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Irb Mode"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "vni",
+        "vrf"
+      ],
+      "title": "L3VxLAN",
+      "type": "object"
+    },
+    "LacpConfig": {
+      "additionalProperties": false,
+      "description": "LACP パラメータ",
+      "properties": {
+        "mode": {
+          "default": "active",
+          "enum": [
+            "active",
+            "passive",
+            "on"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "min_links": {
+          "default": 1,
+          "title": "Min Links",
+          "type": "integer"
+        }
+      },
+      "title": "LacpConfig",
+      "type": "object"
+    },
+    "LacpLag": {
+      "additionalProperties": false,
+      "description": "単一ノードの LACP bond",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "lacp",
+          "title": "Type",
+          "type": "string"
+        },
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "members": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "lacp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LacpConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "node",
+        "members"
+      ],
+      "title": "LacpLag",
+      "type": "object"
+    },
+    "Meta": {
+      "additionalProperties": true,
+      "description": "トポロジーメタデータ",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "network_types": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Network Types",
+          "type": "array"
+        }
+      },
+      "title": "Meta",
+      "type": "object"
+    },
+    "MlagLag": {
+      "additionalProperties": false,
+      "description": "マルチシャーシ LAG (MLAG)",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "mlag",
+          "title": "Type",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "members": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "lacp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LacpConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "peer_link": {
+          "title": "Peer Link",
+          "type": "string"
+        },
+        "peer_link_interface": {
+          "title": "Peer Link Interface",
+          "type": "string"
+        },
+        "domain_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Id"
+        },
+        "system_mac": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Mac"
+        },
+        "client_lag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Lag"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "nodes",
+        "members",
+        "peer_link",
+        "peer_link_interface"
+      ],
+      "title": "MlagLag",
+      "type": "object"
+    },
+    "OspfAdjacency": {
+      "additionalProperties": false,
+      "description": "OSPF の隣接 1 本 (ポイントツーポイント)",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "ospf",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instance"
+        },
+        "from": {
+          "$ref": "#/$defs/OspfEndpoint"
+        },
+        "to": {
+          "$ref": "#/$defs/OspfEndpoint"
+        },
+        "area": {
+          "title": "Area",
+          "type": "string"
+        },
+        "bfd": {
+          "default": false,
+          "title": "Bfd",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "from",
+        "to",
+        "area"
+      ],
+      "title": "OspfAdjacency",
+      "type": "object"
+    },
+    "OspfEndpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "interface": {
+          "title": "Interface",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "interface"
+      ],
+      "title": "OspfEndpoint",
+      "type": "object"
+    },
+    "OspfInstance": {
+      "additionalProperties": false,
+      "description": "1 つの OSPF ルーティングドメイン",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "vrf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vrf"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OspfInstanceNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "OspfInstance",
+      "type": "object"
+    },
+    "OspfInstanceNode": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "title": "OspfInstanceNode",
+      "type": "object"
+    },
+    "PortRef": {
+      "additionalProperties": false,
+      "description": "VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）\n\ninterface / lag: PortTarget。lag のときの VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する\nnode:      廃止予定。ノードは interface / lag から導出する (ADR-0013 D2)。\n           ndl_version 1.x の間は受け付け、validator が warning を出して照合する\nnative:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。\n           access_ports では常に untagged のため通常は未指定。",
+      "properties": {
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interface"
+        },
+        "lag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lag"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node"
+        },
+        "native": {
+          "default": false,
+          "title": "Native",
+          "type": "boolean"
+        }
+      },
+      "title": "PortRef",
+      "type": "object"
+    },
+    "RouteTargets": {
+      "additionalProperties": false,
+      "description": "BGP Route Target (import/export)",
+      "properties": {
+        "import": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Import",
+          "type": "array"
+        },
+        "export": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Export",
+          "type": "array"
+        }
+      },
+      "title": "RouteTargets",
+      "type": "object"
+    },
+    "Subinterface": {
+      "additionalProperties": false,
+      "description": "802.1Q サブインターフェース (ADR-0012)\n\n物理 IF または LAG を 802.1Q タグで分割した論理 IF。L3 は\nlayer3.interfaces[].attaches_to: {subinterface: <サブ IF の id>} で載る。\n\n- node は持たない。基盤 (L1 IF / LAG) から導出できるため (ADR-0005 D6、ADR-0012 D2)\n- vlan_id はこのリンク上の 802.1Q タグ番号であり、layer2.vlans への参照ではない。\n  タグの書き換えや拠点ごとの番号再利用でタグと VLAN エンティティは一致しないことがある\n- Q-in-Q (stag_vlan_id / ctag_vlan_id)、ネイティブ (タグなし) サブ IF、\n  L2 のサービスインスタンスは範囲外",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "attaches_to": {
+          "$ref": "#/$defs/AttachesToObj"
+        },
+        "vlan_id": {
+          "maximum": 4094,
+          "minimum": 1,
+          "title": "Vlan Id",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "attaches_to",
+        "vlan_id"
+      ],
+      "title": "Subinterface",
+      "type": "object"
+    },
+    "TunnelInterface": {
+      "additionalProperties": false,
+      "description": "トンネルインターフェース。source / destination を自分で持つ自己完結型。\n\n対向がトポロジー内なら destination_interface、外なら destination_ip を使う (排他)。\n両端を結ぶ辺はエクスポーターが導出する (tunnel_links は二重表現になるため作らない)。",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "gre",
+            "ipip",
+            "ipsec_vti",
+            "wireguard"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "destination_ip": {
+          "anyOf": [
+            {
+              "format": "ipv4",
+              "type": "string"
+            },
+            {
+              "format": "ipv6",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Destination Ip"
+        },
+        "destination_interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Destination Interface"
+        },
+        "ip": {
+          "anyOf": [
+            {
+              "format": "ipv4interface",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ip"
+        },
+        "ipv6": {
+          "anyOf": [
+            {
+              "format": "ipv6interface",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ipv6"
+        },
+        "vrf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vrf"
+        },
+        "transport_vrf": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transport Vrf"
+        },
+        "mtu": {
+          "anyOf": [
+            {
+              "minimum": 68,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mtu"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "node",
+        "type",
+        "source"
+      ],
+      "title": "TunnelInterface",
+      "type": "object"
+    },
+    "VLAN": {
+      "additionalProperties": false,
+      "description": "VLAN 定義",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "vlan_id": {
+          "title": "Vlan Id",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "trunk_ports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PortRef"
+          },
+          "title": "Trunk Ports",
+          "type": "array"
+        },
+        "access_ports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PortRef"
+          },
+          "title": "Access Ports",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "vlan_id"
+      ],
+      "title": "VLAN",
+      "type": "object"
+    },
+    "VRF": {
+      "additionalProperties": false,
+      "description": "VRF 定義",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "rd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rd"
+        },
+        "l3vni": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "L3Vni"
+        },
+        "route_targets": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RouteTargets"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "VRF",
+      "type": "object"
+    },
+    "VrrpGateway": {
+      "additionalProperties": false,
+      "description": "VRRP によるゲートウェイ冗長。1 インスタンスは単一 AF (RFC 5798)",
+      "properties": {
+        "mode": {
+          "const": "vrrp",
+          "title": "Mode",
+          "type": "string"
+        },
+        "group_id": {
+          "maximum": 255,
+          "minimum": 1,
+          "title": "Group Id",
+          "type": "integer"
+        },
+        "vip": {
+          "anyOf": [
+            {
+              "format": "ipv4",
+              "type": "string"
+            },
+            {
+              "format": "ipv6",
+              "type": "string"
+            }
+          ],
+          "title": "Vip"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "maximum": 254,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "preempt": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preempt"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "mode",
+        "group_id",
+        "vip"
+      ],
+      "title": "VrrpGateway",
+      "type": "object"
+    },
+    "Vtep": {
+      "additionalProperties": false,
+      "description": "VXLAN トンネル端点 (ADR-0014)\n\n1 つ以上のノードが終端するトンネル端点アドレスとして表す。冗長化の方式名\n(anycast / vPC / virtual VTEP / BGW など) は構文に入れない (ADR-0014 D1)。\n\n- sources: この VTEP を終端するノードの L3 IF (ループバック) の id。ノードは各 L3 IF から決まる\n- address / address_v6: VTEP のアドレス。sources が 1 つなら省略でき、その L3 IF の ip / ipv6 になる。\n  sources が複数 (複数ノードで共有) なら必須",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "format": "ipv4interface",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Address"
+        },
+        "address_v6": {
+          "anyOf": [
+            {
+              "format": "ipv6interface",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Address V6"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "sources"
+      ],
+      "title": "Vtep",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "ndl_version": {
+      "default": "1.0",
+      "title": "Ndl Version",
+      "type": "string"
+    },
+    "meta": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Meta"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "layer1": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/L1Layer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "layer2": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/L2Layer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "layer3": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/L3Layer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "control_plane": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ControlPlane"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "type": "object"
+}
