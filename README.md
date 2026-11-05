@@ -72,3 +72,7 @@ layer3:
 ```bash
 python -m pytest
 ```
+
+## ライセンス
+
+MIT License (`LICENSE`)
