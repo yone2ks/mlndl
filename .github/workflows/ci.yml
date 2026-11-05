@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest
+      # examples は warning を含んでよい (error がないこと)。valid_ の fixture は warning もないこと
+      - name: Validate examples
+        run: for f in examples/*.yaml; do python -m mlndl validate "$f" || exit 1; done
+      - name: Validate valid fixtures (strict)
+        run: for f in tests/fixtures/valid_*.yaml; do python -m mlndl validate --strict "$f" || exit 1; done
+      - name: Export examples
+        run: for f in examples/*.yaml; do python -m mlndl export --format cytoscape "$f" > /dev/null || exit 1; done
