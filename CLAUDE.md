@@ -102,7 +102,7 @@ class MLNDLTopology(BaseModel):
 
 ### 4. セキュリティ
 
-- `yaml.safe_load()` 必須（`yaml.load()` は使わない）
+- `yaml.SafeLoader` で読む（`safe_load` と同じ。`yaml.load()` に任意のローダーを渡さない）。同じマッピングでのキーの重複は error（PyYAML は黙って後勝ちにするので、ローダーで検出する）
 - 入力サイズ上限: `MAX_TOPOLOGY_BYTES = 1 * 1024 * 1024`（1MB）
 
 ### 5. `layer1.nodes.role` 語彙
