@@ -52,7 +52,7 @@ from .schema.layer1 import AttachesToObj, LacpLag, MlagLag
 from .schema.layer2 import L2VxLAN, L3VxLAN
 from .schema.topology import MLNDLTopology
 from .schema.refs import COLLECTION_LABELS, Ref
-from .index import IdIndex
+from .index import SECTIONS, IdIndex
 
 _RT_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+:\d+$|^\d+:\d+$")
 
@@ -186,18 +186,8 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         "vlan": vlan_ids, "subinterface": subif_ids,
     }
 
-    # ── ID 空間の重複 (ADR-0002 D5) ─────────────────────────────────────
-    _check_interface_id_spaces(
-        {"L1 インターフェース": interface_ids, "LAG": lag_ids,
-         "VLAN": vlan_ids, "サブインターフェース": subif_ids},
-        errors,
-    )
-    # update_source / OSPF の interface は L3 IF とトンネル IF のどちらも指せるので、id から種類が決まる必要がある (ADR-0018 D3)
-    if topology.layer3:
-        _check_interface_id_spaces(
-            {"L3 インターフェース": l3interface_ids, "トンネル": {t.id for t in topology.layer3.tunnel_interfaces}},
-            errors,
-        )
+    # ── ID の一意性 (ADR-0002 D5) ───────────────────────────────────────
+    _check_id_uniqueness(topology, errors)
 
     # ── Layer 1 ──────────────────────────────────────────────────────────
     if topology.layer1:
@@ -1047,21 +1037,43 @@ def _check_attaches_to(attaches_to, path, spaces, errors):
         _resolve_ref(attaches_to.kind, attaches_to.target, spaces, f"{path}.{attaches_to.kind}", errors)
 
 
-def _check_interface_id_spaces(spaces: dict[str, set[str]], errors: list[ValidationError]) -> None:
-    """参照先になる ID 空間どうしが重複していないか (ADR-0002 D5)
+def _check_id_uniqueness(topology: MLNDLTopology, errors: list[ValidationError]) -> None:
+    """すべての id がトポロジー全体で一意か (ADR-0002 D5)
 
-    キーで種類を示すようになっても (ADR-0001 D8)、旧形式の {interface: X} を読み替えるには
-    X がどの空間にあるかが一意に決まる必要がある。ID のグローバル一意性の一部でもある
+    同じ一覧の中の重複も、別の一覧との重複も error にする。重複を許すと、参照がどれを指すか決まらず、
+    索引 (IdIndex) は先に書いたほうだけを引くので、後に書いたほうが黙って見えなくなる。
+    旧形式の {interface: X} の読み替えや、L3 IF とトンネル IF のどちらも指せる update_source も、
+    id から種類が一意に決まることに頼っている (ADR-0001 D8、ADR-0018 D3)
     """
-    names = list(spaces)
-    for a_i, a in enumerate(names):
-        for b in names[a_i + 1:]:
-            for dup in sorted(spaces[a] & spaces[b]):
+    first: dict[str, tuple[str, int]] = {}   # id → 最初に書いた (一覧のパス, 位置)
+    for section_name in SECTIONS:
+        section = getattr(topology, section_name, None)
+        if section is None:
+            continue
+        for list_name in type(section).model_fields:
+            items = getattr(section, list_name)
+            if not isinstance(items, list):
+                continue
+            path = f"{section_name}.{list_name}"
+            for i, item in enumerate(items):
+                entity_id = getattr(item, "id", None)
+                if not isinstance(entity_id, str):
+                    continue
+                if entity_id not in first:
+                    first[entity_id] = (path, i)
+                    continue
+                first_path, first_i = first[entity_id]
+                where = (f"{_collection_label(path)} の中で 2 回使われています ({first_path}[{first_i}] と {path}[{i}])"
+                         if first_path == path else
+                         f"{_collection_label(first_path)} と {_collection_label(path)} の両方で使われています")
                 errors.append(ValidationError(
-                    f"id '{dup}'",
-                    f"ID '{dup}' が {a} と {b} の両方で使われています。"
-                    f"ID はグローバルに一意である必要があります (ADR-0002 D5)",
+                    f"{path}[{i}].id",
+                    f"ID '{entity_id}' が {where}。ID はグローバルに一意である必要があります (ADR-0002 D5)",
                 ))
+
+
+def _collection_label(path: str) -> str:
+    return COLLECTION_LABELS.get(path) or {"control_plane.bfd": "BFD"}.get(path, path)
 
 
 def _id_grammar_problems(entity_id: str) -> list[str]:
