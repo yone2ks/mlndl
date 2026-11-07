@@ -95,36 +95,30 @@ layer1:
     - { id: host2-eth0, node: host2, name: eth0 }
 
   links:
-    # ── アンダーレイ（P2P /31、MTU 9216）────────────────────────────────
+    # ── アンダーレイ（P2P /31）────────────────────────────────
     - id: link-spine1-leaf1
       endpoints: [spine1-e1-1, leaf1-e1-1]
-      mtu: 9216
       link_role: underlay
 
     - id: link-spine1-leaf2
       endpoints: [spine1-e1-2, leaf2-e1-1]
-      mtu: 9216
       link_role: underlay
 
     - id: link-spine2-leaf1
       endpoints: [spine2-e1-1, leaf1-e1-2]
-      mtu: 9216
       link_role: underlay
 
     - id: link-spine2-leaf2
       endpoints: [spine2-e1-2, leaf2-e1-2]
-      mtu: 9216
       link_role: underlay
 
-    # ── ホスト収容（MTU 1500）──────────────────────────────────────────
+    # ── ホスト収容──────────────────────────────────────────
     - id: link-leaf1-host1
       endpoints: [leaf1-e1-3, host1-eth0]
-      mtu: 1500
       link_role: access
 
     - id: link-leaf2-host2
       endpoints: [leaf2-e1-3, host2-eth0]
-      mtu: 1500
       link_role: access
 
 layer2:

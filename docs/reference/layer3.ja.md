@@ -115,7 +115,7 @@ tunnel_interfaces:
 | `ipv6` | IPv6 プレフィックス付きアドレス | | | |
 | `vrf` | id | | `layer3.vrfs` | トンネル IF が属する VRF |
 | `transport_vrf` | id | | `layer3.vrfs` | 外側のパケットが流れる VRF |
-| `mtu` | 整数 | | | |
+| `mtu` | 整数 | | | トンネル IF の MTU。68 以上 |
 | `description` | 文字列 | | | |
 
 外側のアドレスファミリーは、`source` と宛先で一致させます。両端をトポロジーの中に書くときは、逆向きのトンネルも書きます (ないと info)。

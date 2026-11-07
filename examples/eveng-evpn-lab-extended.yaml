@@ -151,38 +151,38 @@ layer1:
     - { id: server5-eth1, node: server5, name: eth1 }
 
   links:
-    # ── アンダーレイ（P2P /31、MTU 9216）────────────────────────────────
-    - {id: link-spine1-leaf1, endpoints: [spine1-e1-1, leaf1-e1-1], mtu: 9216, link_role: underlay}
-    - {id: link-spine1-leaf2, endpoints: [spine1-e1-2, leaf2-e1-1], mtu: 9216, link_role: underlay}
-    - {id: link-spine1-leaf3, endpoints: [spine1-e1-3, leaf3-e1-1], mtu: 9216, link_role: underlay}
-    - {id: link-spine1-leaf4, endpoints: [spine1-e1-4, leaf4-e1-1], mtu: 9216, link_role: underlay}
-    - {id: link-spine1-leaf5, endpoints: [spine1-e1-5, leaf5-e1-1], mtu: 9216, link_role: underlay}
-    - {id: link-spine1-leaf6, endpoints: [spine1-e1-6, leaf6-e1-1], mtu: 9216, link_role: underlay}
-    - {id: link-spine2-leaf1, endpoints: [spine2-e1-1, leaf1-e1-2], mtu: 9216, link_role: underlay}
-    - {id: link-spine2-leaf2, endpoints: [spine2-e1-2, leaf2-e1-2], mtu: 9216, link_role: underlay}
-    - {id: link-spine2-leaf3, endpoints: [spine2-e1-3, leaf3-e1-2], mtu: 9216, link_role: underlay}
-    - {id: link-spine2-leaf4, endpoints: [spine2-e1-4, leaf4-e1-2], mtu: 9216, link_role: underlay}
-    - {id: link-spine2-leaf5, endpoints: [spine2-e1-5, leaf5-e1-2], mtu: 9216, link_role: underlay}
-    - {id: link-spine2-leaf6, endpoints: [spine2-e1-6, leaf6-e1-2], mtu: 9216, link_role: underlay}
+    # ── アンダーレイ（P2P /31）────────────────────────────────
+    - {id: link-spine1-leaf1, endpoints: [spine1-e1-1, leaf1-e1-1], link_role: underlay}
+    - {id: link-spine1-leaf2, endpoints: [spine1-e1-2, leaf2-e1-1], link_role: underlay}
+    - {id: link-spine1-leaf3, endpoints: [spine1-e1-3, leaf3-e1-1], link_role: underlay}
+    - {id: link-spine1-leaf4, endpoints: [spine1-e1-4, leaf4-e1-1], link_role: underlay}
+    - {id: link-spine1-leaf5, endpoints: [spine1-e1-5, leaf5-e1-1], link_role: underlay}
+    - {id: link-spine1-leaf6, endpoints: [spine1-e1-6, leaf6-e1-1], link_role: underlay}
+    - {id: link-spine2-leaf1, endpoints: [spine2-e1-1, leaf1-e1-2], link_role: underlay}
+    - {id: link-spine2-leaf2, endpoints: [spine2-e1-2, leaf2-e1-2], link_role: underlay}
+    - {id: link-spine2-leaf3, endpoints: [spine2-e1-3, leaf3-e1-2], link_role: underlay}
+    - {id: link-spine2-leaf4, endpoints: [spine2-e1-4, leaf4-e1-2], link_role: underlay}
+    - {id: link-spine2-leaf5, endpoints: [spine2-e1-5, leaf5-e1-2], link_role: underlay}
+    - {id: link-spine2-leaf6, endpoints: [spine2-e1-6, leaf6-e1-2], link_role: underlay}
 
     # ── vPC peer-link（leaf3 ↔ leaf4、2 本）─────────────────────────────
-    - {id: link-leaf3-leaf4-1, endpoints: [leaf3-e1-5, leaf4-e1-5], mtu: 9216, link_role: peer-link}
-    - {id: link-leaf3-leaf4-2, endpoints: [leaf3-e1-6, leaf4-e1-6], mtu: 9216, link_role: peer-link}
+    - {id: link-leaf3-leaf4-1, endpoints: [leaf3-e1-5, leaf4-e1-5], link_role: peer-link}
+    - {id: link-leaf3-leaf4-2, endpoints: [leaf3-e1-6, leaf4-e1-6], link_role: peer-link}
 
-    # ── ホスト収容（MTU 1500）──────────────────────────────────────────
-    - {id: link-leaf1-host1,     endpoints: [leaf1-e1-3, host1-eth0],   mtu: 1500, link_role: access}
-    - {id: link-leaf2-host2,     endpoints: [leaf2-e1-3, host2-eth0],   mtu: 1500, link_role: access}
-    - {id: link-leaf3-server3,   endpoints: [leaf3-e1-3, server3-eth0], mtu: 1500, link_role: trunk}
-    - {id: link-leaf4-server3,   endpoints: [leaf4-e1-3, server3-eth1], mtu: 1500, link_role: trunk}
-    - {id: link-leaf4-host4,     endpoints: [leaf4-e1-4, host4-eth0],   mtu: 1500, link_role: access}
-    - {id: link-leaf5-server5-1, endpoints: [leaf5-e1-3, server5-eth0], mtu: 1500, link_role: trunk}
-    - {id: link-leaf5-server5-2, endpoints: [leaf5-e1-4, server5-eth1], mtu: 1500, link_role: trunk}
-    - {id: link-leaf5-host5,     endpoints: [leaf5-e1-5, host5-eth0],   mtu: 1500, link_role: access}
+    # ── ホスト収容──────────────────────────────────────────
+    - {id: link-leaf1-host1,     endpoints: [leaf1-e1-3, host1-eth0],   link_role: access}
+    - {id: link-leaf2-host2,     endpoints: [leaf2-e1-3, host2-eth0],   link_role: access}
+    - {id: link-leaf3-server3,   endpoints: [leaf3-e1-3, server3-eth0], link_role: trunk}
+    - {id: link-leaf4-server3,   endpoints: [leaf4-e1-3, server3-eth1], link_role: trunk}
+    - {id: link-leaf4-host4,     endpoints: [leaf4-e1-4, host4-eth0],   link_role: access}
+    - {id: link-leaf5-server5-1, endpoints: [leaf5-e1-3, server5-eth0], link_role: trunk}
+    - {id: link-leaf5-server5-2, endpoints: [leaf5-e1-4, server5-eth1], link_role: trunk}
+    - {id: link-leaf5-host5,     endpoints: [leaf5-e1-5, host5-eth0],   link_role: access}
 
     # ── 外部・サービス ──────────────────────────────────────────────────
-    - {id: link-leaf6-wan-rtr, endpoints: [leaf6-e1-3, wan-rtr-gi1], mtu: 1500, link_role: uplink}
-    - {id: link-leaf6-fw1-1,   endpoints: [leaf6-e1-4, fw1-port1],   mtu: 1500, link_role: trunk}
-    - {id: link-leaf6-fw1-2,   endpoints: [leaf6-e1-5, fw1-port2],   mtu: 1500, link_role: trunk}
+    - {id: link-leaf6-wan-rtr, endpoints: [leaf6-e1-3, wan-rtr-gi1], link_role: uplink}
+    - {id: link-leaf6-fw1-1,   endpoints: [leaf6-e1-4, fw1-port1],   link_role: trunk}
+    - {id: link-leaf6-fw1-2,   endpoints: [leaf6-e1-5, fw1-port2],   link_role: trunk}
 
   lag:
     # vPC peer-link。MLNDL の LACP LAG は 1 ノードごとなので、両側に 1 つずつ書く

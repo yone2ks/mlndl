@@ -28,7 +28,7 @@ ADR の本文に残る「Phase 2 で」「Phase 3+ で」は、この一覧の�
 | 障害軸の構造化 (`fault_domains:` など) | ADR-0009、`docs/label-vocabulary.md` | `blast_radius` の問い合わせを作るとき |
 | `labels` を L1 ノード以外 (リンク・LAG・VLAN・VRF など) にも持たせる | drafts/0008 | ノード以外に分類を付けたい例が出たとき |
 | `attaches_to` を複数にする (multi-homing) | ADR-0001 D4 | vSwitch / dvSwitch の設計 (drafts/0007) を進めるとき |
-| `L1Link.mtu` の意味 (Ethernet ヘッダーを含むか) | ADR-0018 | 事業者網の MTU や、L2 と L3 の MTU の照合を書きたくなったとき |
+| インターフェース単位の MTU (L3 IF または L1 IF。何の MTU か・名前・両端の食い違いの検査)。L1 リンクの `mtu` は ADR-0020 でなくした | ADR-0020 D4、ADR-0011、ADR-0018 | OSPF の MTU 不一致・事業者網の MTU・RoCE などを検査したくなったとき |
 | ブレークアウト (100G → 4×25G の親子関係) | ADR-0005 D3-2 | ブレークアウトのあるトポロジーを書く必要が出たとき |
 | 物理配置 (ラックの U 位置・キャビネット) | ADR-0005 D3-2 | ラックの中の位置まで要るとき。サイトとラックの所属は `labels` で書ける (ADR-0017) |
 | 機器の中に L1 IF を書く糖衣 (ADR-0019) | 保留 (2026-11-05)。下書きは main にない | 利用者が再開を求めたとき |

@@ -1,0 +1,45 @@
+# 案 A (現状): L1Link.mtu を書く。underlay は 9216、access は 1500。
+# 検査: _validate_mtu が underlay + 両端 VTEP 終端ノード + mtu < 1550 のときだけ error を出す
+ndl_version: "1.0"
+
+meta:
+  name: trial-a-current
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, implementation: vm, role: spine}
+    - {id: leaf1,  implementation: vm, role: leaf}
+    - {id: leaf2,  implementation: vm, role: leaf}
+    - {id: host1,  implementation: vm, role: server}
+    - {id: border1, implementation: physical, role: border}
+
+  interfaces:
+    - {id: spine1-swp1, node: spine1, name: swp1}
+    - {id: spine1-swp2, node: spine1, name: swp2}
+    - {id: leaf1-swp51, node: leaf1,  name: swp51}
+    - {id: leaf2-swp51, node: leaf2,  name: swp51}
+    - {id: leaf1-swp1,  node: leaf1,  name: swp1}
+    - {id: host1-eth0,  node: host1,  name: eth0}
+    - {id: border1-ge1, node: border1, name: ge1}
+    - {id: border1-ge2, node: border1, name: ge2}  # Internet 側
+
+  links:
+    # underlay (VxLAN が通る)。mtu は 9216 を機械的に書く
+    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay}
+    - {id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, mtu: 9216, link_role: underlay}
+    # access
+    - {id: link-leaf1-host1,  endpoints: [leaf1-swp1,  host1-eth0], link_speed: 1G,  mtu: 1500, link_role: access}
+    # border - Internet (GRE トンネルを張る)
+    - {id: link-border1-inet, endpoints: [border1-ge2, spine1-swp2], link_speed: 1G, mtu: 1500, link_role: uplink}
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.1/32}
+    - {id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.2/32}
+    - {id: border1-ge2-l3, node: border1, name: ge2, ip: 203.0.113.1/30, attaches_to: {interface: border1-ge2}}
+
+  tunnel_interfaces:
+    - {id: tunnel-border1-dc2, node: border1, type: gre,
+       source: border1-ge2-l3, destination_ip: 198.51.100.1,
+       ip: 172.31.0.1/30, mtu: 1476}        # ← トンネル IF の mtu は別軸 (残す)

@@ -11,7 +11,7 @@ layer1:
     - {id: spine1-swp1, node: spine1, name: swp1}
     - {id: leaf1-swp51, node: leaf1,  name: swp51}
   links:
-    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, mtu: 9216}
+    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G}
   lag:
     - {id: lag-leaf1-bond0, type: lacp, node: leaf1, members: [leaf1-swp1, leaf1-swp2]}
 ```
@@ -66,9 +66,10 @@ L1 IF。物理ポート、VM の vNIC、コンテナの veth など。IP は持�
 | `id` | id | ○ | | 推奨プレフィックス `link-` |
 | `endpoints` | [id] | ○ | `layer1.interfaces` | ちょうど 2 つ。順序に意味はない (リンクは無向。[ADR-0006](../decisions/0006-endpoints.md)) |
 | `link_speed` | 文字列 | | | `10G`、`100G` など |
-| `mtu` | 整数 | | | VXLAN の underlay は 1550 以上 (推奨 9216) |
 | `link_role` | 文字列 | | | 自由な文字列。推奨値は `underlay` / `access` / `trunk` / `peer-link` / `management` / `uplink` |
 | `description` | 文字列 | | | 回線 ID・契約帯域・事業者名など ([ADR-0017](../decisions/0017-sites-and-wan.md) D4) |
+
+MTU はリンクには書きません。MTU はインターフェースの設定で、リンク (ケーブル) の性質ではないためです ([ADR-0020](../decisions/0020-remove-l1-link-mtu.md))。
 
 ## lag
 

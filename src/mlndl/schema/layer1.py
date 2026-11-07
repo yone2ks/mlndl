@@ -156,6 +156,7 @@ class L1Link(BaseModel):
     """Layer 1 物理リンク（ケーブル）
 
     ADR-0006: 物理リンクは無向。endpoints は順序非依存の 2 要素リスト。
+    ADR-0020: MTU はインターフェースの設定なので、リンクには書かない (mtu はなくした)。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -163,9 +164,19 @@ class L1Link(BaseModel):
     id: str
     endpoints: Annotated[list[str], Ref("layer1.interfaces")] = Field(min_length=2, max_length=2)
     link_speed: str | None = None   # 例: "10G", "100G"
-    mtu: int | None = None
     link_role: str | None = None    # 自由文字列。推奨: underlay / access / trunk / peer-link / management / uplink
     description: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_mtu(cls, data: Any) -> Any:
+        """mtu は ADR-0020 でなくした。なくした理由を示すエラーを返す"""
+        if isinstance(data, dict) and "mtu" in data:
+            raise ValueError(
+                "layer1.links の mtu はなくしました。MTU はインターフェースの設定で、"
+                "リンク (ケーブル) の性質ではないためです (ADR-0020)"
+            )
+        return data
 
     @model_validator(mode="after")
     def endpoints_distinct(self) -> "L1Link":

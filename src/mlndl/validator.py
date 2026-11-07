@@ -22,7 +22,6 @@
        両端から導いた通り道の食い違い (BGP は error、OSPF / IS-IS は ndl_version 1.x の間 warning。ADR-0018 D4)、
        トランスポートのアドレスファミリー、セッションの重複、RR は iBGP、
        同一ノード・同一 VRF の AS、同一 VRF の BGP エントリ、default 以外の VRF の EVPN / VPN (warning)、BFD のタイマー
-     - MTU: VTEP を終端するノードどうしの underlay リンクが 1550 以上か
      - 規約 (warning): 推奨プレフィックス (ADR-0002 D7)、SVI らしい名前で attaches_to なし、labels のキー
      - 旧形式 (warning): ADR-0011 D10・ADR-0013 D2・ADR-0014 D4
 
@@ -225,9 +224,6 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # ── 制御プレーン (ADR-0010) ──────────────────────────────────────────
     if topology.control_plane:
         _validate_control_plane(topology, errors)
-
-    # ── MTU 整合性 ───────────────────────────────────────────────────────
-    _validate_mtu(topology, errors)
 
     # ── 規約 (warning) ───────────────────────────────────────────────────
     _check_conventions(topology, errors)
@@ -942,48 +938,6 @@ def _mismatch_message(field: str, a: str, b: str, tunnels: set[str], labels: dic
         "(b) 事業者網をはさむなら、両端のポートの対向 (箱のポート) を同じ layer2.bridges[].ports に書く。"
         f"(c) トンネルの上で張るなら、両端の {field} を対になるトンネル IF にする (ADR-0018 D6)"
     )
-
-
-# ---------------------------------------------------------------------------
-# MTU 整合性
-# ---------------------------------------------------------------------------
-
-def _validate_mtu(topology: MLNDLTopology, errors: list[ValidationError]) -> None:
-    """VxLAN underlay の MTU >= 1550 を確認（VxLAN ドメイン内のリンクのみ対象）
-
-    旧実装はトポロジー全体に VxLAN が 1 つでもあれば全 underlay リンクを検査し、
-    マルチサイト構成で VxLAN を使わないサイトの underlay まで誤検出していた。
-    本実装は VxLAN に参加するノード（VTEP メンバー + vtep_source 保有ノード）
-    集合を求め、両端がその集合に属する underlay リンクのみ検査する。
-    """
-    if topology.layer2 is None or topology.layer1 is None:
-        return
-
-    # VxLAN ドメインに参加するノード集合
-    vtep_nodes: set[str] = set()
-    l3if_node = {i.id: i.node for i in topology.layer3.interfaces} if topology.layer3 else {}
-    for vtep in topology.layer2.vteps:
-        vtep_nodes.update(l3if_node[s] for s in vtep.sources if s in l3if_node)
-    for vx in topology.layer2.vxlan:
-        if isinstance(vx, L2VxLAN):                     # 旧形式 (ADR-0014 D4)
-            vtep_nodes.update(vx.members or [])
-            if vx.vtep_source in l3if_node:
-                vtep_nodes.add(l3if_node[vx.vtep_source])
-    if not vtep_nodes:
-        return
-
-    iface_node = {i.id: i.node for i in topology.layer1.interfaces}
-    for i, link in enumerate(topology.layer1.links):
-        if link.link_role != "underlay" or link.mtu is None or link.mtu >= 1550:
-            continue
-        # 両端ノードが VxLAN ドメインに属する underlay リンクのみ検査
-        sn = iface_node.get(link.endpoints[0])
-        tn = iface_node.get(link.endpoints[1])
-        if sn in vtep_nodes and tn in vtep_nodes:
-            errors.append(ValidationError(
-                f"layer1.links[{i}].mtu",
-                f"VxLAN underlay は MTU >= 1550 が必要です（現在: {link.mtu}）",
-            ))
 
 
 # ---------------------------------------------------------------------------

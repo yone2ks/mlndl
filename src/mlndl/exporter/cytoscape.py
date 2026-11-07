@@ -295,7 +295,6 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
             "target_if": if_to_name.get(ep1, ep1),
         }
         if link.link_speed: data["link_speed"] = link.link_speed
-        if link.mtu:        data["mtu"]        = link.mtu
         if link.link_role:  data["link_role"]  = link.link_role
         if link.description: data["description"] = link.description
 

@@ -90,7 +90,7 @@ YAML に `description` があれば、人が読む補足としてそのまま出
 
 | `type` | 内容 |
 |---|---|
-| `link` | L1 リンク。`source` / `target` は L1 ノード、`source_if` / `target_if` は L1 IF の name。`link_speed` / `mtu` / `link_role` / `lag_id` / `lag_type` |
+| `link` | L1 リンク。`source` / `target` は L1 ノード、`source_if` / `target_if` は L1 IF の name。`link_speed` / `link_role` / `lag_id` / `lag_type` |
 | `lag_bundle` | LAG のメンバーリンクを束ねたもの |
 | `attaches_to` | L1 ノードの `attaches_to` (ノードがどこで動くか。ADR-0001) |
 | `vlan_member` | VLAN → ポートのあるノード。`tagged_on` / `untagged_on` はポートの name か LAG の id。`endpoints` は下の「VLAN の端点」 |

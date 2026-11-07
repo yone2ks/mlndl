@@ -280,6 +280,7 @@ OSPF / IS-IS では、1 行目の `update_source` を `interface` と書く。
   - **vSwitch としての bridge**: `type` / `uplinks` / VLAN との関係。drafts/0007 で扱う
 - **VLAN の端点の導出 (ADR-0013 D7) を、bridge をはさんで広げること**
 - **事業者網の MTU** (最大フレーム長): `L1Link.mtu` の意味 (Ethernet ヘッダーを含むか) が決まっていないので、別に扱う。トンネルの PMTU / MSS も同じく扱わない。
+  → `L1Link.mtu` は [ADR-0020](0020-remove-l1-link-mtu.md) でなくした (2026-11-07)。インターフェース単位の MTU は [先送りした項目](deferred.md)。
 - **IPsec / WireGuard の鍵や暗号のパラメーター**: 秘匿情報は書かない (ADR-0017 D4)。
 
 ## Consequences

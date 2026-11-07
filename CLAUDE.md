@@ -313,7 +313,6 @@ layer1:
     - id: link-spine1-leaf1
       endpoints: [spine1-swp1, leaf1-swp51]   # 順序非依存（ADR-0006: 物理リンクは無向）
       link_speed: 10G
-      mtu: 9216                  # VxLAN 使用時は 1550 以上必須（推奨 9216）
       link_role: underlay        # 自由文字列。推奨: underlay/access/trunk/peer-link/management/uplink
 
   lag:
@@ -531,7 +530,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | 制御プレーンの通り道（OSPF / IS-IS） | BGP と同じ規則で両端の `interface` から導いた通り道が食い違わないか。ndl_version 1.x の間は warning、2.0 で error（ADR-0018 D4） | warning |
 | bridge | `ports` は `{interface:}` か `{lag:}`（型）。参照先がそのキーの種類で定義されているか。同じポートを 2 つの bridge に・同じ bridge に 2 回・LAG とそのメンバーを併記（error）。ポートが 1 つ、ポートの対向も同じ bridge のポート（ルーターのポートを書いた疑い）、VLAN のポートにもある、LAG のメンバーだけ（warning）（ADR-0018 D1） | error / warning |
 | 制御プレーンの注意 | default 以外の VRF のセッションに `l2vpn_evpn` / `vpnv4` / `vpnv6` | warning |
-| 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12） | error |
+| 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12）。L1 リンクの `mtu` はなくした理由を示すエラー（ADR-0020） | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
 | VTEP | `sources` が L3 IF に存在するか。同じ L3 IF を 2 つの VTEP / 1 つの VTEP に 2 回書いていないか。1 つの VTEP に同じノードの L3 IF を 2 つ書いていないか。共有（`sources` が複数）なら `address` 必須（型）。アドレスが決まらない / VTEP 間で重複していないか。L2VNI の `vteps` が定義済みか（ADR-0014） | error |
@@ -550,7 +549,6 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、`{interface: <LAG / VLAN / サブ IF>}`、VLAN のポートの `node`。ndl_version 1.x の間は読み替えて受け付ける（ADR-0011 D10） | warning |
 | VNI の参加ノード | L2VNI に参加するノード（VTEP から導出）に、その VLAN のポートがあるか | warning |
 | VLAN の端点 | ポート → L1 リンクの対向 → 対向の L3 IF を id でたどって求めた端点（1 ホップ。`derive.vlan_endpoints`）の IP が、その VLAN の SVI のサブネットに入っているか。SVI がなければ検査しない（ADR-0013 D7） | info |
-| MTU 整合性 | VTEP を終端するノードどうしの underlay MTU が 1550 以上か | error |
 | LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | `vlan_id` が 1..4094 か（スキーマ）。同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。MLAG に載せた VLAN は両ノードで数える） | error |
@@ -594,6 +592,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0015](docs/decisions/drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する | A (Draft) | 参照先が 1 つに決まる参照は `Annotated[str, Ref("layer2.vlans")]` と型に書き、汎用の検査が全参照を検査する。キーで選ぶ参照（attaches_to 等）と意味の検査は別。`topology.resolve(id)` で id から実体を引く（**実装済み**） |
 | [ADR-0017](docs/decisions/0017-sites-and-wan.md) | サイト・事業者網・回線情報の書き分け | **C** | スキーマ・validator は変えない。サイトは `labels.site`（値は `tokyo`）。2 点間の回線は `L1Link`、事業者網は `role: provider-network` の箱 + 箱への `L1Link`（契約の形で分ける）。回線 ID 等は `description`（書式なし、パースしない）。`link_role` に WAN の推奨値は足さない。事業者の機器はトポロジー外の相手。広域イーサ越しの自社機器どうしのセッションは次の ADR（D5-2） |
 | [ADR-0018](docs/decisions/0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 | **C**（2026-11-03 実装） | `layer2.bridges` を最小の形（`id` / `name` / `ports` / `description`）で先取り。`ports` は転送する側（箱）のポートだけ、`{interface:}` / `{lag:}`、方式名は書かない、書かなければ透過しない。両端が同じ bridge に届けば通り道は `{bridge:}`（1 ホップ）。`update_source` / OSPF の `interface` はトンネル IF も指せ（`Ref` の複数コレクション）、対になれば `{tunnel: [from, to]}`。OSPF / IS-IS も通り道を導き、食い違いは 1.x warning・2.0 error。マルチアクセスは次の ADR |
+| [ADR-0020](docs/decisions/0020-remove-l1-link-mtu.md) | L1 リンクの `mtu` をなくす | **C**（2026-11-07 実装） | MTU はケーブルではなくインターフェースの設定なので `layer1.links[].mtu` をなくし、書いたら理由を示す error。`link_role: underlay` の綴りで決まっていた VXLAN の underlay の MTU 検査もやめた。トンネル IF の `mtu` は残す。インターフェース単位の MTU は先送り |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---

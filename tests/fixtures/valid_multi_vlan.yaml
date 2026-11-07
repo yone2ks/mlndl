@@ -87,14 +87,14 @@ layer1:
 
   links:
     # Spine1 ↔ Leaf
-    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-spine1-leaf3, endpoints: [spine1-swp3, leaf3-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, link_role: underlay }
+    - { id: link-spine1-leaf3, endpoints: [spine1-swp3, leaf3-swp51], link_speed: 10G, link_role: underlay }
 
     # Spine2 ↔ Leaf
-    - { id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-spine2-leaf3, endpoints: [spine2-swp3, leaf3-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], link_speed: 10G, link_role: underlay }
+    - { id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], link_speed: 10G, link_role: underlay }
+    - { id: link-spine2-leaf3, endpoints: [spine2-swp3, leaf3-swp52], link_speed: 10G, link_role: underlay }
 
     # Leaf → Server (access)
     - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 1G, link_role: access }
@@ -102,7 +102,7 @@ layer1:
     - { id: link-leaf3-server3, endpoints: [leaf3-swp1, server3-eth0], link_speed: 1G, link_role: access }
 
     # Leaf1 ↔ Leaf2 peer-link (trunk — VLAN 100/200/300/400/900)
-    - { id: link-leaf1-leaf2-trunk, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G, mtu: 9216, link_role: peer-link }
+    - { id: link-leaf1-leaf2-trunk, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G, link_role: peer-link }
 
 layer2:
   vlans:

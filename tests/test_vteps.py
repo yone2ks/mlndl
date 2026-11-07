@@ -202,18 +202,8 @@ class TestLegacy:
 
 
 # ---------------------------------------------------------------------------
-# MTU とエクスポーター
+# エクスポーター
 # ---------------------------------------------------------------------------
-
-def test_mtu_domain_uses_vtep_sources():
-    """VTEP を終端するノードどうしの underlay リンクは MTU >= 1550"""
-    body = 'ndl_version: "1.0"\n' + L1.replace(
-        "  lag:",
-        "  links:\n    - {id: link-x, endpoints: [leaf1-swp1, leaf2-swp1], mtu: 1500, link_role: underlay}\n  lag:",
-    ) + "layer2:\n  vteps:\n" + MLAG_A + L3
-    errs = [str(e) for e in validate(parse(body))]
-    assert any("1550" in e for e in errs)
-
 
 def test_cytoscape_vni_lists_vteps():
     out = cytoscape.export(_topo(

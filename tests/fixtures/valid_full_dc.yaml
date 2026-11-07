@@ -91,52 +91,44 @@ layer1:
     - id: link-spine1-leaf1
       endpoints: [spine1-swp1, leaf1-swp51]
       link_speed: 10G
-      mtu: 9216
       link_role: underlay
 
     - id: link-spine1-leaf2
       endpoints: [spine1-swp2, leaf2-swp51]
       link_speed: 10G
-      mtu: 9216
       link_role: underlay
 
     # ── Spine2 ↔ Leaf（underlay 10G）───────────────────────────────────
     - id: link-spine2-leaf1
       endpoints: [spine2-swp1, leaf1-swp52]
       link_speed: 10G
-      mtu: 9216
       link_role: underlay
 
     - id: link-spine2-leaf2
       endpoints: [spine2-swp2, leaf2-swp52]
       link_speed: 10G
-      mtu: 9216
       link_role: underlay
 
     # ── MLAG peer-link（Leaf1 ↔ Leaf2、2-member LACP）──────────────────
     - id: link-mlag-peerlink-1
       endpoints: [leaf1-swp49, leaf2-swp49]
       link_speed: 10G
-      mtu: 9216
       link_role: peer-link
 
     - id: link-mlag-peerlink-2
       endpoints: [leaf1-swp50, leaf2-swp50]
       link_speed: 10G
-      mtu: 9216
       link_role: peer-link
 
     # ── Spine1/Spine2 ↔ Leaf3（underlay 10G）──────────────────────────
     - id: link-spine1-leaf3
       endpoints: [spine1-swp3, leaf3-swp51]
       link_speed: 10G
-      mtu: 9216
       link_role: underlay
 
     - id: link-spine2-leaf3
       endpoints: [spine2-swp3, leaf3-swp52]
       link_speed: 10G
-      mtu: 9216
       link_role: underlay
 
     # ── Leaf3 → Server2（LACP LAG 2本）────────────────────────────────

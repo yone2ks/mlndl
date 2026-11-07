@@ -15,7 +15,6 @@ layer1:
       a: spine1-swp1
       b: leaf1-swp51
       link_speed: 10G
-      mtu: 9216
       link_role: underlay
 
     - id: link-mlag-peerlink-1
