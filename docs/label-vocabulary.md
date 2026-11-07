@@ -16,7 +16,7 @@
 - id: leaf1
   role: leaf
   attaches_to: esxi-01       # Realization  — どこで動くか（物理基盤）
-  parent: pod-tokyo          # Containment  — どこに属するか（論理階層・Phase 3+）
+  parent: pod-tokyo          # Containment  — どこに属するか（論理階層・まだ書けない）
   labels:                    # Classification — どんな属性か（多軸）
     az: ap-northeast-1a
     tenant: acme
@@ -36,7 +36,7 @@
 
 ### 障害軸 (fault axis)
 
-同じ値を持つノードは**同じ障害を共有しうる**軸。Phase 3+ の `blast_radius` クエリはこの軸を辿る候補になります。
+同じ値を持つノードは**同じ障害を共有しうる**軸。将来の `blast_radius` の問い合わせは、この軸をたどる候補になります。
 
 | キー | 意味 | 値の例 | 備考 |
 |------|------|--------|------|
@@ -69,7 +69,7 @@
 - **値は自由文字列**。ADR-0002 の ID 規則に従う必要はありません (`ap-northeast-1a` のようにハイフンを含む値も可)。
 - **値は参照ではありません**。`labels: {pod: pod-tokyo}` の `pod-tokyo` は `layer1.nodes` の ID を
   指してはいません。属性を持つ箱に所属させたい場合は `parent:` を使ってください ([ADR-0009](decisions/0009-membership-orthogonality.md) D2)。
-- **値の型は `str` のみ** (Phase 1)。`labels: {vlan: 100}` は error です。
+- **値の型は `str` のみ**。`labels: {vlan: 100}` は error です。
 
 ---
 
@@ -92,30 +92,30 @@
 
 | 用法 | 理由 | 代替表現 |
 |------|------|---------|
-| `labels: {vpc: vpc-prod}` で階層を表現する | `labels` は多軸フラット分類。VPC ⊃ subnet ⊃ instance の階層は連鎖で辿れる必要がある | `parent: vpc-prod` (Phase 3+) |
+| `labels: {vpc: vpc-prod}` で階層を表現する | `labels` は多軸フラット分類。VPC ⊃ subnet ⊃ instance の階層は連鎖で辿れる必要がある | `parent: vpc-prod` (まだ書けない) |
 | `labels: {node: leaf1}` のような ID 参照 | `labels` は非参照。参照整合性の検証対象外 | `attaches_to` / `parent` |
 | `labels: {circuit-id: KD-0123}` のような識別子 | 同じ値を共有する要素がなく、分類にならない | `description` (ADR-0017 D4) |
-| 同一軸に複数値を持たせる | map なので構造的に不可能 | 軸を分ける (`az` と `az-secondary` 等)、または Phase 3+ の構造化構成子を待つ |
+| 同一軸に複数値を持たせる | map なので構造的に不可能 | 軸を分ける (`az` と `az-secondary` 等)、または障害軸の構造化を待つ |
 
 ---
 
 ## 将来の拡張
 
-### 障害軸の構造化 (Phase 3+ 検討)
+### 障害軸の構造化 (先送り)
 
 現在の `labels` は障害軸と管理軸をフラットに混在させるため、`blast_radius` クエリが
 「どのキーが障害軸か」を判定できません。`blast_radius(tenant=acme)` は意味をなしませんが、
 mlndl コアはそれを止められません。
 
 当面はこのドキュメントの分類 (障害軸 / 管理軸) を informative な指針とし、
-`blast_radius` を実装する Phase 3+ で必要性が明確になった時点で、
+`blast_radius` の問い合わせを作るときに必要性が明確になった時点で、
 障害軸を構造化構成子 (`fault_domains:` 等) に昇格させる方針です。
 **昇格は加算的変更であり、既存の `labels` を壊しません。**
 
 ### 適用範囲の拡大
 
-Phase 1 では `layer1.nodes` にのみ `labels` を実装しています。
-Phase 2 で lag / vlan / vxlan / vrf / routing_neighbor へ横展開予定です。
+`labels` は `layer1.nodes` にだけ書けます。
+lag / vlan / vxlan / vrf / routing_neighbor などへ広げるかは先送りしています ([先送りした項目](decisions/deferred.md))。
 リンク (`L1Link.labels`) は、リンクを分類で選ぶ用途が出るまで足しません ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
 
 ### 語彙の追加

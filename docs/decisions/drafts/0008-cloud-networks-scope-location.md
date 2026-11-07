@@ -1,6 +1,6 @@
 # ADR-0008: クラウドネットワークの表現 — `parent` / `labels` グルーピングと `location` 軸
 
-- Status: Draft (Phase 3+ 設計、`labels` のみ Phase 1 実装済み)
+- Status: Draft (`labels` のみ実装済み。始めるきっかけは [先送りした項目](../deferred.md))
 - Pass: C (2026-09-15 改訂 — 旧 `scope` 案を撤回)
 - 関連: ADR-0001 (attaches_to), ADR-0002 (ID 命名), ADR-0003 (role open-form), ADR-0005 (表現スコープ),
   ADR-0006 (endpoints), **ADR-0009 (メンバーシップ構成子の直交性)**, 0007-draft (レイヤー中心モデル=案B)
@@ -161,3 +161,35 @@ Phase 1 で `parent` を入れない理由: L1 単層では用途が `attaches_t
 - `group` → LAG / BGP group / security group、および **containerlab のパラメータ継承機構 `groups:`** と衝突
 - `tags` → 802.1Q VLAN tag と衝突。mlndl は `layer2.vlans` 実装済みで衝突が現在進行形
 - `domain` / `zone` / `namespace` / `container` / `tenant` / `enclave` / `compartment` / `realm` → 多重衝突・既存フィールドとの衝突・階層潰し
+
+## 再検討の記録 (2026-11-07)
+
+L1 の整理の中で、`parent` を今 (ndl_version 1.x の加算的な変更として) 入れるかを 5 エージェント
+(spec-architect / linguist / dsl-designer / network-tech-reviewer / example-author) で再検討した。
+**結論: 今は入れない。** 始めるきっかけは [先送りした項目](../deferred.md) の `parent` の行。
+
+### 一致した点
+
+| 論点 | 結論 |
+|---|---|
+| 名前 | `parent` のまま。GCP Resource Manager・AWS Organizations・Cytoscape の compound node・NetBox と同じ語。ADR-0011 D8 でサブ IF の親参照を `attaches_to` に移したので、構文の中で衝突する用法はない |
+| 箱の置き場所 | 本 ADR D2 のとおり `layer1.nodes` に `role` で置く。別の区画 (`groups:` など) は試し書きでも局所性が崩れ、事業者網の箱 (ADR-0017) が `nodes` に残るため箱が 2 か所に分かれる。区画名の候補 (`domain` / `zone` / `scope` など) は ADR-0009 で却下済み |
+| `parent` を持てるもの | L1 ノードだけ。VLAN・VRF・L3 IF は別の参照で所属を書けるので、足すと重なる |
+| 親の数 | 1 つ |
+| 検査 | 参照先の存在 (`Ref`)・自己参照・循環は error。「指した先が箱か」は検査しない (`role` の値に意味を持たせない。ADR-0003) |
+
+### 今入れない理由
+
+- 需要がクラウドに偏っている。オンプレ・WAN・ラボのサイト・pod・ラックは `labels` で足りる (ADR-0017 D1)。VPC ⊃ subnet ⊃ VM の入れ子は `labels` では書けない
+- 親が 1 つだと、物理の階層 (サイト ⊃ ラック) と論理の階層 (fabric ⊃ pod) の交差を書けない。試し書きで、1 つのラックに別の pod の leaf が同居する例が出た。`labels` なら並べて書ける
+- 今入れると、親を書くためだけの属性のない箱が増え、`labels.site` と `parent` の書き方が混ざる。どちらも ADR-0017 で決めたばかりの方針に逆行する
+- 箱を `layer1.nodes` に置くことは、本 ADR の「ADR-0005 D1 を改定 (物理層は任意)」を受理しないと筋が通らない。ADR-0017 の事業者網の箱は、すでに同じ前提に立っている
+
+### 入れるときに決めること
+
+- `parent` は属性 (`cidr` など) を持つ箱にだけ使い、属性のない軸は `labels` に残す (規約として示す)
+- subnet はノードではなく、属性を持つ L3 のプレフィックスである。箱として書くなら、転送の経路ではなく分類のためと明記する。L3 IF の `ip` が subnet の `cidr` に入るかの照合を検討する
+- `parent` にしないもの: 事業者網の箱 (拠点は箱につながるのであって属さない)、VRF、MLAG ドメイン、EVPN の ES、仮想スタック (VSF / IRF)
+- `labels.site` と `parent` を両方書いたときの扱い (どちらも残し、食い違いは検査しない案が出た)
+- `attaches_to` と `parent` は独立した軸とし、ホストの `parent` を VM に継承させない (`labels` の継承と一緒に決める)
+- 障害範囲は `parent` ではなく、障害軸の構成子 (ADR-0009 の未解決事項) で扱う
