@@ -159,6 +159,10 @@ OSPF / IS-IS にも通り道を導く (食い違いは 1.x の間 warning、2.0 
 |-----|---------|--------|------|
 | [0020](0020-remove-l1-link-mtu.md) | L1 リンクの `mtu` をなくす (2026-11-07 実装) | **Accepted** | C |
 | [evaluations/adr0020](evaluations/adr0020/) | 試し書き (現状 / 削除 / IF に移す) | — | — |
+| [0021](0021-link-speed-format.md) | `link_speed` の書式 (2026-11-07 実装) | **Accepted** | C |
+| [evaluations/adr0021](evaluations/adr0021/) | 試し書き (単位付き / bps 付き / 整数 / 両受け / K を含む WAN) | — | — |
 
 1.0 のリリース後には直せない、既にあるフィールドの意味から整理した。MTU はケーブルではなくインターフェースの設定なので、L1 リンクから消し、
 `link_role` の綴りで決まっていた VXLAN の underlay の MTU 検査もやめた。トンネル IF の `mtu` は残し、インターフェース単位の MTU は先送りした。
+`link_speed` は `10G` / `2.5G` / `1.544M` / `64K` / `1.6T` のように `<数値><K|M|G|T>` で書く (10 進のビット毎秒)。書式違反は error、
+`1000G` のように同じ値の別の書き方は `1T` を促す warning (表記は書き換えない)。

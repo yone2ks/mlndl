@@ -841,7 +841,7 @@
     },
     "L1Link": {
       "additionalProperties": false,
-      "description": "Layer 1 物理リンク（ケーブル）\n\nADR-0006: 物理リンクは無向。endpoints は順序非依存の 2 要素リスト。\nADR-0020: MTU はインターフェースの設定なので、リンクには書かない (mtu はなくした)。",
+      "description": "Layer 1 物理リンク（ケーブル）\n\nADR-0006: 物理リンクは無向。endpoints は順序非依存の 2 要素リスト。\nADR-0020: MTU はインターフェースの設定なので、リンクには書かない (mtu はなくした)。\nADR-0021: link_speed は <数値><K|M|G|T> (10 進のビット毎秒)。",
       "properties": {
         "id": {
           "title": "Id",
@@ -859,6 +859,7 @@
         "link_speed": {
           "anyOf": [
             {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?[KMGT]$",
               "type": "string"
             },
             {

@@ -22,7 +22,8 @@
        両端から導いた通り道の食い違い (BGP は error、OSPF / IS-IS は ndl_version 1.x の間 warning。ADR-0018 D4)、
        トランスポートのアドレスファミリー、セッションの重複、RR は iBGP、
        同一ノード・同一 VRF の AS、同一 VRF の BGP エントリ、default 以外の VRF の EVPN / VPN (warning)、BFD のタイマー
-     - 規約 (warning): 推奨プレフィックス (ADR-0002 D7)、SVI らしい名前で attaches_to なし、labels のキー
+     - 規約 (warning): 推奨プレフィックス (ADR-0002 D7)、SVI らしい名前で attaches_to なし、labels のキー、
+       link_speed の正規形 (ADR-0021 D3)
      - 旧形式 (warning): ADR-0011 D10・ADR-0013 D2・ADR-0014 D4
 
 Severity (ADR-0002 D8):
@@ -47,7 +48,7 @@ from .derive import (bgp_session_views, end_path_labels, igp_adjacency_views, l3
                      vlan_endpoints, vlan_svi_networks)
 from .schema.control_plane import BgpInsideEndpoint, BgpSession, OspfAdjacency
 from .schema.layer3 import TunnelInterface
-from .schema.layer1 import AttachesToObj, LacpLag, MlagLag
+from .schema.layer1 import AttachesToObj, LacpLag, MlagLag, canonical_link_speed
 from .schema.layer2 import L2VxLAN, L3VxLAN
 from .schema.topology import MLNDLTopology
 from .schema.refs import COLLECTION_LABELS, Ref
@@ -1198,6 +1199,13 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
     if topology.layer1:
         for i, link in enumerate(topology.layer1.links):
             _warn_prefix(errors, f"layer1.links[{i}].id", link.id, "link-", "L1 リンク")
+            if link.link_speed and (canonical := canonical_link_speed(link.link_speed)) != link.link_speed:
+                errors.append(ValidationError(
+                    f"layer1.links[{i}].link_speed",
+                    f"link_speed '{link.link_speed}' は '{canonical}' と書くとそろいます。"
+                    f"数値が 1 以上 1000 未満になる単位で書きます (ADR-0021 D3)",
+                    "warning",
+                ))
         for i, lag in enumerate(topology.layer1.lag):
             _warn_prefix(errors, f"layer1.lag[{i}].id", lag.id, "lag-", "LAG")
         for i, node in enumerate(topology.layer1.nodes):

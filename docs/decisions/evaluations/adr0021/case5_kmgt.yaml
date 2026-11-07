@@ -1,0 +1,98 @@
+# 修正版 (K/M/G/T、10 進、小数桁数制限なし、bps なし)。
+# 古い WAN (T1 / E1 / ISDN) + 拠点 LAN + 本社コア + DC を 1 枚で持たせた。
+ndl_version: "1.0"
+
+meta:
+  name: speed-trial-case5-kmgt
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    # 本社
+    - {id: hq-core1,   name: hq-core1,   implementation: physical, role: core,   device_type: catalyst_9500}
+    - {id: hq-core2,   name: hq-core2,   implementation: physical, role: core,   device_type: catalyst_9500}
+    - {id: hq-wan1,    name: hq-wan1,    implementation: physical, role: border, device_type: cisco_asr1001}
+
+    # 支社 A (T1 1.544M で接続)
+    - {id: br-a-wan1,  name: br-a-wan1,  implementation: physical, role: border, device_type: cisco_isr4321}
+    - {id: br-a-acc1,  name: br-a-acc1,  implementation: physical, role: access, device_type: catalyst_9200}
+    - {id: br-a-pc1,   name: br-a-pc1,   implementation: physical, role: server, device_type: endpoint}
+
+    # 支社 B (E1 2.048M で接続)
+    - {id: br-b-wan1,  name: br-b-wan1,  implementation: physical, role: border, device_type: cisco_isr4321}
+    - {id: br-b-acc1,  name: br-b-acc1,  implementation: physical, role: access, device_type: catalyst_9200}
+
+    # 旧店舗 C (ISDN 64K backup)
+    - {id: br-c-wan1,  name: br-c-wan1,  implementation: physical, role: border, device_type: cisco_isr}
+
+    # DC
+    - {id: dc-spine1,  name: dc-spine1,  implementation: physical, role: spine,  device_type: arista_7050}
+    - {id: dc-leaf1,   name: dc-leaf1,   implementation: physical, role: leaf,   device_type: arista_7050}
+    - {id: dc-gpu1,    name: dc-gpu1,    implementation: physical, role: server, device_type: dgx}
+
+  interfaces:
+    - {id: hq-core1-te1,  node: hq-core1, name: Te1/1/1}
+    - {id: hq-core1-fo1,  node: hq-core1, name: Fo1/0/1}   # 25G uplink to core2
+    - {id: hq-core2-fo1,  node: hq-core2, name: Fo1/0/1}
+    - {id: hq-core1-te2,  node: hq-core1, name: Te1/1/2}
+    - {id: hq-wan1-se0,   node: hq-wan1,  name: Serial0/0}   # T1
+    - {id: hq-wan1-se1,   node: hq-wan1,  name: Serial0/1}   # E1
+    - {id: hq-wan1-bri0,  node: hq-wan1,  name: BRI0}        # ISDN
+
+    - {id: br-a-wan1-se0, node: br-a-wan1, name: Serial0/0}
+    - {id: br-a-wan1-gi1, node: br-a-wan1, name: Gi0/1}
+    - {id: br-a-acc1-gi1, node: br-a-acc1, name: Gi1/0/1}    # 1G uplink
+    - {id: br-a-acc1-fa1, node: br-a-acc1, name: Fa1/0/1}    # 100M access
+    - {id: br-a-pc1-eth0, node: br-a-pc1,  name: eth0}
+
+    - {id: br-b-wan1-se0, node: br-b-wan1, name: Serial0/0}
+    - {id: br-b-wan1-gi1, node: br-b-wan1, name: Gi0/1}
+    - {id: br-b-acc1-gi1, node: br-b-acc1, name: Gi1/0/1}
+
+    - {id: br-c-wan1-bri0, node: br-c-wan1, name: BRI0}
+
+    - {id: dc-spine1-et1, node: dc-spine1, name: Ethernet1}
+    - {id: dc-leaf1-et1,  node: dc-leaf1,  name: Ethernet1}
+    - {id: dc-leaf1-et2,  node: dc-leaf1,  name: Ethernet2}
+    - {id: dc-gpu1-et0,   node: dc-gpu1,   name: eth0}
+
+  links:
+    # DC (100G / 400G)
+    - {id: link-dc-spine1-leaf1, endpoints: [dc-spine1-et1, dc-leaf1-et1], link_speed: 400G,    link_role: underlay}
+    - {id: link-dc-leaf1-gpu1,   endpoints: [dc-leaf1-et2,  dc-gpu1-et0],  link_speed: 100G,    link_role: access}
+
+    # 本社コア (25G) + コアから WAN ルータ (10G)
+    - {id: link-hq-core1-core2,  endpoints: [hq-core1-fo1,  hq-core2-fo1], link_speed: 25G,     link_role: underlay}
+    - {id: link-hq-core1-wan1,   endpoints: [hq-core1-te2,  hq-wan1-se0],  link_speed: 10G,     link_role: uplink}
+    # (本社側のフロア LAN は省略)
+
+    # 支社 A の LAN (100M access / 1G uplink)
+    - {id: link-br-a-acc1-pc1,   endpoints: [br-a-acc1-fa1, br-a-pc1-eth0], link_speed: 100M,   link_role: access}
+    - {id: link-br-a-wan1-acc1,  endpoints: [br-a-wan1-gi1, br-a-acc1-gi1], link_speed: 1G,     link_role: uplink}
+
+    # 支社 B の LAN (1G)
+    - {id: link-br-b-wan1-acc1,  endpoints: [br-b-wan1-gi1, br-b-acc1-gi1], link_speed: 1G,     link_role: uplink}
+
+    # 古い WAN: T1 (1.544M) / E1 (2.048M) / ISDN BRI (64K) の 10 進表記
+    - id: link-wan-hq-br-a
+      endpoints: [hq-wan1-se0, br-a-wan1-se0]
+      link_speed: 1.544M          # T1 (24 x 64K channels)
+      link_role: uplink
+      description: "T1 専用線 / 回線 ID JP-T1-001"
+
+    - id: link-wan-hq-br-b
+      endpoints: [hq-wan1-se1, br-b-wan1-se0]
+      link_speed: 2.048M          # E1 (32 x 64K channels)
+      link_role: uplink
+      description: "E1 専用線 / 回線 ID JP-E1-017"
+
+    - id: link-wan-hq-br-c-isdn
+      endpoints: [hq-wan1-bri0, br-c-wan1-bri0]
+      link_speed: 64K             # ISDN BRI 1 チャネル
+      link_role: management
+      description: "ISDN BRI backup / 回線 ID JP-ISDN-203"
+
+    # 書式ルールの試験用コメント:
+    #   OK    : 400G / 1.544M / 64K / 2.5G / 100M / 10G
+    #   warn  : 1000G (→1T) / 2500M (→2.5G) / 10.0G (→10G) / 1544K (→1.544M) / 0.5G (→500M)
+    #   error : 10g / 10Gbps / 10 G / 10GB / 10000 / 10G_fast

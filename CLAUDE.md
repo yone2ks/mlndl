@@ -312,7 +312,7 @@ layer1:
   links:
     - id: link-spine1-leaf1
       endpoints: [spine1-swp1, leaf1-swp51]   # 順序非依存（ADR-0006: 物理リンクは無向）
-      link_speed: 10G
+      link_speed: 10G            # <数値><K|M|G|T>（10 進のビット毎秒。bps は付けない。ADR-0021）
       link_role: underlay        # 自由文字列。推奨: underlay/access/trunk/peer-link/management/uplink
 
   lag:
@@ -555,6 +555,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
 | SVI の紐づけ忘れ | `name` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
+| link_speed | `<数値><単位>`（単位は K / M / G / T） の書式か（`10g` / `10Gbps` / `10000` 等は直し方を示す error）。正規形（数値が 1 以上 1000 未満になる単位）でなければ warning。表記は書き換えない（ADR-0021） | error / warning |
 | ルーター ID | ~~bgp/ospf の router_id が layer3.interfaces に定義済みか~~ | **実装しない** — RFC 6286 は BGP Identifier と IF の IP の一致を要求しない。ADR-0016 の一意性チェックに置き換え予定（ADR-0010 D9 で委譲。router_id は control_plane.bgp[].nodes[] に置く） |
 
 ---
@@ -593,6 +594,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0017](docs/decisions/0017-sites-and-wan.md) | サイト・事業者網・回線情報の書き分け | **C** | スキーマ・validator は変えない。サイトは `labels.site`（値は `tokyo`）。2 点間の回線は `L1Link`、事業者網は `role: provider-network` の箱 + 箱への `L1Link`（契約の形で分ける）。回線 ID 等は `description`（書式なし、パースしない）。`link_role` に WAN の推奨値は足さない。事業者の機器はトポロジー外の相手。広域イーサ越しの自社機器どうしのセッションは次の ADR（D5-2） |
 | [ADR-0018](docs/decisions/0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 | **C**（2026-11-03 実装） | `layer2.bridges` を最小の形（`id` / `name` / `ports` / `description`）で先取り。`ports` は転送する側（箱）のポートだけ、`{interface:}` / `{lag:}`、方式名は書かない、書かなければ透過しない。両端が同じ bridge に届けば通り道は `{bridge:}`（1 ホップ）。`update_source` / OSPF の `interface` はトンネル IF も指せ（`Ref` の複数コレクション）、対になれば `{tunnel: [from, to]}`。OSPF / IS-IS も通り道を導き、食い違いは 1.x warning・2.0 error。マルチアクセスは次の ADR |
 | [ADR-0020](docs/decisions/0020-remove-l1-link-mtu.md) | L1 リンクの `mtu` をなくす | **C**（2026-11-07 実装） | MTU はケーブルではなくインターフェースの設定なので `layer1.links[].mtu` をなくし、書いたら理由を示す error。`link_role: underlay` の綴りで決まっていた VXLAN の underlay の MTU 検査もやめた。トンネル IF の `mtu` は残す。インターフェース単位の MTU は先送り |
+| [ADR-0021](docs/decisions/0021-link-speed-format.md) | `link_speed` の書式 | **C**（2026-11-07 実装） | `<数値><単位>`（単位は K / M / G / T）（10 進のビット毎秒、大文字だけ、bps は付けない、小数の桁は制限なし）。`P` 以上は必要になったら足す。書式違反は直し方を示す error、単位なしは推測しない。正規形（数値が 1 以上 1000 未満になる単位）でなければ warning で、表記は書き換えない。数値への変換は比較が要るまで足さない |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
 
 ---
