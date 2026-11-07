@@ -136,7 +136,7 @@ layer1:
 |---|---|
 | 2 点間の回線か事業者網か | 構造 (D3。リンクか箱か) |
 | 事業者網のサービス名 (事業者名を含めてよい) | 箱の `name` |
-| ポートの速度、MTU | `link_speed`、`mtu` (既存。MTU は VTEP の検査にも使う) |
+| ポートの速度、MTU | `link_speed` (既存)。MTU はリンクには書かない ([ADR-0020](0020-remove-l1-link-mtu.md) で `mtu` をなくした。契約上の MTU は `description`) |
 | 回線 ID、契約帯域、帯域保証の有無、契約番号、QoS クラス、`name` に書かなかった事業者名、クロスコネクトの位置 | リンクや箱の `description` |
 | サイト | 両端のノードの `labels.site` (D1) |
 

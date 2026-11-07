@@ -113,18 +113,18 @@ layer1:
 
   links:
     # ── DC underlay (Spine <-> Leaf/Border) ─────────────────────────────
-    - { id: link-dc-spine1-leaf1,   endpoints: [dc-spine1-swp1, dc-leaf1-swp51],   link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-dc-spine1-leaf2,   endpoints: [dc-spine1-swp2, dc-leaf2-swp51],   link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-dc-spine1-border1, endpoints: [dc-spine1-swp3, dc-border1-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-dc-spine1-border2, endpoints: [dc-spine1-swp4, dc-border2-swp51], link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-dc-spine2-leaf1,   endpoints: [dc-spine2-swp1, dc-leaf1-swp52],   link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-dc-spine2-leaf2,   endpoints: [dc-spine2-swp2, dc-leaf2-swp52],   link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-dc-spine2-border1, endpoints: [dc-spine2-swp3, dc-border1-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
-    - { id: link-dc-spine2-border2, endpoints: [dc-spine2-swp4, dc-border2-swp52], link_speed: 10G, mtu: 9216, link_role: underlay }
+    - { id: link-dc-spine1-leaf1,   endpoints: [dc-spine1-swp1, dc-leaf1-swp51],   link_speed: 10G, link_role: underlay }
+    - { id: link-dc-spine1-leaf2,   endpoints: [dc-spine1-swp2, dc-leaf2-swp51],   link_speed: 10G, link_role: underlay }
+    - { id: link-dc-spine1-border1, endpoints: [dc-spine1-swp3, dc-border1-swp51], link_speed: 10G, link_role: underlay }
+    - { id: link-dc-spine1-border2, endpoints: [dc-spine1-swp4, dc-border2-swp51], link_speed: 10G, link_role: underlay }
+    - { id: link-dc-spine2-leaf1,   endpoints: [dc-spine2-swp1, dc-leaf1-swp52],   link_speed: 10G, link_role: underlay }
+    - { id: link-dc-spine2-leaf2,   endpoints: [dc-spine2-swp2, dc-leaf2-swp52],   link_speed: 10G, link_role: underlay }
+    - { id: link-dc-spine2-border1, endpoints: [dc-spine2-swp3, dc-border1-swp52], link_speed: 10G, link_role: underlay }
+    - { id: link-dc-spine2-border2, endpoints: [dc-spine2-swp4, dc-border2-swp52], link_speed: 10G, link_role: underlay }
 
     # ── DC MLAG peer-link ──────────────────────────────────────────────
-    - { id: link-dc-leaf-peer1, endpoints: [dc-leaf1-swp49, dc-leaf2-swp49], link_speed: 10G, mtu: 9216, link_role: peer-link }
-    - { id: link-dc-leaf-peer2, endpoints: [dc-leaf1-swp50, dc-leaf2-swp50], link_speed: 10G, mtu: 9216, link_role: peer-link }
+    - { id: link-dc-leaf-peer1, endpoints: [dc-leaf1-swp49, dc-leaf2-swp49], link_speed: 10G, link_role: peer-link }
+    - { id: link-dc-leaf-peer2, endpoints: [dc-leaf1-swp50, dc-leaf2-swp50], link_speed: 10G, link_role: peer-link }
 
     # ── DC MLAG -> Servers ─────────────────────────────────────────────
     - { id: link-dc-leaf1-server1, endpoints: [dc-leaf1-swp1, dc-server1-eth0], link_speed: 10G, link_role: access }
@@ -137,8 +137,8 @@ layer1:
     #       underlay/access/peer-link/management/uplink しか例が無く、
     #       WAN リンクをどれにマップすべきか不明。'uplink' を採用したが、
     #       片側 (DC) では downlink でもある。feedback 参照。
-    - { id: link-wan-border1-core1, endpoints: [dc-border1-swp1, cm-core1-te1-1], link_speed: 10G, mtu: 9216, link_role: uplink }
-    - { id: link-wan-border2-core2, endpoints: [dc-border2-swp1, cm-core2-te1-1], link_speed: 10G, mtu: 9216, link_role: uplink }
+    - { id: link-wan-border1-core1, endpoints: [dc-border1-swp1, cm-core1-te1-1], link_speed: 10G, link_role: uplink }
+    - { id: link-wan-border2-core2, endpoints: [dc-border2-swp1, cm-core2-te1-1], link_speed: 10G, link_role: uplink }
 
     # ── Campus inter-core LACP (2-member) ──────────────────────────────
     - { id: link-cm-core-interconnect-a, endpoints: [cm-core1-te2-1, cm-core2-te2-1], link_speed: 40G, link_role: peer-link }

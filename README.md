@@ -53,7 +53,7 @@ layer1:
     - {id: spine1-swp1, node: spine1, name: swp1}
     - {id: leaf1-swp51, node: leaf1, name: swp51}
   links:
-    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], mtu: 9216}
+    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G}
 layer3:
   interfaces:
     - {id: spine1-swp1-l3, node: spine1, name: swp1, ip: 10.1.0.0/31, attaches_to: {interface: spine1-swp1}}

@@ -42,7 +42,6 @@ class TestParser:
         link = l1.links[0]
         assert link.endpoints == ["spine1-swp1", "leaf1-swp51"]
         assert link.link_speed == "10G"
-        assert link.mtu == 9216
 
     def test_parse_valid_with_lag(self):
         t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")

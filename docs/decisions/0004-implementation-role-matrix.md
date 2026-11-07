@@ -127,7 +127,7 @@ ADR-0005 (2026-05-29 Accepted) を受けた影響評価 (B 判定) で以下を�
 
 以下はプロトコル仕様レベルで成立しない組み合わせであり、Phase 2 でコアバリデーターの error として実装すること:
 
-- VxLAN 利用時の underlay MTU < 1550
+- VxLAN 利用時の underlay MTU < 1550 (実装したが、[ADR-0020](0020-remove-l1-link-mtu.md) で L1 リンクの `mtu` とあわせてなくした)
 - MLAG ペアで `system-mac` 不一致
 - eBGP ピアで同一 AS 番号 / iBGP ピアで異なる AS 番号
 - VNI グローバルユニーク性違反

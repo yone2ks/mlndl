@@ -60,7 +60,6 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | **VNI**: L2VNI と L3VNI を通して `vni` が重複しない | error |
 | **VNI**: L2VNI に参加する機器 (VTEP から導く) に、その VLAN のポートがある | warning |
 | **VRF と L3VNI**: VRF の `l3vni` が定義されている。VRF の `l3vni` と L3VNI の `vrf` が互いに一致する | error |
-| **MTU**: VTEP を終端する機器どうしの underlay のリンクの `mtu` が 1550 以上 | error |
 | **サブ IF**: `vlan_id` が 1〜4094。同じ基盤の上でタグが重複しない。`attaches_to` が `{interface:}` か `{lag:}`。タグと `layer2.vlans` の照合は**しない** | error |
 
 ## layer3 ([layer3.md](layer3.ja.md))
@@ -104,6 +103,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | L3 IF の `vlan` | `attaches_to: {vlan:}` ([ADR-0011](../decisions/0011-layer3-data-plane.md) D10) |
 | L3 IF の `fhrp` | `gateway_redundancy` |
 | `gateway_redundancy[].protocol` | `gateway_redundancy[].mode` |
+| `layer1.links[].mtu` | 書かない。MTU はインターフェースの設定 ([ADR-0020](../decisions/0020-remove-l1-link-mtu.md)) |
 
 ## 旧形式
 

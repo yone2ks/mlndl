@@ -152,3 +152,13 @@ ndl-viz が `link_role: wan` のリンクを除いた連結成分を「サイト
 ADR-0017 D5-2 の 5 つの問いを受けた。事業者網の中の L2 の転送は `layer2.bridges` (drafts/0007 の先取り。`ports` は箱のポートだけ) に書き、
 両端が同じ bridge に届けば通り道は `{bridge:}`。`update_source` と OSPF の `interface` はトンネル IF も指せ、対になるトンネルなら通り道は `{tunnel: [from, to]}`。
 OSPF / IS-IS にも通り道を導く (食い違いは 1.x の間 warning、2.0 で error)。マルチアクセスの隣接は次の ADR。
+
+### L1 の整理 (2026-11-07)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [0020](0020-remove-l1-link-mtu.md) | L1 リンクの `mtu` をなくす (2026-11-07 実装) | **Accepted** | C |
+| [evaluations/adr0020](evaluations/adr0020/) | 試し書き (現状 / 削除 / IF に移す) | — | — |
+
+1.0 のリリース後には直せない、既にあるフィールドの意味から整理した。MTU はケーブルではなくインターフェースの設定なので、L1 リンクから消し、
+`link_role` の綴りで決まっていた VXLAN の underlay の MTU 検査もやめた。トンネル IF の `mtu` は残し、インターフェース単位の MTU は先送りした。

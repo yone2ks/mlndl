@@ -93,16 +93,20 @@ class TestValidatorVniDuplicate:
 
 
 # ---------------------------------------------------------------------------
-# バリデーター: MTU 整合性
+# L1 リンクの mtu はなくした (ADR-0020)
 # ---------------------------------------------------------------------------
 
-class TestValidatorMtu:
-    def test_mtu_too_low_for_vxlan(self):
-        t = parse_file(FIXTURES / "invalid_mtu_vxlan.yaml")
-        errors = validate(t)
-        paths = [e.path for e in errors]
-        assert any("mtu" in p for p in paths)
-        assert any("1550" in e.message for e in errors)
+class TestLinkMtuRemoved:
+    def test_link_mtu_is_error_with_reason(self):
+        body = (
+            'ndl_version: "1.0"\n'
+            "layer1:\n"
+            "  nodes: [{id: a}, {id: b}]\n"
+            "  interfaces: [{id: a-e1, node: a}, {id: b-e1, node: b}]\n"
+            "  links: [{id: link-a-b, endpoints: [a-e1, b-e1], mtu: 9216}]\n"
+        )
+        with pytest.raises(Exception, match="ADR-0020"):
+            parse(body)
 
 
 # ---------------------------------------------------------------------------
