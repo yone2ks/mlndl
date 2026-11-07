@@ -44,6 +44,8 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | `labels` の値が文字列 | error |
 | `labels` のキーが id の文法に従う | warning |
 | リンクの `endpoints` がちょうど 2 つ | error |
+| リンクの `link_speed` が [速度](types.ja.md#速度) の書式に従う。違反には直し方を示す | error |
+| リンクの `link_speed` が正規形 (数値が 1 以上 1000 未満になる単位。`1000G` は `1T`) | warning |
 | MLAG の `nodes` がちょうど 2 つ。`peer_link` が同じ `lag` の一覧にある | error |
 
 ## layer2 ([layer2.md](layer2.ja.md))

@@ -1,0 +1,64 @@
+# 案 1: 単位付き文字列 (10G / 2.5G / 100M / 1.6T)
+# 今の書き方 (<整数>G) の上位互換。M / T も単位として受ける。
+ndl_version: "1.0"
+
+meta:
+  name: speed-trial-case1
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    # AI ファブリック (800G / 400G)
+    - {id: ai-spine1,  name: ai-spine1,  implementation: physical, role: spine,  device_type: nvidia_sn5600}
+    - {id: ai-leaf1,   name: ai-leaf1,   implementation: physical, role: leaf,   device_type: nvidia_sn5600}
+    - {id: ai-gpu1,    name: ai-gpu1,    implementation: physical, role: server, device_type: dgx_h100}
+
+    # キャンパス (1G / 2.5G access, 10G uplink, 100M mgmt)
+    - {id: cmp-core1,  name: cmp-core1,  implementation: physical, role: core,   device_type: catalyst_9500}
+    - {id: cmp-acc1,   name: cmp-acc1,   implementation: physical, role: access, device_type: catalyst_9300}
+    - {id: cmp-ap1,    name: cmp-ap1,    implementation: physical, role: server, device_type: wifi_ap}    # 2.5GBASE-T 収容
+    - {id: cmp-pc1,    name: cmp-pc1,    implementation: physical, role: server, device_type: endpoint}   # 1G 収容
+    - {id: mgmt-sw1,   name: mgmt-sw1,   implementation: physical, role: management, device_type: catalyst_1000}
+
+    # WAN (1G 物理 / 契約 300Mbps)
+    - {id: site-rtr1,  name: site-rtr1,  implementation: physical, role: border,           device_type: cisco_isr}
+    - {id: carrier-ipvpn, name: IPVPN-A (契約 300Mbps), implementation: physical, role: provider-network}
+
+  interfaces:
+    - {id: ai-spine1-et1, node: ai-spine1, name: Ethernet1}
+    - {id: ai-leaf1-et1,  node: ai-leaf1,  name: Ethernet1}
+    - {id: ai-leaf1-et2,  node: ai-leaf1,  name: Ethernet2}
+    - {id: ai-gpu1-et0,   node: ai-gpu1,   name: eth0}
+
+    - {id: cmp-core1-te1, node: cmp-core1, name: Te1/0/1}
+    - {id: cmp-acc1-te1,  node: cmp-acc1,  name: Te1/0/1}
+    - {id: cmp-acc1-mg1,  node: cmp-acc1,  name: Mg0}
+    - {id: cmp-acc1-gi1,  node: cmp-acc1,  name: Gi1/0/1}
+    - {id: cmp-acc1-gi2,  node: cmp-acc1,  name: Gi1/0/2}
+    - {id: cmp-ap1-eth0,  node: cmp-ap1,   name: eth0}
+    - {id: cmp-pc1-eth0,  node: cmp-pc1,   name: eth0}
+    - {id: mgmt-sw1-fa1,  node: mgmt-sw1,  name: Fa0/1}
+
+    - {id: site-rtr1-gi1, node: site-rtr1, name: Gi0/0}
+    - {id: carrier-ipvpn-p1, node: carrier-ipvpn, name: p1}
+
+  links:
+    # AI ファブリック
+    - {id: link-ai-spine1-leaf1, endpoints: [ai-spine1-et1, ai-leaf1-et1], link_speed: 800G, link_role: underlay}
+    - {id: link-ai-leaf1-gpu1,   endpoints: [ai-leaf1-et2,  ai-gpu1-et0],  link_speed: 400G, link_role: access}
+
+    # キャンパス
+    - {id: link-cmp-core-acc,    endpoints: [cmp-core1-te1, cmp-acc1-te1], link_speed: 10G,  link_role: uplink}
+    - {id: link-cmp-acc-ap,      endpoints: [cmp-acc1-gi1,  cmp-ap1-eth0], link_speed: 2.5G, link_role: access}
+    - {id: link-cmp-acc-pc,      endpoints: [cmp-acc1-gi2,  cmp-pc1-eth0], link_speed: 1G,   link_role: access}
+    - {id: link-cmp-mgmt,        endpoints: [cmp-acc1-mg1,  mgmt-sw1-fa1], link_speed: 100M, link_role: management}
+
+    # WAN (物理ポート 1G、契約 300M は description)
+    - id: link-site-ipvpn
+      endpoints: [site-rtr1-gi1, carrier-ipvpn-p1]
+      link_speed: 1G
+      link_role: uplink
+      description: "回線 ID WE-12345 / 契約 300Mbps"
+
+    # 将来の 1.6T 相当 (単位 T を使う例)
+    # - {id: link-future-xpu, endpoints: [...], link_speed: 1.6T, link_role: access}

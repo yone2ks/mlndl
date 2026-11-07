@@ -65,7 +65,7 @@ L1 IF。物理ポート、VM の vNIC、コンテナの veth など。IP は持�
 |---|---|---|---|---|
 | `id` | id | ○ | | 推奨プレフィックス `link-` |
 | `endpoints` | [id] | ○ | `layer1.interfaces` | ちょうど 2 つ。順序に意味はない (リンクは無向。[ADR-0006](../decisions/0006-endpoints.md)) |
-| `link_speed` | 文字列 | | | `10G`、`100G` など |
+| `link_speed` | 速度 | | | ポートの速度。`10G`、`2.5G`、`1.6T` など ([速度](types.ja.md#速度))。契約帯域ではない (契約帯域は `description`) |
 | `link_role` | 文字列 | | | 自由な文字列。推奨値は `underlay` / `access` / `trunk` / `peer-link` / `management` / `uplink` |
 | `description` | 文字列 | | | 回線 ID・契約帯域・事業者名など ([ADR-0017](../decisions/0017-sites-and-wan.md) D4) |
 
