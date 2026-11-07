@@ -70,7 +70,7 @@ NetBox から mlndl YAML に変換する際のアダプター参照表 (informat
 
 | 語彙 | 理由 | 代替表現 |
 |------|------|---------|
-| `vswitch`, `dvswitch` | ソフトウェア機能であり L1 物理「箱」ではない | Phase 2 の `layer2.bridges` 等で設計予定 |
+| `vswitch`, `dvswitch` | ソフトウェア機能であり L1 物理「箱」ではない | `layer2.bridges` 等で設計予定 (drafts/0007。ADR-0018 で bridge の最小の形だけ実装済み) |
 | `isp`, `carrier-network`, `transit`, `cloud` (事業者網の箱として) | 狭い (`isp` はインターネット、`carrier-network` は通信事業者に寄る)、または別の意味と衝突する (`transit` は BGP の transit) | `provider-network` (ADR-0017 D3) |
 | `eor` (End of Row) | 物理配置概念であり論理 role 軸と直交 | `leaf` または `core` で表現 |
 | `router` | 機能ではなく実装タイプ。`border`/`core` 等で役割を示すほうが明確 | — |
@@ -98,9 +98,9 @@ ndl-viz は既定スタイルを用意しており、慣用語として推奨し
 
 ---
 
-## informative 慣用語彙: グルーピングの箱 (Phase 3+)
+## informative 慣用語彙: グルーピングの箱
 
-ADR-0008 / ADR-0009 でクラウド・オンプレの「箱」をノードとして表現する方針が確定した。
+ADR-0009 と drafts/0008 (Draft) で、クラウド・オンプレの「箱」をノードとして表現する方針を立てた。箱への所属を書く `parent` はまだない ([先送りした項目](decisions/deferred.md))。事業者網の箱 (`provider-network`) は ADR-0017 で使っている。
 箱の種別も `role` が担うため、以下を慣用語彙として推奨する。CANONICAL_ROLES には含めない
 (ADR-0003 C2 のオープン語彙方針を維持)。
 

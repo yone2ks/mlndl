@@ -23,7 +23,7 @@ CANONICAL_ROLES: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 # 障害軸: 値が同じノードは同じ障害を共有しうる。
-# Phase 3+ の blast_radius クエリはこの軸を辿る候補となる。
+# 将来の blast_radius の問い合わせはこの軸を辿る候補となる (docs/decisions/deferred.md)。
 FAULT_AXIS_LABEL_KEYS: frozenset[str] = frozenset({
     "az",
     "pod",

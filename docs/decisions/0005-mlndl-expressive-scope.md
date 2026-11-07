@@ -9,6 +9,7 @@
   [ADR-0013](0013-vlan-ports-on-lag.md)、ラウンド4 Pass C (2026-10-15) — 表現の指針 (D4 補則)、`node` の持ち方 (D6)、
   SVI 規範の改訂、スコープ表の実装同期。[drafts/0014](drafts/0014-vteps.md) (2026-10-20) — D4 補則に問い 4 (方式中立) を追加。
   [ADR-0010](0010-control-plane-separation.md) (2026-11-01) — 制御プレーンを `control_plane` に分離 (D1・D3-1 の制御プレーンの行、P6、BGP unnumbered の規則)。
+  2026-11-07 — D5 の Phase の札をやめ、先送りした項目を [deferred.md](deferred.md) にまとめた。
   改訂箇所には注記を入れ、元の記述は履歴として残す。一覧は末尾の「実装同期メモ」を参照
 
 ## Context
@@ -389,6 +390,10 @@ mlndl は「VRF が存在する」「この SVI がゲートウェイである�
 | **Phase 3+** | broadcast_domain / blast_radius クエリ、ValidationPlugin 機構 | クエリ層 (側面は変わらず) |
 
 「スコープ内」と「Phase 1 実装」は別概念。Phase 2 以降のスコープ内概念を Phase 1 中に記述した場合、パーサーは `extra="forbid"` で未知フィールドとして `error` にする。
+
+> **改訂 (2026-11-07)**: Phase 1 と Phase 2 の実装は終わった。「Phase 3+」は、時期の決まらない先送り全般を指す札になっていたので、Phase の札をやめる。
+> 先送りした項目は、何が起きたら始めるか (きっかけ) と一緒に [先送りした項目](deferred.md) にまとめた。この ADR と他の ADR の本文に残る「Phase 2 で」「Phase 3+ で」は、その一覧の行に読み替える。
+> スキーマにないキーを書くと `extra="forbid"` で error になる点は変わらない。
 
 ### D6. `node` の持ち方 (ラウンド4 Pass C で追加, 2026-10-15)
 

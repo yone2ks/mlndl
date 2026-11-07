@@ -137,7 +137,7 @@ ndl_version 1.x の間は、いくつかの古い書き方を読み替えて受�
 | L3 IF | `layer3.interfaces` の要素。IP を持つ IF (routed ポート・SVI・ループバックなど) |
 | 実現 (supporting) | 下の層のものが上の層のものを支える関係。`attaches_to` で書く |
 | 所属 | あるものがどの機器のものか。`node` で書く |
-| 包含 (containment) | 論理的な箱への所属。`parent` で書く (Phase 3 以降) |
+| 包含 (containment) | 論理的な箱への所属。`parent` で書く予定 (まだ書けない。[先送りした項目](../decisions/deferred.md)) |
 | 分類 | 参照ではない属性による分類。`labels` で書く |
 | 正規形 | mlndl が読み込んだあとの形。旧形式は正規形に読み替える |
 | 通り道 | セッションのパケットが通るリンク・LAG・bridge・トンネル。`update_source` から導く |

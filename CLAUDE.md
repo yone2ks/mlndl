@@ -196,7 +196,7 @@ cumulus_linux:
 
 > **根拠: [ADR-0003](docs/decisions/0003-role-vocabulary.md) D1・D6 / [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) D1**
 
-`vswitch`/`dvswitch` は **L1 canonical roles ではない**。vSwitch はソフトウェア機能であり物理的な「箱」ではないため L1 に属さない。Phase 2 の L2 スキーマで扱う。
+`vswitch`/`dvswitch` は **L1 canonical roles ではない**。vSwitch はソフトウェア機能であり物理的な「箱」ではないため L1 に属さない。L2 で扱う（drafts/0007。ADR-0018 で `layer2.bridges` の最小の形だけ実装済み）。
 
 **L1 での表現方針**:
 
@@ -216,7 +216,7 @@ cumulus_linux:
 # ESXi の物理 NIC → ToR スイッチへの物理ケーブルは L1 links で表現
 ```
 
-`vswitch`/`dvswitch` の仮想スイッチング機能は Phase 2 L2 スキーマ (`layer2.bridges` 等) で設計予定。
+`vswitch`/`dvswitch` の仮想スイッチング機能は `layer2.bridges` の拡張として設計予定（drafts/0007、先送り）。
 
 ---
 
@@ -224,13 +224,13 @@ cumulus_linux:
 
 > **→ 詳細: [ADR-0009](docs/decisions/0009-membership-orthogonality.md) / 推奨軸名: [docs/label-vocabulary.md](docs/label-vocabulary.md)**
 
-ノードが**同時に複数の直交した軸に所属する**ことを表す key-value マップ。**Phase 1 実装済み**。
+ノードが**同時に複数の直交した軸に所属する**ことを表す key-value マップ。**実装済み**（`layer1.nodes` だけ）。
 
 ```yaml
 - id: leaf1
   role: leaf
   attaches_to: esxi-01       # Realization  — どこで動くか（物理基盤）
-  parent: pod-tokyo          # Containment  — どこに属するか（論理階層・Phase 3+）
+  parent: pod-tokyo          # Containment  — どこに属するか（論理階層・未実装。docs/decisions/deferred.md）
   labels:                    # Classification — どんな属性か（多軸）
     az: ap-northeast-1a
     tenant: acme
@@ -259,7 +259,7 @@ cumulus_linux:
 MPLS は `mpls_label` / `label_stack`、802.1Q は `vlan_id`（実装済み）、Q-in-Q は `stag_vlan_id` / `ctag_vlan_id`。
 
 **未解決**: `labels` は障害軸（`az`/`pod`/`rack`）と管理軸（`tenant`/`env`）をフラットに混在させるため、
-Phase 3+ の `blast_radius` クエリが軸の性質を区別できない。当面は `docs/label-vocabulary.md` の分類を
+将来の `blast_radius` クエリが軸の性質を区別できない。当面は `docs/label-vocabulary.md` の分類を
 informative な指針とし、必要が明確になった時点で構造化構成子に昇格させる（加算的変更）。
 
 ### 11. サイト・事業者網・回線情報（構文は足さない）
@@ -503,7 +503,7 @@ mlndl/
 │       └── exporter/
 │           ├── yaml.py
 │           ├── cytoscape.py    # ndl-viz 向け Cytoscape.js JSON
-│           └── rfc8345.py
+│           └── rfc8345.py      # 未実装（ADR-0001 D7 の予定）
 ├── tests/
 │   └── fixtures/
 │       ├── valid_l1_simple.yaml
@@ -561,19 +561,14 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 
 ---
 
-## 実装フェーズ（このリポジトリの範囲）
+## 実装の状況と先送りした項目
 
-### Phase 1（最初に着手）
-- `MLNDLTopology` pydantic v2 スキーマ（**L1 のみ**）
-- `ndl_version` フィールド + バージョン検証
-- `yaml.safe_load` + 1MB サイズ制限
-- `model_validator` でクロスフィールド参照検証（リンクが未定義インターフェースを参照していないか）
-- `exporter/yaml.py` と `exporter/cytoscape.py`（L1 部分のみ）
-- pytest fixtures YAML によるユニットテスト
-- **成果物: L1 MLMLNDL を parse・validate・export できる pip パッケージ**
-
-### Phase 2 以降（全体プランを参照）
-L2/L3/protocols スキーマ追加 → validator.py 完全実装 → broadcast_domain/blast_radius クエリ対応
+- 実装済み: L1（機器・L1 IF・リンク・LAG）、L2（VLAN・bridge の最小の形・VTEP・VXLAN・サブ IF）、L3（VRF・L3 IF・ゲートウェイ冗長・トンネル IF）、
+  制御プレーン（BGP・OSPF・IS-IS・BFD・セッション）、パーサー、バリデーター、エクスポーター（YAML・Cytoscape）
+- かつての Phase 1（L1）と Phase 2（L2 / L3 / 制御プレーン）は終わった。「Phase 3+」の札は 2026-11-07 にやめた（ADR-0005 D5 の改訂）
+- 先送りした項目（`parent`・クラウド・問い合わせ・RFC 8345 エクスポーター・ルーター ID・マルチアクセスなど）は、始めるきっかけと一緒に
+  [docs/decisions/deferred.md](docs/decisions/deferred.md) にまとめた。ADR の本文に残る「Phase 2 で」「Phase 3+ で」はその一覧の行に読み替える
+- 最初のリリースは 1.0。今の整理が終わってから出す。それまでは 1.0 の範囲内で破壊的な変更を許し、リリース後は破壊的な変更にメジャーバージョンの更新を必須とする（ADR-0010 の移行の改訂）
 
 ---
 
