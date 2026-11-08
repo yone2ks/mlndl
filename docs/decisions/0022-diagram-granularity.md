@@ -71,7 +71,7 @@ ESI の値・LACP system-id・domain_id・vPC 番号 / clag-id・ピアリンク
 
 **悪い影響 / トレードオフ:**
 
-- テナントごとに違う anycast MAC を使う運用 (少ない) は、MLNDL では書けない。上位のツール (`overrides` など) で持つ
+- テナントごとに違う anycast MAC を使う運用 (少ない) は、MLNDL では書けない。上位のツールの設定で機器の id を引いて持つ ([ADR-0024](0024-remove-node-overrides.md) で `overrides` をなくしたときに直した)
 - 既存の YAML の `anycast_mac` は error になる。リポジトリの例 (`examples/eveng-evpn-lab*.yaml`) から消した
 
 **影響を受けるコンポーネント:**

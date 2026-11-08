@@ -115,8 +115,20 @@ class L1Node(BaseModel):
     # ADR-0009: 多軸分類。任意の key-value。コアは値域・キー域を検証しない。
     # 推奨軸名: docs/label-vocabulary.md（informative）
     labels: dict[str, str] | None = None
-    overrides: dict[str, Any] | None = None  # 上位ツール向け任意上書き
+    # overrides は ADR-0024 でなくした。下流のツールの値は下流のツールの設定で機器の id を引いて持つ
     description: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_overrides(cls, data: Any) -> Any:
+        """overrides は ADR-0024 でなくした。理由と移動先を示すエラーを返す"""
+        if isinstance(data, dict) and "overrides" in data:
+            raise ValueError(
+                "layer1.nodes の overrides はなくしました。機器ごとの CPU・RAM・イメージなどは、"
+                "下流のツール (eve-lab-builder など) の設定で機器の id を引いて書きます。"
+                "人が読む補足は description に書きます (ADR-0024)"
+            )
+        return data
 
     @field_validator("attaches_to")
     @classmethod

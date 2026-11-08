@@ -110,6 +110,21 @@ class TestLinkMtuRemoved:
 
 
 # ---------------------------------------------------------------------------
+# 機器の overrides はなくした (ADR-0024)
+# ---------------------------------------------------------------------------
+
+class TestNodeOverridesRemoved:
+    def test_node_overrides_is_error_with_reason(self):
+        body = (
+            'ndl_version: "1.0"\n'
+            "layer1:\n"
+            "  nodes: [{id: spine1, overrides: {eve_ng: {cpu: 4}}}]\n"
+        )
+        with pytest.raises(Exception, match=r"overrides はなくしました.*ADR-0024"):
+            parse(body)
+
+
+# ---------------------------------------------------------------------------
 # バリデーター: Route Target フォーマット
 # ---------------------------------------------------------------------------
 

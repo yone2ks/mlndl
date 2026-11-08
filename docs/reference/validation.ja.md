@@ -107,6 +107,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | L3 IF の `fhrp` | `gateway_redundancy` |
 | `gateway_redundancy[].protocol` | `gateway_redundancy[].mode` |
 | `layer1.links[].mtu` | 書かない。MTU はインターフェースの設定 ([ADR-0020](../decisions/0020-remove-l1-link-mtu.md)) |
+| `layer1.nodes[].overrides` | 書かない。CPU・RAM・イメージなどは下流のツールの設定で機器の id を引いて書く ([ADR-0024](../decisions/0024-remove-node-overrides.md)) |
 | `layer1.lag[].type` (`lacp`) | 書かない。LAG は常に機器 1 台 ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D1) |
 | `layer1.lag[]` の `type: mlag`・`nodes`・`peer_link`・`peer_link_interface`・`domain_id`・`system_mac`・`client_lag` | 機器ごとの LAG と `layer1.ethernet_segments`。番号と MAC は書かない ([ADR-0022](../decisions/0022-diagram-granularity.md)・[ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D9) |
 | `ethernet_segments[]` の `esi`・`system_mac`・`domain_id`・`peer_link(s)` | 書かない ([ADR-0022](../decisions/0022-diagram-granularity.md)) |

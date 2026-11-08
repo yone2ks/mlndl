@@ -1,0 +1,46 @@
+# (b) overrides をなくし、下流ツール (eve-lab-builder 想定) 側の設定ファイルで
+#     機器の id を引いて上書きする形。(a) と同じラボ (spine x2 / leaf x2 / border x1)。
+#
+# mlndl の YAML には CPU / RAM / template / 管理 IP は一切書かない。
+# device_type: cumulus_linux は抽象キーのまま (CLAUDE.md §8)。
+#
+# mlndl の id は ADR-0002 の正規表現に従い安定しているので、下流ツールは id を
+# キーに自分の設定を引けばよい (この YAML の外、b_eve_lab_builder_overrides.yaml 参照)。
+
+ndl_version: "1.0"
+
+meta:
+  name: lab-overrides-b
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - {id: eve-01,  name: EVE-NG host, implementation: physical, role: hypervisor}
+
+    - {id: spine1,  role: spine,  implementation: vm, attaches_to: eve-01, device_type: cumulus_linux}
+    - {id: spine2,  role: spine,  implementation: vm, attaches_to: eve-01, device_type: cumulus_linux}
+    - {id: leaf1,   role: leaf,   implementation: vm, attaches_to: eve-01, device_type: cumulus_linux}
+    - {id: leaf2,   role: leaf,   implementation: vm, attaches_to: eve-01, device_type: cumulus_linux}
+    - {id: border1, role: border, implementation: vm, attaches_to: eve-01, device_type: cumulus_linux}
+
+  interfaces:
+    - {id: spine1-swp1,   node: spine1,  name: swp1}
+    - {id: spine1-swp2,   node: spine1,  name: swp2}
+    - {id: spine1-swp3,   node: spine1,  name: swp3}
+    - {id: spine2-swp1,   node: spine2,  name: swp1}
+    - {id: spine2-swp2,   node: spine2,  name: swp2}
+    - {id: spine2-swp3,   node: spine2,  name: swp3}
+    - {id: leaf1-swp51,   node: leaf1,   name: swp51}
+    - {id: leaf1-swp52,   node: leaf1,   name: swp52}
+    - {id: leaf2-swp51,   node: leaf2,   name: swp51}
+    - {id: leaf2-swp52,   node: leaf2,   name: swp52}
+    - {id: border1-swp51, node: border1, name: swp51}
+    - {id: border1-swp52, node: border1, name: swp52}
+
+  links:
+    - {id: link-spine1-leaf1,   endpoints: [spine1-swp1, leaf1-swp51],   link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf2,   endpoints: [spine1-swp2, leaf2-swp51],   link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-border1, endpoints: [spine1-swp3, border1-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine2-leaf1,   endpoints: [spine2-swp1, leaf1-swp52],   link_speed: 10G, link_role: underlay}
+    - {id: link-spine2-leaf2,   endpoints: [spine2-swp2, leaf2-swp52],   link_speed: 10G, link_role: underlay}
+    - {id: link-spine2-border1, endpoints: [spine2-swp3, border1-swp52], link_speed: 10G, link_role: underlay}

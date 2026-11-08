@@ -39,8 +39,9 @@ layer1:
 | `device_type` | 文字列 | | | 機種を表す抽象的なキー (`cumulus_linux` など)。EVE-NG のテンプレートや CPU 数は書かない。上位のツールが変換する |
 | `attaches_to` | 文字列 / `{node:}` / `{interface:}` | | `layer1.nodes` / `layer1.interfaces` | この機器が動く基盤。VM ならホスト。文字列で書くと `{node:}` と同じ ([README.md](README.ja.md#attaches_to-実現)) |
 | `labels` | 文字列 → 文字列 | | | 多軸の分類 ([ADR-0009](../decisions/0009-membership-orthogonality.md))。値は参照ではない。サイトは `labels: {site: tokyo}` ([ADR-0017](../decisions/0017-sites-and-wan.md)) |
-| `overrides` | マッピング | | | 上位のツールの既定値の上書き (`{eve_ng: {cpu: 4}}` など)。mlndl は中を見ない |
 | `description` | 文字列 | | | |
+
+`overrides` はなくしました。書くと error です。EVE-NG の CPU・RAM・イメージなど、下流のツールが機器ごとに変える値は、そのツールの設定で機器の `id` を引いて書きます ([ADR-0024](../decisions/0024-remove-node-overrides.md))。
 
 ### 事業者網の箱
 
