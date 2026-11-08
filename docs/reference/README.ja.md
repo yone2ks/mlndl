@@ -123,8 +123,8 @@ control_plane: {...}    # 制御プレーン: BGP・OSPF・IS-IS・BFD・セッ�
 
 ### 旧形式
 
-ndl_version 1.x の間は、いくつかの古い書き方を読み替えて受け付け、warning を出します (例: L3 IF の `interface` → `name`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members`)。
-一覧は [validation.md](validation.ja.md) の「旧形式」にあります。新しく書くときは使わないでください。
+古い書き方は読み替えず、書くと新しい書き方を示す error になります (例: L3 IF の `interface` → `name`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members`。[ADR-0025](../decisions/0025-end-grace-for-old-forms.md))。
+一覧は [validation.md](validation.ja.md) の「旧構造と廃止キー」と「旧形式」にあります。
 
 ## 用語集
 
@@ -139,6 +139,5 @@ ndl_version 1.x の間は、いくつかの古い書き方を読み替えて受�
 | 所属 | あるものがどの機器のものか。`node` で書く |
 | 包含 (containment) | 論理的な箱への所属。`parent` で書く予定 (まだ書けない。[先送りした項目](../decisions/deferred.md)) |
 | 分類 | 参照ではない属性による分類。`labels` で書く |
-| 正規形 | mlndl が読み込んだあとの形。旧形式は正規形に読み替える |
 | 通り道 | セッションのパケットが通るリンク・LAG・bridge・トンネル。`update_source` から導く |
 | トポロジー外 | このファイルに書かれていない相手 (事業者の機器など)。アドレスと AS だけで書く |

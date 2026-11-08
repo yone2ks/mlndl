@@ -46,6 +46,8 @@ layer2:
 Pass A では「任意 (書けば照合)」だったが、サブ IF (ADR-0012 D2) と揃えて書かない形に改めた (ユーザー判断)。
 ndl_version 1.x の間は旧形式として受け付け、warning を出したうえで照合する (食い違えば error。MLAG に `node` を書くのも error)。
 
+> **改訂 ([ADR-0025](0025-end-grace-for-old-forms.md), 2026-11-09)**: `node` を書くと、消すよう示す error にする。照合はしない。
+
 ### D3. LAG のメンバーを VLAN に書かない
 
 | 書き方 | Severity |

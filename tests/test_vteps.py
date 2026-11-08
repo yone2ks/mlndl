@@ -187,23 +187,24 @@ class TestChecks:
 
 
 # ---------------------------------------------------------------------------
-# 旧形式 (ndl_version 1.x の間だけ受け付ける。ADR-0014 D4)
+# 旧形式は移動先を示す error (ADR-0014 D4・ADR-0025 D1)
 # ---------------------------------------------------------------------------
 
-class TestLegacy:
-    LEGACY = "    - {id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100, vtep_source: leaf1-lo1, members: [leaf1, leaf2]}\n"
+class TestOldForms:
+    """旧形式の vtep_source / members は移動先を示す error (ADR-0025 D1)"""
 
-    def test_legacy_is_warning(self):
-        r = validate_all(_topo(MLAG_A, vxlan=self.LEGACY))
-        assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer2.vxlan[0].vtep_source"]
-        assert "layer2.vteps" in r.warnings[0].message
+    @pytest.mark.parametrize("extra,keys", [
+        ("vtep_source: leaf1-lo1, members: [leaf1, leaf2]", "vtep_source / members"),
+        ("vtep_source: leaf1-lo1", "vtep_source"),
+        ("vteps: [vtep-mlag-a], members: [leaf1]", "members"),
+    ])
+    def test_old_form_is_error(self, extra, keys):
+        with pytest.raises(pydantic.ValidationError, match=rf"L2VNI の {keys} はなくしました.*vteps: \[<VTEP の id>\]"):
+            _topo(MLAG_A, vxlan=f"    - {{id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100, {extra}}}\n")
 
-    def test_legacy_and_vteps_together_is_error(self):
-        with pytest.raises(pydantic.ValidationError, match="併記"):
-            _topo(MLAG_A, vxlan=(
-                "    - {id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100, vteps: [vtep-mlag-a],"
-                " vtep_source: leaf1-lo1}\n"))
+    def test_vteps_is_required(self):
+        with pytest.raises(pydantic.ValidationError, match="vteps: \\[<layer2.vteps の id>\\]"):
+            _topo(MLAG_A, vxlan="    - {id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100}\n")
 
 
 # ---------------------------------------------------------------------------

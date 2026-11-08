@@ -5,7 +5,7 @@
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: B 済み r4 (r3 = D8 の決定と、保留中に Accepted になった ADR との整合を反映。r4 = r3 の Pass B を反映。差分は末尾「r3 からの変更」「r2 からの変更」)
 - **関連**: ADR-0001 (attaches_to。D8 のキー規則), ADR-0002 (ID 命名 D2・D6・D7), ADR-0005 (表現スコープ D1・D3-1・D3-3・D4 補則), ADR-0006 (endpoints), ADR-0009 (labels),
-  ADR-0011 (L3 IF・トンネルの `destination_ip`), [drafts/0014](0014-vteps.md) (VTEP), [drafts/0015](0015-declarative-references.md) (Ref), [drafts/0016](0016-router-id-and-management-interface.md) (router_id)
+  ADR-0011 (L3 IF・トンネルの `destination_ip`), [ADR-0014](../0014-vteps.md) (VTEP), [ADR-0015](../0015-declarative-references.md) (Ref), [drafts/0016](0016-router-id-and-management-interface.md) (router_id)
 - **吸収する課題**: 「案P」(BGP 隣接の二重表現)
 
 ## 経緯と現在の状態

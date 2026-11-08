@@ -46,7 +46,7 @@ vlans:
 | `ethernet_segment` | id | `layer1.ethernet_segments` | Ethernet Segment。脚の全機器のポートを 1 行で書ける |
 | `native` | 真偽値 (`false`) | | trunk でこの VLAN をタグなし (native VLAN) で流すなら `true` |
 
-`node` は書きません (参照先から導く。1.x の間は書いても warning で受け付ける)。
+`node` は書きません。ノードは参照先から導きます。書くと error です ([ADR-0025](../decisions/0025-end-grace-for-old-forms.md))。
 同じ VLAN に LAG とそのメンバーを併記すると error、メンバーだけを書くと `{lag:}` を促す warning です。
 同じように、Ethernet Segment とその脚 (脚の LAG のメンバーを含む) を併記すると error、脚の一部だけを書くと `{ethernet_segment:}` を促す warning です
 (MLAG の片側にだけ VLAN を載せる誤りを拾う)。脚をすべて機器ごとに書くのは `{ethernet_segment:}` と同じ意味なので warning にしません。
@@ -78,7 +78,7 @@ bridges:
 
 ## vteps
 
-VXLAN のトンネル端点 ([ADR-0014](../decisions/drafts/0014-vteps.md))。方式名 (anycast VTEP、vPC など) は書きません。
+VXLAN のトンネル端点 ([ADR-0014](../decisions/0014-vteps.md))。方式名 (anycast VTEP、vPC など) は書きません。
 
 ```yaml
 vteps:
@@ -112,7 +112,7 @@ VNI。`type` で L2VNI と L3VNI を分けます。L2VNI と L3VNI を通して 
 | `vteps` | [id] | | `layer2.vteps` | この VNI に参加する VTEP。参加する機器は VTEP から導く |
 | `description` | 文字列 | | | |
 
-旧形式の `vtep_source` / `members` は、1.x の間は warning で受け付けます。
+旧形式の `vtep_source` / `members` は、書くと `vteps` への移動先を示す error です ([ADR-0025](../decisions/0025-end-grace-for-old-forms.md))。
 
 ### type: l3vni
 

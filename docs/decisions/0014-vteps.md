@@ -1,11 +1,11 @@
 # ADR-0014: VXLAN のトンネル端点 (VTEP)
 
-- **Status**: Draft — 実装済み (2026-10-20)。Pass B / C は未実施
+- **Status**: Accepted (2026-10-20 に実装。2026-11-09 に [ADR-0025](0025-end-grace-for-old-forms.md) D4 で Accepted にした。Pass B / C は行っていない)
 - **Date**: 2026-10-20
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author、ユーザー
 - **Pass**: A (5 エージェントの評価を 2 回取った。1 回目の推奨 `anycast_ip` にユーザーが疑問を出し、方式中立の形に改めた)
 - **Amends**: ADR-0005 D4 補則 (問い 4 を追加)、ADR-0002 D7 (推奨プレフィックス `vtep-`)
-- **関連**: ADR-0001 D8、ADR-0005 D4 補則・D6、[ADR-0011](../0011-layer3-data-plane.md) (「書けないまま残るもの」1)、[ADR-0013](../0013-vlan-ports-on-lag.md)、drafts/0010 (制御プレーン・保留中)
+- **関連**: ADR-0001 D8、ADR-0005 D4 補則・D6、[ADR-0011](0011-layer3-data-plane.md) (「書けないまま残るもの」1)、[ADR-0013](0013-vlan-ports-on-lag.md)、drafts/0010 (制御プレーン・保留中)
 
 ## Context
 
@@ -33,7 +33,7 @@ Cumulus の `clagd-vxlan-anycast-ip` など) は、機器の種類 (`device_type
 
 | 構成子 | 分けている理由 |
 |---|---|
-| `lag.type: lacp \| mlag` | `node` (単数) と `nodes` + `peer_link` で、持つフィールドが違う。[ADR-0023](../0023-per-device-lag-and-ethernet-segments.md) で LAG を機器ごとにし、`type` はなくした |
+| `lag.type: lacp \| mlag` | `node` (単数) と `nodes` + `peer_link` で、持つフィールドが違う。[ADR-0023](0023-per-device-lag-and-ethernet-segments.md) で LAG を機器ごとにし、`type` はなくした |
 | `gateway_redundancy.mode` | VRRP / HSRP は `group_id` / `vip` / `priority`、anycast gateway は `anycast_mac` |
 | `vxlan.type: l2vni \| l3vni` | `vlan` を指すか `vrf` を指すか |
 | `tunnel_interfaces.type` | カプセル化の種類 (列挙値。フィールドの形は同じなので型は分けていない) |
@@ -79,6 +79,8 @@ L3VNI には今回 `vteps` を持たせない。L3VNI が載るノードは、�
 
 `vtep_source` と `members` は ndl_version 1.x の間だけ受け付け、warning を出す (`--strict` では error)。2.0 で廃止する。
 
+> **改訂 ([ADR-0025](0025-end-grace-for-old-forms.md), 2026-11-09)**: 1.0 の前に猶予をやめた。`vtep_source` / `members` は、`layer2.vteps` と `vteps` への移動先を示す error にする。
+
 - **自動では読み替えない**。旧形式の `members` に複数ノードがあっても、それが VTEP の共有なのか、ノードごとの別の VTEP
   なのかは YAML から分からないため (dsl-designer・spec-architect)。warning に従って `layer2.vteps` を書き起こす
 - `vteps` と旧形式の併記はスキーマで error
@@ -97,7 +99,7 @@ L3VNI には今回 `vteps` を持たせない。L3VNI が載るノードは、�
 | `sources` が 1 つで `address` がなく、その L3 IF にも ip / ipv6 がない (アドレスが決まらない) | error |
 | `sources` が 1 つで、`address` とその L3 IF の ip が食い違う | warning |
 | 2 つの VTEP のアドレスが重複していないか (共有なら 1 つの VTEP にまとめる) | error |
-| MLAG ペアの片方だけが VTEP を終端している (相方の書き忘れの可能性)。[ADR-0023](../0023-per-device-lag-and-ethernet-segments.md) D7 で「Ethernet Segment の脚の機器の一部が、どの VTEP も終端していない」に付け替えた | warning |
+| MLAG ペアの片方だけが VTEP を終端している (相方の書き忘れの可能性)。[ADR-0023](0023-per-device-lag-and-ethernet-segments.md) D7 で「Ethernet Segment の脚の機器の一部が、どの VTEP も終端していない」に付け替えた | warning |
 | L2VNI の `vteps` が定義済みの VTEP か、重複していないか | error |
 | L2VNI に `vteps` も旧 `vtep_source` もない (型) | error |
 | L2VNI に参加するノードに、その VLAN のポートがない (ADR-0011 D9) | warning |

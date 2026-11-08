@@ -8,7 +8,7 @@
 - **エクスポーターは参照を解決し、ビューワは集合演算をする**。参照 (id) をたどる導出はエクスポーター (`src/mlndl/derive.py`) で行い、
   ビューワに機器上の名前 (`name`) を照合させない (`name` は参照ではない。ADR-0011 D3)
 - 導出した値は、何から導いたかを ADR で決めたものに限る。推測は出さない
-- 旧キーは ndl_version 1.x の間だけ併記し、2.0 で外す
+- 旧キーは出さない (1.x の間だけ併記するとしていた旧キーは、[ADR-0025](decisions/0025-end-grace-for-old-forms.md) D3 で 1.0 の前に外した)
 
 ## ノード
 
@@ -25,7 +25,6 @@
 | `tunnels` | このノードのトンネル IF (ADR-0011 D6) |
 | `local_as` | BGP の AS 番号 (default VRF のインスタンスのもの。なければ最初に出てくるインスタンス) |
 | `bgp_sessions` | このノードの BGP セッションすべて (相手がトポロジー外のものを含む。トンネルの `tunnels` と同じ形)。下の「BGP セッション」に `local` (この機器の端) と `peer` (相手の端) を足したもの (ADR-0010 D11) |
-| `lo_ip` / `lo_ipv6` | **旧キー (推定)**。下の「旧キー `lo_ip` / `lo_ipv6`」 |
 
 #### L3 IF (`l3_interfaces[]`)
 
@@ -37,31 +36,16 @@
 | `attaches_to` | YAML と同じ形 (`{"interface": "<L1 IF の id>"}` 等)。`unattached` なら省略 |
 | `roles` | ほかのエンティティから参照されている役割: `update_source` (routing_adjacencies) / `vtep_source` (layer2.vteps)。なければ省略。参照の逆引きで、YAML 全体をたどらずに「どの L3 IF が update-source か」を引くためのもの (ndl-viz の表示では使っていない) |
 | `ip` / `ipv6` / `vrf` / `gateway_redundancy` | L3 IF の値 |
-| `interface` / `kind` | **旧キー**。`interface` は `name` と同じ。`kind` は `attachment` から写したもの (`vlan` → `svi`、`subinterface` → `subinterface`、`unattached` → `loopback`、`l1_interface` / `lag` → `routed`) |
-| `vlan` / `subinterface` + `vlan_id` / `lag` | **旧キー**。`attaches_to` の参照先 (サブ IF はそのタグ番号も) |
 
 `unattached` はループバックとは限らない (dummy IF、L1 を書かずに書いた管理 IF、`attaches_to` の書き忘れもありうる)。
 表示で「ループバック」と決めつけず、`name` をそのまま見せる。
 
-#### 旧キー `lo_ip` / `lo_ipv6`
+#### ノードの代表アドレスは出さない
 
-MLNDL はノードの代表アドレスを定義しない (ADR-0011 D11)。ndl-viz はカードに代表アドレスを出さず、L3 IF ごとに `name` とアドレスを見せる
-(L3 IF が 1 つだけのノードは、そのアドレスを出す)。
-
-`lo_ip` / `lo_ipv6` は、旧 ndl-viz がノードごとに 1 つのアドレスを受け取るためのキーで、ループバックの IP が入ると想定していた。
-D11 で `unattached` をループバックとみなさないと決めたので、キー名と中身は一致しない。
-既存のビューワを壊さないため ndl_version 1.x の間だけ出し、2.0 で外す。冒頭の方針「推測は出さない」の、1.x 限定の例外である。
-新しい表示は使わず、`l3_interfaces[].ip` / `ipv6` を見る。
-
-選び方 (IPv4 / IPv6 で別々に。名前は見ない):
-
-1. `attachment: unattached` で、そのアドレスファミリーのアドレスを持つ L3 IF のうち、`roles` に `update_source` があるもの
-2. 1 がなければ、そのうち `roles` に `vtep_source` がないもの
-3. 2 もなければ、そのうち YAML で先に書かれたもの
-4. 該当する L3 IF がなければキーを出さない
-
-各段で候補が複数あれば、YAML で先に書かれたものを選ぶ (出力は記述順で決まる)。
-管理 IF だけが `unattached` の構成では管理アドレスが、BGP unnumbered では記述順で先のアドレスが入る。代表としては当てにならない。
+MLNDL はノードの代表アドレスを定義しない (ADR-0011 D11)。以前は旧ビューワのために `lo_ip` / `lo_ipv6` を推定で 1 つ選んで出していたが、
+[ADR-0025](decisions/0025-end-grace-for-old-forms.md) D3 で外した。代わりは置かない。
+ビューワは `l3_interfaces[]` の `name` / `ip` / `ipv6` / `roles` を見て、何を見せるかを自分で決める
+(ndl-viz は L3 IF ごとに `name` とアドレスを見せ、L3 IF が 1 つだけのノードはそのアドレスを出す)。
 
 ### `type: vlan`
 

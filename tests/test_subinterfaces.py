@@ -204,9 +204,10 @@ class TestExport:
         assert r1["subinterfaces"] == [
             {"id": "subif-r1-eth0-10", "parent": "r1-eth0", "vlan_id": 10, "name": "eth0.10"}
         ]
-        kinds = {x["interface"]: x for x in r1["l3_interfaces"]}
-        assert kinds["eth0.10"]["kind"] == "subinterface" and kinds["eth0.10"]["vlan_id"] == 10
-        assert kinds["bond0"]["kind"] == "routed" and kinds["bond0"]["lag"] == "lag-r1-bond0"
+        ifs = {x["name"]: x for x in r1["l3_interfaces"]}
+        assert ifs["eth0.10"]["attachment"] == "subinterface"
+        assert ifs["eth0.10"]["attaches_to"] == {"subinterface": "subif-r1-eth0-10"}
+        assert ifs["bond0"]["attachment"] == "lag" and ifs["bond0"]["attaches_to"] == {"lag": "lag-r1-bond0"}
 
     def test_cytoscape_segment_subif_on_its_node(self):
         out = cytoscape.export(_topo(_subifs(
@@ -226,29 +227,24 @@ class TestExport:
 
 
 # ---------------------------------------------------------------------------
-# 旧形式 (ndl_version 1.x の間だけ受け付ける。ADR-0001 D8)
+# 旧形式は正しいキーを示す error (ADR-0001 D8・ADR-0025 D1)
 # ---------------------------------------------------------------------------
 
-class TestLegacyInterfaceKey:
+class TestOldInterfaceKey:
+    """{interface: <LAG / サブ IF の id>} は読み替えず、正しいキーを示す error (ADR-0025 D1)"""
+
     def test_subif_on_lag_via_interface_key(self):
-        r = validate_all(_topo(_subifs(
+        errs = _errors(_subifs(
             "    - {id: subif-r1-bond0-10, attaches_to: {interface: lag-r1-bond0}, vlan_id: 10}\n"
-        )))
-        assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer2.subinterfaces[0].attaches_to.interface"]
-        assert "{lag: lag-r1-bond0}" in r.warnings[0].message
+        ))
+        assert len(errs) == 1 and errs[0].startswith("layer2.subinterfaces[0].attaches_to.interface")
+        assert "{lag: lag-r1-bond0} と書いてください" in errs[0]
 
     @pytest.mark.parametrize("ref,key", [("subif-r1-eth0-10", "subinterface"), ("lag-r1-bond0", "lag")])
     def test_l3_via_interface_key(self, ref, key):
-        r = validate_all(_topo(_subifs(S10, l3=(
-            f"    - {{id: r1-x, node: r1, name: x, attaches_to: {{interface: {ref}}}}}\n"
-        ))))
-        assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer3.interfaces[0].attaches_to.interface"]
-        assert f"{{{key}: {ref}}}" in r.warnings[0].message
-
-    def test_legacy_reference_still_checks_node(self):
         errs = _errors(_subifs(S10, l3=(
-            "    - {id: r2-x, node: r2, name: x, attaches_to: {interface: subif-r1-eth0-10}}\n"
+            f"    - {{id: r1-x, node: r1, name: x, attaches_to: {{interface: {ref}}}}}\n"
         )))
-        assert any("サブインターフェース" in e and "r2" in e for e in errs)
+        assert len(errs) == 1 and errs[0].startswith("layer3.interfaces[0].attaches_to.interface")
+        assert f"{{{key}: {ref}}} と書いてください" in errs[0] and "attaches_to のキー" in errs[0]
+

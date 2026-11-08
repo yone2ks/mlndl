@@ -130,45 +130,26 @@ class TestSviReference:
         assert "mode に改名" in msg
 
 
-class TestLegacyInterfaceKey:
-    """旧形式は ndl_version 1.x の間だけ受け付け、新形式に読み替えて warning を出す (ADR-0011 D10)"""
+class TestOldFormsAreErrors:
+    """旧形式は読み替えず、移動先を示す error にする (ADR-0025 D1)"""
 
-    def test_interface_key_becomes_name(self):
-        t = _topo(_l3("    - {id: s1, node: leaf1, interface: swp2, attaches_to: {interface: leaf1-swp2}}\n"))
-        assert t.layer3.interfaces[0].name == "swp2"
-        r = validate_all(t)
-        assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer3.interfaces[0].name"]
-        assert "name に改名" in r.warnings[0].message
+    def test_interface_key_is_error(self):
+        msg = _parse_error(_l3("    - {id: s1, node: leaf1, interface: swp2, attaches_to: {interface: leaf1-swp2}}\n"))
+        assert "interface はなくしました" in msg and "name" in msg and "ADR-0025" in msg
 
-    def test_shorthand_becomes_vlan_reference(self):
-        t = _topo(_l3("    - {id: s1, node: leaf1, interface: vlan-100}\n"))
-        iface = t.layer3.interfaces[0]
-        assert (iface.name, iface.attaches_to.kind, iface.attaches_to.target) == ("vlan-100", "vlan", "vlan-100")
-        r = validate_all(t)
-        assert r.errors == [] and len(r.warnings) == 1
-        assert "attaches_to: {vlan: vlan-100}" in r.warnings[0].message
+    def test_shorthand_is_error_with_move(self):
+        msg = _parse_error(_l3("    - {id: s1, node: leaf1, interface: vlan-100}\n"))
+        assert "短縮形 interface: vlan-100 はなくしました" in msg
+        assert "attaches_to: {vlan: vlan-100}" in msg
 
-    def test_shorthand_to_undefined_vlan_is_error(self):
-        errs = _errors(_l3("    - {id: s1, node: leaf1, interface: vlan-999}\n"))
-        assert len(errs) == 1 and "未定義の VLAN 'vlan-999'" in errs[0]
-
-    def test_interface_key_for_vlan_is_warning(self):
-        r = validate_all(_topo(_l3("    - {id: s1, node: leaf1, name: Vlan100, attaches_to: {interface: vlan-100}}\n")))
-        assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer3.interfaces[0].attaches_to.interface"]
+    def test_interface_key_for_vlan_is_error(self):
+        errs = _errors(_l3("    - {id: s1, node: leaf1, name: Vlan100, attaches_to: {interface: vlan-100}}\n"))
+        assert len(errs) == 1
+        assert "{interface:} は L1 インターフェース専用です" in errs[0] and "{vlan: vlan-100}" in errs[0]
 
     def test_both_interface_and_name_is_error(self):
         msg = _parse_error(_l3("    - {id: s1, node: leaf1, interface: swp2, name: swp2}\n"))
-        assert "name だけ" in msg
-
-    def test_export_writes_new_form(self):
-        """エクスポーターは新形式で書き出すので、旧形式の移行にも使える"""
-        out = yaml_exporter.export(_topo(_l3("    - {id: s1, node: leaf1, interface: vlan-100}\n")))
-        assert "interface: vlan-100" not in out
-        assert "name: vlan-100" in out and "vlan: vlan-100" in out
-        r = validate_all(parse(out))
-        assert r.errors == [] and r.warnings == []
+        assert "interface はなくしました" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -202,15 +183,6 @@ layer3:
         # VRF → L3VNI 方向と L3VNI → VRF 方向を、それぞれ独立に検出すること
         assert {"layer3.vrfs[0].l3vni", "layer3.vrfs[1].l3vni"} <= paths
         assert {"layer2.vxlan[0].vrf", "layer2.vxlan[1].vrf"} <= paths
-
-    def test_legacy_vtep_source_node_not_in_members(self):
-        """旧形式 (ADR-0014 D4) でも従来の検査は働く"""
-        body = _l3("    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}\n").replace(
-            "layer3:",
-            "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,"
-            " vtep_source: leaf2-lo, members: [leaf1]}\nlayer3:",
-        )
-        assert any("members に含まれていません" in e for e in _errors(body))
 
 
 # ---------------------------------------------------------------------------
@@ -369,10 +341,10 @@ class TestExport:
         ))
         out = json.loads(cytoscape.export_json(t))
         leaf1 = next(n["data"] for n in out["nodes"] if n["data"]["id"] == "leaf1")
-        assert leaf1["lo_ip"] == "10.0.0.1/32"
-        assert leaf1["lo_ipv6"] == "2001:db8::1/128"
-        svi = next(x for x in leaf1["l3_interfaces"] if x["interface"] == "Vlan100")
-        assert svi["kind"] == "svi" and svi["vlan"] == "vlan-100"
+        lo = next(x for x in leaf1["l3_interfaces"] if x["name"] == "lo")
+        assert (lo["ip"], lo["ipv6"]) == ("10.0.0.1/32", "2001:db8::1/128")
+        svi = next(x for x in leaf1["l3_interfaces"] if x["name"] == "Vlan100")
+        assert svi["attachment"] == "vlan" and svi["attaches_to"] == {"vlan": "vlan-100"}
         vlan = next(n["data"] for n in out["nodes"] if n["data"]["id"] == "vlan-100")
         assert vlan["subnet"] == "192.168.100.0/24"
         assert vlan["subnet_v6"] == "2001:db8:100::/64"
@@ -392,22 +364,11 @@ class TestExport:
         assert {k: v["attachment"] for k, v in ifs.items()} == {"a": "unattached", "b": "l1_interface", "c": "vlan"}
         assert ifs["b"]["attaches_to"] == {"interface": "leaf1-swp1"} and "attaches_to" not in ifs["a"]
         assert ifs["b"]["name"] == "loopback9"
-        # 旧キーは分類から写す (1.x の間だけ)
-        assert {k: (v["interface"], v["kind"]) for k, v in ifs.items()} == {
-            "a": ("system", "loopback"), "b": ("loopback9", "routed"), "c": ("Vlan100", "svi")}
+        # 旧キー (interface / kind / vlan / lag / subinterface) は出さない (ADR-0025 D3)
+        assert not any(k in v for v in ifs.values() for k in ("interface", "kind", "vlan", "lag", "subinterface"))
 
-    def test_attachment_reads_legacy_interface_key_by_target(self):
-        """旧形式 {interface: <LAG の id>} は参照先の種類で読む (ADR-0011 D10)"""
-        body = _l3("    - {id: po1, node: leaf1, name: Port-channel1, ip: 10.250.0.1/31,"
-                   " attaches_to: {interface: lag-leaf1-po1}}\n").replace(
-            "    - {id: leaf2-swp1, node: leaf2, name: swp1}\n",
-            "    - {id: leaf2-swp1, node: leaf2, name: swp1}\n"
-            "  lag: [{id: lag-leaf1-po1, node: leaf1, members: [leaf1-swp2]}]\n")
-        (entry,) = self._leaf1(_topo(body))["l3_interfaces"]
-        assert entry["attachment"] == "lag"
-
-    def test_roles_and_legacy_lo_ip(self):
-        """役割は参照から導く。旧 lo_ip (互換値) は update_source → VTEP の source 以外 → 記述順で選ぶ"""
+    def test_roles_without_representative_address(self):
+        """役割は参照から導く。ノードの代表アドレス (旧 lo_ip / lo_ipv6) は推定しない (ADR-0011 D11・ADR-0025 D3)"""
         body = _l3(
             "    - {id: leaf1-lo1, node: leaf1, name: loopback1, ip: 10.2.0.11/32}\n"     # VTEP 用 (先に書く)
             "    - {id: leaf1-lo0, node: leaf1, name: loopback0, ip: 10.1.0.11/32}\n"     # BGP の update_source
@@ -421,16 +382,7 @@ class TestExport:
         leaf1 = self._leaf1(_topo(body))
         roles = {x["id"]: x.get("roles") for x in leaf1["l3_interfaces"]}
         assert roles == {"leaf1-lo1": ["vtep_source"], "leaf1-lo0": ["update_source"]}
-        assert leaf1["lo_ip"] == "10.1.0.11/32"
-        # update_source がなければ、VTEP の source ではないものを選ぶ
-        no_adj = body[:body.index("control_plane:")]
-        assert self._leaf1(_topo(no_adj))["lo_ip"] == "10.1.0.11/32"
-
-    def test_no_legacy_lo_ip_without_unattached(self):
-        """下位の IF に載る L3 IF だけなら旧 lo_ip は出さない (名前が lo でも)"""
-        t = _topo(_l3("    - {id: x, node: leaf1, name: lo1, ip: 10.9.0.1/31, attaches_to: {interface: leaf1-swp1}}\n"))
-        leaf1 = self._leaf1(t)
-        assert "lo_ip" not in leaf1 and leaf1["l3_interfaces"][0]["attachment"] == "l1_interface"
+        assert "lo_ip" not in leaf1 and "lo_ipv6" not in leaf1
 
     def test_cytoscape_derives_one_tunnel_edge_per_pair(self):
         out = cytoscape.export(_topo(_tun(T1, T2)))

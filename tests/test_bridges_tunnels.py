@@ -164,11 +164,12 @@ class TestChecks:
         (msg,) = _msgs(_topo(("update_source: tunnel-fukuoka-tokyo}", "update_source: fukuoka-rtr-inet}")))
         assert "to 側の 'fukuoka-rtr-inet' はトンネル IF ではありません" in msg
 
-    def test_ospf_mismatch_is_warning(self):
+    def test_ospf_mismatch_is_error(self):
+        """OSPF / IS-IS の食い違いも BGP と同じく error (ADR-0018 D4・ADR-0025 D2)"""
         topo = _topo(NO_BRIDGE)
-        assert [m for m in _msgs(topo) if "ospf" in m or "[2]" in m] == []
-        (warning,) = [m for m in _msgs(topo, "warning") if m.startswith("control_plane.routing_neighbors[2]")]
-        assert "両端の interface から導いた通り道が食い違います" in warning
+        (error,) = [m for m in _msgs(topo) if m.startswith("control_plane.routing_neighbors[2]")]
+        assert "両端の interface から導いた通り道が食い違います" in error and "(c) トンネル" in error
+        assert not any(m.startswith("control_plane.routing_neighbors[2]") for m in _msgs(topo, "warning"))
 
     def test_isis_over_bridge(self):
         topo = _topo(
@@ -215,7 +216,7 @@ class TestChecks:
     def test_wrong_key(self):
         msgs = _msgs(_topo((PORTS, "        - {lag: net-wideether-tokyo}\n        - {interface: net-wideether-osaka}\n")))
         (msg,) = [m for m in msgs if m.startswith("layer2.bridges")]   # 届かないので通り道の食い違いも出る
-        assert "{interface: net-wideether-tokyo} の誤りではありませんか" in msg
+        assert "{interface: net-wideether-tokyo} と書いてください" in msg
 
     def test_one_port_is_warning(self):
         topo = _topo((PORTS, "        - {interface: net-wideether-tokyo}\n"))

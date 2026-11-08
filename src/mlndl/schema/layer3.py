@@ -2,7 +2,7 @@
 
 設計決定:
 - ADR-0011 D3: 機器上の名前は name、参照は attaches_to だけ。SVI は attaches_to: {vlan: <VLAN id>}。
-  旧 `interface` キーと短縮形 `interface: vlan-N` は ndl_version 1.x の間だけ受け付ける (D10)
+  旧 `interface` キーと短縮形 `interface: vlan-N` は移動先を示すエラーにする (ADR-0025 D1)
 - ADR-0011 D4: fhrp → gateway_redundancy。mode を discriminator とする Tagged Union
 - ADR-0011 D5: ip は IPv4、ipv6 は IPv6。いずれも単数
 - ADR-0011 D6: トンネルは自己完結した TunnelInterface で表現する
@@ -15,12 +15,12 @@ import re
 from ipaddress import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .layer1 import AttachesTo, AttachesToObj, restrict_attach_keys
 from .refs import Ref
 
-# 旧形式 (ADR-0011 D10): `interface` がこの形で attaches_to がないものは、VLAN を指す短縮形だった
+# 旧形式: `interface` がこの形で attaches_to がないものは、VLAN を指す短縮形だった (ADR-0011 D10・ADR-0025 D1)
 VLAN_SHORTHAND = re.compile(r"^vlan-\d+$")
 
 # L3Interface の attaches_to に書けるキー (ADR-0001 D8)
@@ -145,8 +145,7 @@ class L3Interface(BaseModel):
     - attaches_to: 参照の唯一の手段。参照先の種類をキーで示す (ADR-0001 D8)。
       {interface: <L1 IF>} / {lag: <LAG>} / {vlan: <VLAN>} / {subinterface: <サブ IF>}。
       ループバックのように基盤を持たない L3 IF では省略する
-    - 旧形式 (`interface` キー、短縮形 `interface: vlan-N`) は ndl_version 1.x の間だけ受け付け、
-      新形式に読み替える。読み替えた内容は deprecations に残し、validator が warning にする (ADR-0011 D10)
+    - 旧形式 (`interface` キー、短縮形 `interface: vlan-N`) は移動先を示すエラーにする。読み替えない (ADR-0025 D1)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -161,19 +160,13 @@ class L3Interface(BaseModel):
     gateway_redundancy: list[GatewayRedundancy] = []
     description: str | None = None
 
-    _deprecations: list[tuple[str, str]] = PrivateAttr(default_factory=list)
-
-    @model_validator(mode="wrap")
+    @model_validator(mode="before")
     @classmethod
-    def migrate_legacy(cls, data: Any, handler: Any) -> "L3Interface":
-        """廃止キーにはエラーを返し、旧形式は新形式に読み替える (ADR-0011 D10)"""
-        notes: list[tuple[str, str]] = []
+    def reject_old_forms(cls, data: Any) -> Any:
+        """廃止したキーと旧形式に、移動先を示すエラーを返す (ADR-0011 D10・ADR-0025 D1)"""
         if isinstance(data, dict):
             _reject_removed_keys(data)
-            data, notes = _migrate_interface_key(data)
-        obj = handler(data)
-        obj._deprecations = notes
-        return obj
+        return data
 
     @field_validator("attaches_to", mode="before")
     @classmethod
@@ -195,19 +188,26 @@ class L3Interface(BaseModel):
     def ip_is_ipv4(cls, v: Any) -> Any:
         return _reject_ipv6_in_ip(v)
 
-    @property
-    def deprecations(self) -> list[tuple[str, str]]:
-        """旧形式から読み替えた箇所 (フィールド名, メッセージ)"""
-        return list(self._deprecations)
-
     def attachment_ref(self) -> str | None:
         """attaches_to が指す ID (なければ None)"""
         return self.attaches_to.target if self.attaches_to is not None else None
 
 
 def _reject_removed_keys(data: dict) -> None:
-    """ADR-0011 で廃止したキーに、移動先を示すエラーを返す"""
+    """なくしたキー (ADR-0011 D10) と旧形式の interface キー (ADR-0025 D1) に、移動先を示すエラーを返す"""
     problems = []
+    if "interface" in data:
+        legacy = data["interface"]
+        if data.get("attaches_to") is None and isinstance(legacy, str) and VLAN_SHORTHAND.match(legacy):
+            problems.append(
+                f"L3 IF の短縮形 interface: {legacy} はなくしました。name: <機器上の名前> と"
+                f" attaches_to: {{vlan: {legacy}}} に書き換えてください (ADR-0011 D3・ADR-0025)"
+            )
+        else:
+            problems.append(
+                "L3 IF の interface はなくしました。機器上の名前は name に書き、L1 IF などへの参照は"
+                " attaches_to: {interface: <L1 IF の id>} のように書きます (ADR-0011 D3・ADR-0025)"
+            )
     if "vlan" in data:
         problems.append(
             "vlan は廃止されました。SVI は attaches_to: {vlan: <VLAN id>} で書いてください (ADR-0011 D3)"
@@ -223,32 +223,6 @@ def _reject_removed_keys(data: dict) -> None:
             break
     if problems:
         raise ValueError(" / ".join(problems))
-
-
-def _migrate_interface_key(data: dict) -> tuple[dict, list[tuple[str, str]]]:
-    """旧 `interface` キーを name に読み替える。短縮形 interface: vlan-N は VLAN 参照も補う"""
-    if "interface" not in data:
-        return data, []
-    if "name" in data:
-        raise ValueError(
-            "interface と name の両方が書かれています。interface は name に改名されたので、"
-            "name だけを書いてください (ADR-0011 D3)"
-        )
-    data = dict(data)
-    legacy = data.pop("interface")
-    data["name"] = legacy
-    if data.get("attaches_to") is None and isinstance(legacy, str) and VLAN_SHORTHAND.match(legacy):
-        data["attaches_to"] = {"vlan": legacy}
-        return data, [(
-            "name",
-            f"短縮形 interface: {legacy} は廃止予定です。name: <機器上の名前> と"
-            f" attaches_to: {{vlan: {legacy}}} に書き換えてください (ADR-0011 D3・D10)",
-        )]
-    return data, [(
-        "name",
-        "interface は name に改名されました (機器上の名前)。interface: を name: に"
-        "書き換えてください (ADR-0011 D3・D10)",
-    )]
 
 
 # ---------------------------------------------------------------------------

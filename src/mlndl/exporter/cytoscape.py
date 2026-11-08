@@ -58,29 +58,9 @@ def _interface_nodes(topology: MLNDLTopology) -> dict[str, list[str]]:
     return nodes
 
 
-# 旧 kind (ndl_version 1.x の間だけ併記)。分類 (ADR-0011 D11) から写し、name では判定しない
-_LEGACY_KIND = {"l1_interface": "routed", "lag": "routed", "vlan": "svi",
-                "subinterface": "subinterface", "unattached": "loopback"}
-
-
-def _legacy_lo(cands: list, roles: dict[str, list[str]]):
-    """旧 lo_ip / lo_ipv6 にする L3 IF (旧ビューワのための互換値。1.x 限定の推定。ADR-0011 D11)
-
-    unattached の L3 IF のうち、update_source に使われているもの → VTEP の source ではないもの → 先に書かれたもの。
-    選び方は docs/exporter-cytoscape.md の「旧キー lo_ip / lo_ipv6」と合わせること
-    """
-    for pick in (lambda i: "update_source" in roles.get(i.id, []),
-                 lambda i: "vtep_source" not in roles.get(i.id, []),
-                 lambda i: True):
-        for iface in cands:
-            if pick(iface):
-                return iface
-    return None
-
-
 def _port_nodes(pr, interface_nodes: dict[str, list[str]]) -> list[str]:
-    """PortRef が載るノード群。ノードは interface / lag から導出する (ADR-0013 D2)"""
-    return interface_nodes.get(pr.target) or ([pr.node] if pr.node else [])
+    """PortRef が載るノード群。ノードは interface / lag / ethernet_segment から導出する (ADR-0013 D2)"""
+    return interface_nodes.get(pr.target, [])
 
 
 def _port_names(pr, interface_nodes, if_to_name, segment_members) -> list[tuple[str, str]]:
@@ -92,8 +72,7 @@ def _port_names(pr, interface_nodes, if_to_name, segment_members) -> list[tuple[
     out = []
     for t in targets:
         name = if_to_name.get(t, t)
-        nodes = interface_nodes.get(t) or ([pr.node] if pr.node and pr.kind != "ethernet_segment" else [])
-        out.extend((nid, name) for nid in nodes)
+        out.extend((nid, name) for nid in interface_nodes.get(t, []))
     return out
 
 
@@ -145,14 +124,11 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     # L3 情報をノード別に集約。IP は構造化配列 l3_interfaces として出力する
     # （旧 "ifname:ip" 文字列パッキングは廃止 — lossy・パース脆弱のため）
     # ip / ipv6 は IPv4Interface / IPv6Interface なので、JSON 化のため str() する (ADR-0011 D5)
-    lo_ip:    dict[str, str]         = {}
-    lo_ipv6:  dict[str, str]         = {}
     node_l3ifs: dict[str, list[dict]] = defaultdict(list)
     node_vrfs: dict[str, list[str]]  = defaultdict(list)
     node_tunnels: dict[str, list[dict]] = defaultdict(list)
     node_subifs: dict[str, list[dict]] = defaultdict(list)
     node_vteps: dict[str, list[dict]] = defaultdict(list)
-    vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
 
     # サブ IF は親 (L1 IF / LAG) のノードに埋め込む (ADR-0012)
     parent_nodes = _interface_nodes(topology)
@@ -163,47 +139,27 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         if si.description: entry["description"] = si.description
         for nid in parent_nodes.get(si.attaches_to.target, []):
             node_subifs[nid].append(entry)
-    lag_ids = {lag.id for lag in topology.layer1.lag}
     attachments = l3_attachments(topology)
     roles = l3_roles(topology)
     if topology.layer3:
         for iface in topology.layer3.interfaces:
             if iface.ip or iface.ipv6:
-                ref = iface.attachment_ref()
-                vlan = ref if ref in vlan_ids else None
-                subif = subifs.get(ref)
                 attachment = attachments[iface.id]
                 # 分類と役割は参照から決める (ADR-0011 D11)。attaches_to は YAML と同じ形で出す
                 entry: dict = {"id": iface.id, "name": iface.name, "attachment": attachment}
                 if iface.attaches_to is not None:
                     entry["attaches_to"] = {iface.attaches_to.kind: iface.attaches_to.target}
                 if roles.get(iface.id): entry["roles"] = roles[iface.id]
-                # 旧キー (1.x の間だけ): interface (= name)、kind
-                entry["interface"] = iface.name
-                entry["kind"] = _LEGACY_KIND[attachment]
                 if iface.ip:   entry["ip"]   = str(iface.ip)
                 if iface.ipv6: entry["ipv6"] = str(iface.ipv6)
                 if iface.vrf:  entry["vrf"]  = iface.vrf
-                if vlan:       entry["vlan"] = vlan
                 if iface.description: entry["description"] = iface.description
-                if subif:
-                    entry["subinterface"] = subif.id
-                    entry["vlan_id"]      = subif.vlan_id
-                if ref in lag_ids: entry["lag"] = ref
                 gws = [gw.model_dump(mode="json", exclude_none=True)
                        for gw in iface.gateway_redundancy]
                 if gws:        entry["gateway_redundancy"] = gws
                 node_l3ifs[iface.node].append(entry)
             if iface.vrf and iface.vrf not in node_vrfs[iface.node]:
                 node_vrfs[iface.node].append(iface.vrf)
-        # 旧 lo_ip / lo_ipv6 (1.x の間だけ): 互換値として 1 つ選ぶ。名前では選ばない
-        for nid in {i.node for i in topology.layer3.interfaces}:
-            for fld, out in (("ip", lo_ip), ("ipv6", lo_ipv6)):
-                cands = [i for i in topology.layer3.interfaces
-                         if i.node == nid and attachments[i.id] == "unattached" and getattr(i, fld) is not None]
-                rep = _legacy_lo(cands, roles)
-                if rep is not None:
-                    out[nid] = str(getattr(rep, fld))
         for tun in topology.layer3.tunnel_interfaces:
             node_tunnels[tun.node].append(
                 tun.model_dump(mode="json", exclude_none=True, exclude={"node"})
@@ -259,8 +215,6 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         if node.description:    data["description"] = node.description
 
         # L3 データを埋め込む（overlay 有効時に参照）
-        if lo_ip.get(node.id):        data["lo_ip"]          = lo_ip[node.id]
-        if lo_ipv6.get(node.id):      data["lo_ipv6"]        = lo_ipv6[node.id]
         if node_tunnels[node.id]:     data["tunnels"]        = node_tunnels[node.id]
         if node_subifs[node.id]:      data["subinterfaces"]  = node_subifs[node.id]
         if node_vteps[node.id]:       data["vteps"]          = node_vteps[node.id]

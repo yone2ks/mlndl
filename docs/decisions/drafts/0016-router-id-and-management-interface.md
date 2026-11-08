@@ -5,7 +5,7 @@
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author
 - **Pass**: A (初回策定)
 - **関連**: [ADR-0011](../0011-layer3-data-plane.md) D9・D11、[ADR-0010](../0010-control-plane-separation.md) D5・D9 (2026-11-01 に Accepted、実装は未着手)、
-  ADR-0005 (D3-1 (b)・D4・D4 補則 問い 4)、ADR-0009 (labels は非参照)、[drafts/0015](0015-declarative-references.md) (Ref)、
+  ADR-0005 (D3-1 (b)・D4・D4 補則 問い 4)、ADR-0009 (labels は非参照)、[ADR-0015](../0015-declarative-references.md) (Ref)、
   [docs/exporter-cytoscape.md](../../exporter-cytoscape.md)
 
 ## Context

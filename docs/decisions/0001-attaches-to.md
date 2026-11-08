@@ -183,6 +183,7 @@ D2「キー名が discriminator」に反する、(2) YAML を見ても何を指�
 **旧形式の扱い**: `{interface: X}` で X が LAG / VLAN / サブ IF を指す書き方は、ndl_version 1.x の間だけ受け付ける。
 validator が X の種類を引き、`{lag: X}` などに書き換えるよう **warning** を出す (`--strict` では error)。
 この読み替えは ID のグローバル一意性 (ADR-0002 D5) に頼るので、L1 IF / LAG / VLAN / サブ IF の ID 重複は引き続き error。
+**改訂 ([ADR-0025](0025-end-grace-for-old-forms.md) D1, 2026-11-09)**: 読み替えをやめた。X の種類を引いて、`{lag: X}` などと書くよう示す **error** にする。
 
 キーと ID の種類が食い違う参照 (例: `{lag: vlan-100}`) は未定義の参照として error にし、正しいキーをメッセージで示す。
 
