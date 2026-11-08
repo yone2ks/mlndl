@@ -7,7 +7,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | 重さ | 意味 | 例 |
 |---|---|---|
 | **error** | 正しい MLNDL ではない。上位のツールは読み込みを止めてよい | 参照先がない、id の文法違反、IP の形式違反 |
-| **warning** | 正しいが、誤りの疑いがあるか、推奨から外れている | 推奨プレフィックスに従わない id、旧形式の書き方 |
+| **warning** | 正しいが、誤りの疑いがあるか、推奨から外れている | 推奨プレフィックスに従わない id、LAG のメンバーだけを VLAN に書く |
 | **info** | 正しく、知らせておくだけのこと | 対向がトポロジー内にあるのに逆向きのトンネルがない |
 
 `python -m mlndl validate --strict` は warning を error として扱います。決め方は [ADR-0002](../decisions/0002-id-naming-convention.md) D8 にあります。
@@ -87,7 +87,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | **インスタンス**: `instance` を省略できるのは、同じ type のインスタンスが 1 つのときだけ。端の機器がインスタンスの `nodes` にある | error |
 | **端の機器**: `update_source` / `interface` の機器が端の `node` と一致する。`update_source` の VRF がインスタンスの VRF と一致する | error |
 | **通り道 (BGP)**: 両端から導いた通り道が食い違わない。トランスポートのアドレスファミリーが一致する | error |
-| **通り道 (OSPF / IS-IS)**: 両端から導いた通り道が食い違わない (ndl_version 2.0 で error にする) | warning |
+| **通り道 (OSPF / IS-IS)**: 両端から導いた通り道が食い違わない (BGP と同じ。[ADR-0025](../decisions/0025-end-grace-for-old-forms.md) D2) | error |
 | **重複**: 同じ両端のセッションが 2 つない | error |
 | **AS**: `route_reflector_client` は iBGP のセッションにだけ書ける。同じ機器・同じ VRF で AS は 1 つ。同じ VRF に BGP のインスタンスは 1 つ | error |
 | **BFD**: `bfd: true` のセッションの両端が、BFD のタイマーの `nodes` にある | error |
@@ -116,7 +116,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 
 ## 旧形式
 
-ndl_version 1.x の間は読み替えて受け付け、warning を出すもの。
+以前は読み替えて warning を出していたもの。今は読み替えず、新しい書き方を示す error にします ([ADR-0025](../decisions/0025-end-grace-for-old-forms.md))。
 
 | 旧形式 | 新しい書き方 |
 |---|---|
@@ -124,4 +124,4 @@ ndl_version 1.x の間は読み替えて受け付け、warning を出すもの�
 | L3 IF の短縮形 `interface: vlan-100` | `name: Vlan100` と `attaches_to: {vlan: vlan-100}` |
 | `attaches_to: {interface: <LAG / VLAN / サブ IF の id>}` | `{lag:}` / `{vlan:}` / `{subinterface:}` ([ADR-0001](../decisions/0001-attaches-to.md) D8) |
 | VLAN のポートの `node` | 書かない。参照先から導く ([ADR-0013](../decisions/0013-vlan-ports-on-lag.md)) |
-| L2VNI の `vtep_source` / `members` | `layer2.vteps` と L2VNI の `vteps` ([ADR-0014](../decisions/drafts/0014-vteps.md)) |
+| L2VNI の `vtep_source` / `members` | `layer2.vteps` と L2VNI の `vteps` ([ADR-0014](../decisions/0014-vteps.md)) |

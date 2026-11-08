@@ -1132,7 +1132,7 @@
     },
     "L2VxLAN": {
       "additionalProperties": false,
-      "description": "L2VNI — VLAN を VxLAN セグメントにマッピング\n\nvteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014\nvtep_source / members: 旧形式。ndl_version 1.x の間だけ受け付け、validator が warning を出す",
+      "description": "L2VNI — VLAN を VxLAN セグメントにマッピング\n\nvteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014\n旧形式の vtep_source / members は移動先を示すエラーにする (ADR-0025 D1)",
       "properties": {
         "id": {
           "title": "Id",
@@ -1159,33 +1159,6 @@
           "title": "Vteps",
           "type": "array"
         },
-        "vtep_source": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Vtep Source"
-        },
-        "members": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Members"
-        },
         "description": {
           "anyOf": [
             {
@@ -1210,7 +1183,7 @@
     },
     "L3Interface": {
       "additionalProperties": false,
-      "description": "Layer 3 インターフェース（ループバック / SVI / ルーテッドポート / サブ IF / routed LAG）\n\n- name: 機器上の名前 (swp51 / Vlan100 / lo)。参照ではない\n- attaches_to: 参照の唯一の手段。参照先の種類をキーで示す (ADR-0001 D8)。\n  {interface: <L1 IF>} / {lag: <LAG>} / {vlan: <VLAN>} / {subinterface: <サブ IF>}。\n  ループバックのように基盤を持たない L3 IF では省略する\n- 旧形式 (`interface` キー、短縮形 `interface: vlan-N`) は ndl_version 1.x の間だけ受け付け、\n  新形式に読み替える。読み替えた内容は deprecations に残し、validator が warning にする (ADR-0011 D10)",
+      "description": "Layer 3 インターフェース（ループバック / SVI / ルーテッドポート / サブ IF / routed LAG）\n\n- name: 機器上の名前 (swp51 / Vlan100 / lo)。参照ではない\n- attaches_to: 参照の唯一の手段。参照先の種類をキーで示す (ADR-0001 D8)。\n  {interface: <L1 IF>} / {lag: <LAG>} / {vlan: <VLAN>} / {subinterface: <サブ IF>}。\n  ループバックのように基盤を持たない L3 IF では省略する\n- 旧形式 (`interface` キー、短縮形 `interface: vlan-N`) は移動先を示すエラーにする。読み替えない (ADR-0025 D1)",
       "properties": {
         "id": {
           "title": "Id",
@@ -1670,7 +1643,7 @@
     },
     "PortRef": {
       "additionalProperties": false,
-      "description": "VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）\n\ninterface / lag: PortTarget。lag のときの VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する\nnode:      廃止予定。ノードは interface / lag から導出する (ADR-0013 D2)。\n           ndl_version 1.x の間は受け付け、validator が warning を出して照合する\nnative:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。\n           access_ports では常に untagged のため通常は未指定。",
+      "description": "VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）\n\ninterface / lag: PortTarget。lag のときの VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する\nnative:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。\n           access_ports では常に untagged のため通常は未指定。\nnode は書かない。ノードは参照先から導く (ADR-0013 D2)。書くと移動先を示すエラー (ADR-0025 D1)",
       "properties": {
         "interface": {
           "anyOf": [
@@ -1707,18 +1680,6 @@
           ],
           "default": null,
           "title": "Ethernet Segment"
-        },
-        "node": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Node"
         },
         "native": {
           "default": false,

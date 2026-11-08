@@ -170,7 +170,8 @@ class TestChecks:
     ])
     def test_undefined_member(self, member, hint):
         r = _result(f"    - {{id: es-x, members: [{member}, {{lag: lag-leaf2-srv1}}]}}\n")
-        assert len(r.errors) == 1 and "未定義" in r.errors[0].message
+        assert len(r.errors) == 1
+        assert ("と書いてください" if hint else "未定義") in r.errors[0].message
         if hint:
             assert hint in r.errors[0].message
 

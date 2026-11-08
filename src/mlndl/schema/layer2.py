@@ -51,14 +51,22 @@ class PortRef(PortTarget):
     """VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）
 
     interface / lag: PortTarget。lag のときの VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する
-    node:      廃止予定。ノードは interface / lag から導出する (ADR-0013 D2)。
-               ndl_version 1.x の間は受け付け、validator が warning を出して照合する
     native:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。
                access_ports では常に untagged のため通常は未指定。
+    node は書かない。ノードは参照先から導く (ADR-0013 D2)。書くと移動先を示すエラー (ADR-0025 D1)
     """
 
-    node: Annotated[str | None, Ref("layer1.nodes")] = None   # 旧形式
     native: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_node(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "node" in data:
+            raise ValueError(
+                "VLAN のポートの node はなくしました。ノードは参照先の interface / lag / ethernet_segment から"
+                "導くので、node の行を消してください (ADR-0013 D2・ADR-0025)"
+            )
+        return data
 
 
 class BridgePort(PortTarget):
@@ -136,7 +144,7 @@ class L2VxLAN(BaseModel):
     """L2VNI — VLAN を VxLAN セグメントにマッピング
 
     vteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014
-    vtep_source / members: 旧形式。ndl_version 1.x の間だけ受け付け、validator が warning を出す
+    旧形式の vtep_source / members は移動先を示すエラーにする (ADR-0025 D1)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -146,18 +154,24 @@ class L2VxLAN(BaseModel):
     vni: int
     vlan: Annotated[str, Ref("layer2.vlans")]
     vteps: Annotated[list[str], Ref("layer2.vteps")] = []
-    vtep_source: Annotated[str | None, Ref("layer3.interfaces")] = None   # 旧形式
-    members: Annotated[list[str] | None, Ref("layer1.nodes")] = None     # 旧形式。書き出しに出ないよう既定は None
     description: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_old_forms(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            old = [k for k in ("vtep_source", "members") if k in data]
+            if old:
+                raise ValueError(
+                    f"L2VNI の {' / '.join(old)} はなくしました。layer2.vteps に VTEP を書き"
+                    f" (sources: [<ループバックの L3 IF の id>])、L2VNI では vteps: [<VTEP の id>] で参照してください"
+                    f" (ADR-0014 D4・ADR-0025)"
+                )
+        return data
+
     @model_validator(mode="after")
-    def vteps_or_legacy(self) -> "L2VxLAN":
-        legacy = self.vtep_source is not None or bool(self.members)
-        if self.vteps and legacy:
-            raise ValueError(
-                "vteps と旧形式の vtep_source / members は併記できません。vteps だけを書いてください (ADR-0014 D4)"
-            )
-        if not self.vteps and self.vtep_source is None:
+    def needs_vteps(self) -> "L2VxLAN":
+        if not self.vteps:
             raise ValueError("L2VNI が載る VTEP を vteps: [<layer2.vteps の id>] で書いてください (ADR-0014 D3)")
         return self
 

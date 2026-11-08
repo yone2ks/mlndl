@@ -112,15 +112,15 @@ underlay / overlay は構文に入れず AF と VRF から導く、に決めた�
 ADR-0010 を保留した上で、先に L1〜L3 のデータプレーンを確定させる作業。
 表現原理 (関係の成立に必要な情報は書き、個別経路は書かない)、スタティックルートのスコープ外化、
 SVI 表現の一本化、`fhrp` → `gateway_redundancy`、デュアルスタック (`ip` / `ipv6`)、トンネルを扱う。
-Pass C (2026-10-15) で、参照先の種類を `attaches_to` のキーで示す形 (ADR-0001 D8)、`L3Interface.name`、VLAN のポートとサブ IF に `node` を書かない形 (ADR-0005 D6)、表現の「指針」(ADR-0005 D4 補則) を決めた。旧形式は ndl_version 1.x の間だけ warning 付きで受け付ける。
+Pass C (2026-10-15) で、参照先の種類を `attaches_to` のキーで示す形 (ADR-0001 D8)、`L3Interface.name`、VLAN のポートとサブ IF に `node` を書かない形 (ADR-0005 D6)、表現の「指針」(ADR-0005 D4 補則) を決めた。旧形式は ndl_version 1.x の間だけ warning 付きで受け付けることにしていた (ADR-0025 で error に改めた)。
 
 ### ラウンド5: VXLAN の表現 (2026-10-20〜)
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [drafts/0014](drafts/0014-vteps.md) | VXLAN のトンネル端点 (VTEP) (実装済み) | Draft | A |
+| [0014](0014-vteps.md) | VXLAN のトンネル端点 (VTEP) (2026-10-20 実装。ADR-0025 で Accepted) | **Accepted** | A |
 | [evaluations/adr0014](evaluations/adr0014/README.md) | ADR-0014 設計比較 YAML (1 回目の 4 案と、方式中立モデルの 7 構成) | — | — |
-| [drafts/0015](drafts/0015-declarative-references.md) | 参照先をスキーマに宣言する (Ref) (実装済み) | Draft | A |
+| [0015](0015-declarative-references.md) | 参照先をスキーマに宣言する (Ref) (2026-10-21 実装。ADR-0025 で Accepted) | **Accepted** | A |
 | [evaluations/declarative-refs](evaluations/declarative-refs/comparison.md) | ADR-0015 試し書き (構文を足す作業の比較) | — | — |
 
 ADR-0011 の「書けないまま残るもの」を優先順に扱う。ADR-0014 で、構文は関係の形で決め、方式名は構文に入れない
@@ -151,7 +151,7 @@ ndl-viz が `link_role: wan` のリンクを除いた連結成分を「サイト
 
 ADR-0017 D5-2 の 5 つの問いを受けた。事業者網の中の L2 の転送は `layer2.bridges` (drafts/0007 の先取り。`ports` は箱のポートだけ) に書き、
 両端が同じ bridge に届けば通り道は `{bridge:}`。`update_source` と OSPF の `interface` はトンネル IF も指せ、対になるトンネルなら通り道は `{tunnel: [from, to]}`。
-OSPF / IS-IS にも通り道を導く (食い違いは 1.x の間 warning、2.0 で error)。マルチアクセスの隣接は次の ADR。
+OSPF / IS-IS にも通り道を導く (食い違いは 1.x の間 warning、2.0 で error としたが、ADR-0025 で error に繰り上げた)。マルチアクセスの隣接は次の ADR。
 
 ### L1 の整理 (2026-11-07)
 
@@ -188,3 +188,13 @@ ADR-0005 D4 補則に問い 5 (構成図の粒度) を足して `anycast_mac` �
 | [evaluations/adr0024](evaluations/adr0024/) | 試し書き (`overrides` あり / なし + 下流のツールの設定) | — | — |
 
 機器の `overrides` (`dict[str, Any]`) は、EVE-NG の CPU / RAM を mlndl に書く穴で、CLAUDE.md §8 と ADR-0022 の問い 5 に食い違っていた。なくして、下流のツールが自分の設定で機器の id を引く形にした。ツール向けの汎用の欄は 1.x では足さない。
+
+### 1.0 の前の片付け (2026-11-09)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [0025](0025-end-grace-for-old-forms.md) | 1.0 の前に旧形式の猶予 (warning) をやめる (2026-11-09 実装) | **Accepted** | C |
+
+「ndl_version 1.x の間は読み替えて warning」とした旧形式 (L3 IF の `interface`、短縮形 `interface: vlan-N`、`{interface: <LAG 等>}`、
+VLAN のポートの `node`、L2VNI の `vtep_source` / `members`) を、移動先を示す error にした。OSPF / IS-IS の通り道の食い違いも BGP と同じ error に繰り上げた。
+エクスポーターの旧キー (L3 IF の `interface` / `kind` など、推定の代表アドレス `lo_ip` / `lo_ipv6`) を外し、実装済みの ADR-0014・ADR-0015 を Accepted にした。

@@ -95,18 +95,14 @@ def ethernet_segments(topology: MLNDLTopology) -> dict[str, SegmentInfo]:
 
 
 def port_legs(port, topology: MLNDLTopology, segments: dict[str, SegmentInfo] | None = None) -> list[str]:
-    """VLAN / bridge のポートが指す L1 IF。LAG はメンバーに、Ethernet Segment は脚の L1 IF に展開する
-
-    旧形式 {interface: <LAG id>} (ADR-0011 D10) も LAG として読む
-    """
+    """VLAN / bridge のポートが指す L1 IF。LAG はメンバーに、Ethernet Segment は脚の L1 IF に展開する"""
     lags = {g.id: g for g in topology.layer1.lag} if topology.layer1 else {}
     if port.ethernet_segment is not None:
         segs = segments if segments is not None else ethernet_segments(topology)
         info = segs.get(port.ethernet_segment)
         return list(info.legs) if info else []
-    lag_id = port.lag if port.lag is not None else (port.interface if port.interface in lags else None)
-    if lag_id is not None:
-        return list(lags[lag_id].members) if lag_id in lags else []
+    if port.lag is not None:
+        return list(lags[port.lag].members) if port.lag in lags else []
     return [port.interface]
 
 
@@ -207,29 +203,16 @@ def l3_attachments(topology: MLNDLTopology) -> dict[str, Attachment]:
     """L3 IF の id → 何の上に載るか (ADR-0011 D11)
 
     attaches_to のキーで決め、name では決めない。attaches_to がなければ unattached
-    (ループバックとはみなさない)。旧形式 {interface: <LAG / VLAN / サブ IF の id>} (ADR-0011 D10) は、
-    validator と同じく参照先の種類で読む。
+    (ループバックとはみなさない)
     """
     if not topology.layer3:
         return {}
-    lag_ids = {g.id for g in topology.layer1.lag} if topology.layer1 else set()
-    vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
-    subif_ids = {si.id for si in topology.layer2.subinterfaces} if topology.layer2 else set()
     by_key: dict[str, Attachment] = {"interface": "l1_interface", "lag": "lag", "vlan": "vlan",
                                      "subinterface": "subinterface"}
     out: dict[str, Attachment] = {}
     for iface in topology.layer3.interfaces:
         at = iface.attaches_to
-        if at is None:
-            out[iface.id] = "unattached"
-        elif at.kind == "interface" and at.target in lag_ids:
-            out[iface.id] = "lag"
-        elif at.kind == "interface" and at.target in vlan_ids:
-            out[iface.id] = "vlan"
-        elif at.kind == "interface" and at.target in subif_ids:
-            out[iface.id] = "subinterface"
-        else:
-            out[iface.id] = by_key[at.kind]
+        out[iface.id] = "unattached" if at is None else by_key[at.kind]
     return out
 
 

@@ -5,7 +5,7 @@
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author、ユーザー
 - **Pass**: C (5 エージェントの検討を 5 回行った。下書きはない。最初の案は廃棄した。下の「経緯」)
 - **関連**: [ADR-0022](0022-diagram-granularity.md) (記載の粒度)、ADR-0001 D8 (キーが参照先の種類を示す)、ADR-0005 D4 補則 問い 4 (方式名を構文に入れない)・D6 (`node` の持ち方)、
-  ADR-0012 (サブ IF)、ADR-0013 (VLAN のポート)、[drafts/0014](drafts/0014-vteps.md) (VTEP)、ADR-0018 D1 (bridge のポート)、ADR-0020 (注釈の綴りに頼る検査をやめた)
+  ADR-0012 (サブ IF)、ADR-0013 (VLAN のポート)、[ADR-0014](0014-vteps.md) (VTEP)、ADR-0018 D1 (bridge のポート)、ADR-0020 (注釈の綴りに頼る検査をやめた)
 
 ## Context
 
@@ -56,7 +56,7 @@ lag:
 
 - `node` は 1 台。`name` は機器上の名前 (`Port-Channel10` / `bond0` / `ae0`)。参照ではない (ADR-0011 D3 と同じ)
 - スタック / VSS / Virtual Chassis / IRF は 1 つの L1 ノードで、筐体をまたぐ LAG もここに 1 つ書く。どの IF がどの筐体にあるかは書かない (`parent` は先送り)
-- drafts/0014 は `lag.type: lacp | mlag` を「持つフィールドの形が違うので型を分ける」例に挙げていた。
+- ADR-0014 は `lag.type: lacp | mlag` を「持つフィールドの形が違うので型を分ける」例に挙げていた。
   LAG を機器ごとにすると、MLAG の LAG も LACP の LAG も形が同じになり、型を分ける理由がなくなった
 
 ### D2. 複数の機器の LAG を相手から 1 本に見せる関係は `layer1.ethernet_segments`
@@ -146,7 +146,7 @@ layer3:
 | 脚に LAG のメンバーの IF を書いている (`{lag:}` を促す) | warning |
 | 同じ VLAN / bridge に ES とその脚 (脚の LAG のメンバーを含む) を併記している | error |
 | VLAN / bridge のポートに ES の脚の一部だけを書いている (`{ethernet_segment:}` を促す。MLAG の片側にだけ VLAN を載せる典型的な誤り) | warning |
-| ES の脚の機器の一部だけが VTEP を終端している (どの VTEP も終端していない機器がある。drafts/0014 D5 の「MLAG ペアの片方だけ」を付け替えた) | warning |
+| ES の脚の機器の一部だけが VTEP を終端している (どの VTEP も終端していない機器がある。ADR-0014 D5 の「MLAG ペアの片方だけ」を付け替えた) | warning |
 | ES の id が `es-` で始まらない (ADR-0002 D7) | warning |
 
 - VLAN ID の同一機器上の重複は、ES に載せた VLAN を脚のすべての機器で数える (ADR-0013 D4 の MLAG の扱いを付け替えた)
@@ -202,7 +202,7 @@ layer3:
 - バリデーター: `src/mlndl/validator.py` (ES の検査、VLAN / bridge のポート、VTEP の warning の付け替え、`client_lag` の検査をなくした)
 - 導出: `src/mlndl/derive.py` (`ethernet_segments`・`port_legs`。VLAN の端点と bridge の脚)
 - エクスポーター: `src/mlndl/exporter/cytoscape.py`
-- 文書: ADR-0001 D8・ADR-0002 D7・ADR-0012・ADR-0013・drafts/0014・ADR-0018 D1 の注記、`docs/reference/`、`docs/exporter-cytoscape.md`、`CLAUDE.md`
+- 文書: ADR-0001 D8・ADR-0002 D7・ADR-0012・ADR-0013・ADR-0014・ADR-0018 D1 の注記、`docs/reference/`、`docs/exporter-cytoscape.md`、`CLAUDE.md`
 - ndl-viz: MLAG の枠を `ethernet_segment` から描く (別のリポジトリ)
 
 ## Alternatives Considered

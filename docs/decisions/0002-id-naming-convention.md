@@ -122,7 +122,7 @@ NetBox / neteye からのアダプターは次のルールを守る:
 | `isis-adj-` | IS-IS 隣接関係 | ADR-0005 D3-1 でスコープ内確定 (Phase 2 以降) |
 | `tunnel-` | L3 トンネルインターフェース (GRE/IPIP/IPSec-VTI) | ADR-0005 D3-1 `layer3.tunnel_interfaces` (Phase 2 以降) |
 | `subif-` | L2 サブインターフェース (`swp1.100` 等) | ADR-0005 D3-1 `layer2.subinterfaces` (Phase 2 以降) |
-| `vtep-` | VXLAN のトンネル端点 (`layer2.vteps`) | drafts/0014 (2026-10-20 追加) |
+| `vtep-` | VXLAN のトンネル端点 (`layer2.vteps`) | ADR-0014 (2026-10-20 追加) |
 | `bridge-` | 番号を持たない L2 セグメント (`layer2.bridges`) | ADR-0018 D1 (2026-11-03 追加) |
 | `vpc-` | クラウド論理ネットワークの箱 | ADR-0008 D2 / ADR-0009 D1 `parent` の参照先 (Phase 3 以降) |
 | `pod-` | オンプレ Clos 増設単位の箱 | 同上。Cisco PoD (Point of Delivery)。**Kubernetes Pod ではない** |

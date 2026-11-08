@@ -7,7 +7,7 @@
 - **Supersedes**: drafts/0005-mlndl-expressive-scope.md
 - **Amended by**: [ADR-0011](0011-layer3-data-plane.md) (2026-10-04、Pass C で確定 2026-10-15)、[ADR-0012](0012-subinterfaces.md) (2026-10-05)、
   [ADR-0013](0013-vlan-ports-on-lag.md)、ラウンド4 Pass C (2026-10-15) — 表現の指針 (D4 補則)、`node` の持ち方 (D6)、
-  SVI 規範の改訂、スコープ表の実装同期。[drafts/0014](drafts/0014-vteps.md) (2026-10-20) — D4 補則に問い 4 (方式中立) を追加。
+  SVI 規範の改訂、スコープ表の実装同期。[ADR-0014](0014-vteps.md) (2026-10-20) — D4 補則に問い 4 (方式中立) を追加。
   [ADR-0010](0010-control-plane-separation.md) (2026-11-01) — 制御プレーンを `control_plane` に分離 (D1・D3-1 の制御プレーンの行、P6、BGP unnumbered の規則)。
   2026-11-07 — D5 の Phase の札をやめ、先送りした項目を [deferred.md](deferred.md) にまとめた。
   改訂箇所には注記を入れ、元の記述は履歴として残す。一覧は末尾の「実装同期メモ」を参照
@@ -110,7 +110,7 @@ layer3:
 
 > **ラウンド4 Pass C で改訂 (2026-10-15)**: 以下の B-1 (短縮形 `interface: vlan-N`) は廃止し、B-2 に一本化した。
 > 書き方は `name: <機器上の名前>` + `attaches_to: {vlan: <VLAN id>}` である (ADR-0001 D8、ADR-0011 D3)。
-> 短縮形と旧キー `interface` は ndl_version 1.x の間だけ受け付け、warning を出す。以下は履歴として残す。
+> 短縮形と旧キー `interface` は ndl_version 1.x の間だけ受け付け、warning を出す ([ADR-0025](0025-end-grace-for-old-forms.md) で、移動先を示す error に改めた)。以下は履歴として残す。
 
 SVI は VLAN を上位 supporting 対象として持つ L3 entity である。次の 2 種類の表現を許容する:
 
@@ -371,7 +371,7 @@ mlndl は「VRF が存在する」「この SVI がゲートウェイである�
 2. **転送テーブルの個別エントリ、または個々のパケットへの処理か** (経路、ACL、NAT 変換、QoS、ポリシールーティング) → 書かない
 3. **それを削除すると、その関係自体が存在できなくなるか** (Route Target、トンネルの MTU、VTEP) → 書く
 
-書くと決めたものの**書き方**は、次の問いで決める (drafts/0014 D1 で追加, 2026-10-20)。
+書くと決めたものの**書き方**は、次の問いで決める (ADR-0014 D1 で追加, 2026-10-20)。
 
 4. **違いは関係の形 (持つフィールド・参照先・多重度) の違いか、同じ関係を実現する方式の違いか** →
    形が同じなら 1 つの構文で書き、方式名 (anycast / vPC / virtual VTEP など) は構文に入れない。
@@ -423,7 +423,7 @@ mlndl は「VRF が存在する」「この SVI がゲートウェイである�
 | VLAN の `trunk_ports` / `access_ports` | 書かない | VLAN の所属だけを表す。ノードは `interface` / `lag` から決まる。MLAG なら両ノード |
 
 VLAN のポートの `node` は、ADR-0013 (Pass A) では「任意 (書けば照合)」だった。サブ IF と揃えて書かない形に改めた
-(ユーザー判断)。ndl_version 1.x の間は旧形式として受け付け、validator が warning を出して照合する。
+(ユーザー判断)。ndl_version 1.x の間は旧形式として受け付け、validator が warning を出して照合する ([ADR-0025](0025-end-grace-for-old-forms.md) で、書くと error に改めた)。
 
 ## Consequences
 
@@ -528,7 +528,7 @@ VLAN のポートの `node` は、ADR-0013 (Pass A) では「任意 (書けば�
 | D6 (新設) | `node` を持つかどうかの基準 | ラウンド4 Pass C (論点 B) |
 | D2-2 ケース B / D2-3 | SVI は `attaches_to: {vlan:}`、機器上の名前は `name`。短縮形 `interface: vlan-N` は廃止 (1.x の間は warning で受け付ける)。`{interface:}` は L1 IF 専用 | ADR-0001 D8、ADR-0011 D3 (Pass C) |
 | D3-2 | ポリシールーティングと VRF 間のスタティックリークをスコープ外に追加 | ラウンド4 Pass C |
-| D4 補則 | 問い 4 (方式中立。型を分けるのはフィールドの形が違うときだけ) を追加 | drafts/0014 D1 |
+| D4 補則 | 問い 4 (方式中立。型を分けるのはフィールドの形が違うときだけ) を追加 | ADR-0014 D1 |
 | D1・D3-1 (制御プレーンの行・(c) の routing_adjacencies 行)・P6・BGP unnumbered の規則 | `control_plane` への分離。VRF ごとの BGP インスタンス、セッションの通り道は導く、unnumbered はアドレスのない L3 IF | ADR-0010 (2026-11-01。Accepted・実装済み) |
 | D3-2・D4 補則 | 問い 5 (構成図の粒度) を追加。`anycast_mac` / `system_mac` をスコープ外に戻した | ADR-0022 (2026-11-08) |
 | D3-2 | EVPN Ethernet Segment を `layer1.ethernet_segments` として扱った (MLAG / vPC / MC-LAG と同じ形) | ADR-0023 (2026-11-08) |

@@ -1,10 +1,10 @@
 # ADR-0015: 参照先をスキーマに宣言する (Ref)
 
-- **Status**: Draft — 実装済み (2026-10-21)。Pass B / C は未実施
+- **Status**: Accepted (2026-10-21 に実装。2026-11-09 に [ADR-0025](0025-end-grace-for-old-forms.md) D4 で Accepted にした。Pass B / C は行っていない)
 - **Date**: 2026-10-21
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author、ユーザー
 - **Pass**: A
-- **関連**: ADR-0001 D8 (キーで参照先を選ぶ参照)、ADR-0002 D1・D5、ADR-0005 D4 補則、drafts/0014
+- **関連**: ADR-0001 D8 (キーで参照先を選ぶ参照)、ADR-0002 D1・D5、ADR-0005 D4 補則、ADR-0014
 
 ## Context
 

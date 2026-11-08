@@ -96,14 +96,22 @@ def test_segment_in_access_ports():
 @pytest.mark.parametrize("port,hint", [
     ("{interface: nope}", None),
     ("{lag: nope}", None),
-    ("{interface: vlan-100}", "VLAN"),      # VLAN は VLAN のポートにならない
-    ("{lag: r1-eth1}", "{interface: r1-eth1}"),   # キーの取り違え
+    ("{interface: vlan-100}", "VLAN で、ここには書けません"),      # VLAN は VLAN のポートにならない
 ])
 def test_undefined_reference(port, hint):
     errs = _errors(_vlan(trunk=port))
     assert len(errs) == 1 and "未定義" in errs[0]
     if hint:
         assert hint in errs[0]
+
+
+@pytest.mark.parametrize("port,move", [
+    ("{lag: r1-eth1}", "{interface: r1-eth1}"),      # キーの取り違え
+    ("{interface: lag-r3-po1}", "{lag: lag-r3-po1}"),  # 旧形式。読み替えない (ADR-0025 D1)
+])
+def test_wrong_key_shows_right_key(port, move):
+    errs = _errors(_vlan(trunk=port))
+    assert len(errs) == 1 and f"{move} と書いてください" in errs[0]
 
 
 def test_lag_and_member_in_same_vlan_is_error():
@@ -181,32 +189,16 @@ def test_all_legs_of_segment_is_not_warning():
 
 
 # ---------------------------------------------------------------------------
-# 旧形式 (ndl_version 1.x の間だけ受け付ける。ADR-0013 D2、ADR-0001 D8)
+# 旧形式は移動先を示す error (ADR-0025 D1)
 # ---------------------------------------------------------------------------
 
-def test_legacy_node_is_warning():
-    r = validate_all(_topo(_vlan(trunk="{node: r1, interface: r1-eth1}")))
-    assert r.errors == []
-    assert [w.path for w in r.warnings] == ["layer2.vlans[0].trunk_ports[0].node"]
-    assert "node を消してください" in r.warnings[0].message
-
-
-def test_legacy_interface_key_for_lag_is_warning():
-    r = validate_all(_topo(_vlan(trunk="{interface: lag-r3-po1}")))
-    assert r.errors == []
-    assert [w.path for w in r.warnings] == ["layer2.vlans[0].trunk_ports[0].interface"]
-    assert "{lag: lag-r3-po1}" in r.warnings[0].message
-
-
-@pytest.mark.parametrize("port,needle", [
-    ("{node: r1, ethernet_segment: es-a}", "Ethernet Segment"),   # ES は脚の全機器に効く
-    ("{node: r1, lag: lag-r3-po1}", "lag-r3-po1"),            # 別ノードの LAG
-    ("{node: r2, interface: r1-eth1}", "r1-eth1"),            # 別ノードの IF
-    ("{node: nope, interface: r1-eth1}", "nope"),
+@pytest.mark.parametrize("port", [
+    "{node: r1, interface: r1-eth1}",
+    "{node: r1, ethernet_segment: es-a}",
 ])
-def test_legacy_node_is_still_checked(port, needle):
-    errs = _errors(_vlan(trunk=port))
-    assert len(errs) == 1 and needle in errs[0]
+def test_port_node_is_error(port):
+    with pytest.raises(pydantic.ValidationError, match=r"VLAN のポートの node はなくしました.*ADR-0025"):
+        _topo(_vlan(trunk=port))
 
 
 # ---------------------------------------------------------------------------

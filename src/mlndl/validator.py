@@ -5,11 +5,11 @@
   1. 参照の存在 — スキーマの Ref 宣言から _check_refs が検査する。どのフィールドがどこを指すかは
      スキーマ (src/mlndl/schema/*.py の Annotated[..., Ref("<パス>")]) を見る。ここには一覧を書かない
   2. キーで参照先を選ぶ参照 — attaches_to と VLAN のポート (ADR-0001 D8 / ADR-0013 D1)。
-     _resolve_ref がキーごとに参照先を引く。旧形式 {interface: <LAG 等>} の読み替えもここ
+     _resolve_ref がキーごとに参照先を引く。{interface: <LAG 等>} のようなキーの取り違えには正しいキーを示す
   3. 意味の検査 — ネットワークとしての整合性。手書き。主なもの:
      - ID: 文法 (ADR-0002 D1)、L1 IF / LAG / VLAN / サブ IF の ID 重複、L3 IF とトンネルの ID 重複 (ADR-0002 D5)
      - L1: Ethernet Segment の脚 (機器の重複、2 つの ES に入る脚、LAG とメンバーの併記、脚どうしのリンク。ADR-0023 D7)
-     - L2: VLAN のポートのノード (旧形式の node との照合、ES に node)、LAG とメンバー・ES と脚の併記、
+     - L2: LAG とメンバー・ES と脚の併記、
        ES の脚の一部だけ (warning)、同じ端点の重複、同一ノード上の vlan_id 重複 (ES は脚の全機器で数える)、サブ IF のタグ重複、
        VNI 番号の重複、VNI に参加するノードの VLAN、VTEP の検査 (ADR-0014 D5)、
        VLAN の端点の IP が SVI のサブネット外 (info。ADR-0013 D7)、
@@ -19,12 +19,12 @@
        gateway_redundancy (VIP のサブネット・group_id 重複)、anycast gateway の ip / ipv6 の一致、
        トンネル (source のノード、自己トンネル、外側の AF、片側だけのトンネル)
      - control_plane (ADR-0010 D10): インスタンスの省略、端の機器とインスタンス・update_source の機器と VRF、
-       両端から導いた通り道の食い違い (BGP は error、OSPF / IS-IS は ndl_version 1.x の間 warning。ADR-0018 D4)、
+       両端から導いた通り道の食い違い (BGP も OSPF / IS-IS も error。ADR-0018 D4・ADR-0025 D2)、
        トランスポートのアドレスファミリー、セッションの重複、RR は iBGP、
        同一ノード・同一 VRF の AS、同一 VRF の BGP エントリ、default 以外の VRF の EVPN / VPN (warning)、BFD のタイマー
      - 規約 (warning): 推奨プレフィックス (ADR-0002 D7)、SVI らしい名前で attaches_to なし、labels のキー、
        link_speed の正規形 (ADR-0021 D3)
-     - 旧形式 (warning): ADR-0011 D10・ADR-0013 D2・ADR-0014 D4
+     - 旧形式は読み替えない。スキーマが移動先を示すエラーにする (ADR-0025 D1)
 
 Severity (ADR-0002 D8):
   error   仕様違反。トポロジーは無効
@@ -47,9 +47,9 @@ from pydantic import BaseModel
 from .derive import (bgp_session_views, end_path_labels, ethernet_segments, igp_adjacency_views,
                      l3_and_tunnels, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
 from .schema.control_plane import BgpInsideEndpoint, BgpSession, OspfAdjacency
-from .schema.layer3 import TunnelInterface
+from .schema.layer3 import L3_ATTACH_KEYS, TunnelInterface
 from .schema.layer1 import AttachesToObj, canonical_link_speed
-from .schema.layer2 import L2VxLAN, L3VxLAN
+from .schema.layer2 import PORT_KEYS, L2VxLAN, L3VxLAN
 from .schema.topology import MLNDLTopology
 from .schema.refs import COLLECTION_LABELS, Ref
 from .index import SECTIONS, IdIndex
@@ -199,7 +199,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         _validate_l2(
             topology.layer2,
             node_ids, iface_node, lag_nodes, member_lag, spaces, segments, _segment_of_leg(topology.layer1),
-            vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vtep_nodes,
+            vtep_nodes,
             errors,
         )
 
@@ -270,7 +270,7 @@ def _validate_ethernet_segments(l1, iface_node, member_lag, spaces, errors):
         legs_of: dict[str, set[str]] = {}   # 脚 → 脚の L1 IF
         for j, m in enumerate(es.members):
             path = f"layer1.ethernet_segments[{i}].members[{j}].{m.kind}"
-            kind = _resolve_ref(m.kind, m.target, spaces, path, errors)
+            kind = _resolve_ref(m.kind, m.target, spaces, path, errors, accepts=("interface", "lag"))
             if kind is None:
                 continue
             if m.target in legs_of:
@@ -335,44 +335,15 @@ def _validate_ethernet_segments(l1, iface_node, member_lag, spaces, errors):
 # Layer 2
 # ---------------------------------------------------------------------------
 
-def _port_nodes(pr, kind, path, iface_node, lag_nodes, segments, node_ids, errors) -> set[str]:
-    """VLAN のポートが載るノード群を返す (ADR-0013 D2)
-
-    node は書かない (interface / lag / ethernet_segment から導出する)。ndl_version 1.x の間は旧形式として受け付けて
-    warning を出し、導出したノードと照合する。Ethernet Segment は脚の全機器に効くので node を書くと error
-    """
+def _port_nodes(kind, target, iface_node, lag_nodes, segments) -> set[str]:
+    """VLAN のポートが載るノード群を返す。ノードは interface / lag / ethernet_segment から導く (ADR-0013 D2)"""
     if kind == "interface":
-        owners = {iface_node[pr.target]}
-    elif kind == "lag":
-        owners = set(lag_nodes[pr.target])
-    elif kind == "ethernet_segment":
-        owners = set(segments[pr.target].nodes) if pr.target in segments else set()
-    else:
-        return set()
-    if pr.node is None:
-        return owners
-    errors.append(ValidationError(
-        f"{path}.node",
-        f"VLAN のポートには node を書きません。ノードは '{pr.target}' から導出します。"
-        f"node を消してください (ADR-0013 D2)",
-        "warning",
-    ))
-    if pr.node not in node_ids:
-        return owners                           # 未定義のノードは _check_refs が検査する
+        return {iface_node[target]}
+    if kind == "lag":
+        return set(lag_nodes[target])
     if kind == "ethernet_segment":
-        errors.append(ValidationError(
-            f"{path}.node",
-            f"Ethernet Segment '{pr.target}' は {' / '.join(sorted(owners))} のすべてに効くため、node は書けません"
-            f" (ADR-0013 D2 / ADR-0023 D5)",
-        ))
-    elif pr.node not in owners:
-        what = "インターフェース" if kind == "interface" else "LAG"
-        errors.append(ValidationError(
-            f"{path}.{pr.kind}",
-            f"{what} '{pr.target}' はノード '{next(iter(owners))}' に属しており、"
-            f"'{pr.node}' のものではありません (ADR-0013 D2)",
-        ))
-    return owners
+        return set(segments[target].nodes) if target in segments else set()
+    return set()
 
 
 def _segment_of_leg(l1) -> dict[str, str]:
@@ -427,7 +398,7 @@ def _check_segment_ports(ports, listed, segment_of, segments, what, adr, errors)
 
 
 def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segments, segment_of,
-                 vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vtep_nodes, errors):
+                 vtep_nodes, errors):
     # VLAN trunk_ports / access_ports (ADR-0013)
     # interface (L1 IF)・lag (LAG)・ethernet_segment (ES) で指す。node は書かず、参照先から導出する
     vlans_on_node: dict[tuple[str, int], list[str]] = {}
@@ -448,9 +419,8 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segmen
                 ))
             else:
                 seen[pr.target] = where
-            kind = _resolve_ref(pr.kind, pr.target, spaces, f"{path}.{pr.kind}", errors,
-                                legacy_kinds=("lag",))
-            nodes = _port_nodes(pr, kind, path, iface_node, lag_nodes, segments, node_ids, errors)
+            kind = _resolve_ref(pr.kind, pr.target, spaces, f"{path}.{pr.kind}", errors, accepts=PORT_KEYS)
+            nodes = _port_nodes(kind, pr.target, iface_node, lag_nodes, segments)
             vlan_nodes.setdefault(vlan.id, set()).update(nodes)
             for node in nodes:
                 owners = vlans_on_node.setdefault((node, vlan.vlan_id), [])
@@ -488,8 +458,8 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segmen
     seen_tag: dict[tuple[str, int], int] = {}
     for i, si in enumerate(l2.subinterfaces):
         at = si.attaches_to
-        _resolve_ref(at.kind, at.target, spaces, f"layer2.subinterfaces[{i}].attaches_to.{at.kind}",
-                     errors, legacy_kinds=("lag",))
+        _resolve_ref(at.kind, at.target, spaces, f"layer2.subinterfaces[{i}].attaches_to.{at.kind}", errors,
+                     accepts=("interface", "lag"))
         key = (at.target, si.vlan_id)
         if key in seen_tag:
             errors.append(ValidationError(
@@ -512,10 +482,7 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segmen
             seen_vnis[vx.vni] = vx.id
 
         if isinstance(vx, L2VxLAN):
-            if vx.vteps:
-                participants = _check_vni_vteps(vx, i, vtep_nodes, errors)
-            else:
-                participants = _check_legacy_vtep_source(vx, i, node_ids, l3interface_ids, l3iface_node, errors)
+            participants = _check_vni_vteps(vx, i, vtep_nodes, errors)
             # VNI に参加するノードなのに、その VLAN のポートが 1 つもない (round4 E10)。
             # VLAN にポートが書かれていない場合は判断できないので見ない
             carried = vlan_nodes.get(vx.vlan)
@@ -557,7 +524,7 @@ def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, segments, err
         for j, port in enumerate(br.ports):
             key = port.kind
             path = f"layer2.bridges[{i}].ports[{j}].{key}"
-            kind = _resolve_ref(key, port.target, spaces, path, errors)
+            kind = _resolve_ref(key, port.target, spaces, path, errors, accepts=PORT_KEYS)
             if port.target in legs_of:
                 errors.append(ValidationError(path, f"'{port.target}' はこの bridge にすでに書かれています (ADR-0018 D1)"))
                 continue
@@ -616,24 +583,6 @@ def _check_vni_vteps(vx, i, vtep_nodes, errors) -> set[str]:
         seen.add(vt)
         participants |= vtep_nodes.get(vt, set())     # 未定義の VTEP は _check_refs が検査する
     return participants
-
-
-def _check_legacy_vtep_source(vx, i, node_ids, l3interface_ids, l3iface_node, errors) -> set[str]:
-    """旧形式 vtep_source / members (ndl_version 1.x の間だけ受け付ける。ADR-0014 D4)"""
-    errors.append(ValidationError(
-        f"layer2.vxlan[{i}].vtep_source",
-        "vtep_source と members は廃止予定です。layer2.vteps に VTEP を定義し、"
-        "vteps: [<VTEP の id>] で参照してください (ADR-0014 D4)",
-        "warning",
-    ))
-    vtep_node = l3iface_node.get(vx.vtep_source)
-    if vtep_node is not None and vx.members and vtep_node not in vx.members:
-        errors.append(ValidationError(
-            f"layer2.vxlan[{i}].vtep_source",
-            f"vtep_source '{vx.vtep_source}' のノード '{vtep_node}' が members に含まれていません"
-            f" (ADR-0011 D9)",
-        ))
-    return set(vx.members or []) | ({vtep_node} if vtep_node else set())
 
 
 def _validate_vteps(topology: MLNDLTopology, vtep_nodes: dict[str, set[str]], segments, errors) -> None:
@@ -806,15 +755,11 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
         else:
             seen_if[key] = iface.id
 
-        # 旧形式 (interface キー、短縮形 interface: vlan-N) を読み替えた箇所 (ADR-0011 D10)
-        for fld, message in iface.deprecations:
-            errors.append(ValidationError(f"{path}.{fld}", message, "warning"))
-
         # 参照解決と、参照先の node (群) に L3 IF の node が含まれるか (ADR-0001 D8 / ADR-0011 D9)
         at = iface.attaches_to
         if at is not None:
             kind = _resolve_ref(at.kind, at.target, spaces, f"{path}.attaches_to.{at.kind}", errors,
-                                legacy_kinds=("lag", "vlan", "subinterface"))
+                                accepts=L3_ATTACH_KEYS)
             if kind == "interface":
                 owners = {iface_node[at.target]}
             elif kind == "lag":
@@ -947,6 +892,7 @@ def _validate_control_plane(topology: MLNDLTopology, errors: list[ValidationErro
     instance_vrfs = {inst.vrf for inst in cp.bgp if inst.vrf is not None}
 
     # セッション: インスタンスの省略と、端の機器がインスタンスに参加しているか
+    wrong_end: set[int] = set()     # update_source / interface が別の機器のもの。通り道の食い違いは重ねて出さない
     for i, nb in enumerate(cp.routing_neighbors):
         path = f"control_plane.routing_neighbors[{i}]"
         entries = instances[nb.type]
@@ -975,20 +921,21 @@ def _validate_control_plane(topology: MLNDLTopology, errors: list[ValidationErro
             else:
                 ref, owner, field_name = ep.interface, l1if_node.get(ep.interface), "interface"
             if owner is not None and owner != node:
+                wrong_end.add(i)
                 errors.append(ValidationError(
                     f"{path}.{side}.{field_name}",
                     f"'{ref}' はノード '{owner}' のインターフェースです。この端のノードは '{node}' です (ADR-0010 D3)",
                 ))
 
-    # 通り道の食い違い: OSPF / IS-IS は ndl_version 1.x の間 warning、2.0 で error (ADR-0018 D4)
+    # 通り道の食い違い: BGP と同じく error (ADR-0018 D4・ADR-0025 D2)
     tunnels = {t.id for t in topology.layer3.tunnel_interfaces} if topology.layer3 else set()
     labels = end_path_labels(topology)
     for v in igp_adjacency_views(topology):
-        if v.transport_mismatch:
+        if v.transport_mismatch and v.index not in wrong_end:
             errors.append(ValidationError(
                 f"control_plane.routing_neighbors[{v.index}]",
-                _mismatch_message("interface", v.session.from_.interface, v.session.to.interface, tunnels, labels),
-                "warning",
+                _mismatch_message("interface", v.session.from_.interface, v.session.to.interface, tunnels, labels,
+                                  over_tunnel=v.session.type != "isis"),
             ))
 
     # BGP セッション: 導いた値 (derive.bgp_session_views) を検査する
@@ -1009,7 +956,7 @@ def _validate_control_plane(topology: MLNDLTopology, errors: list[ValidationErro
                     f"'{iface.id}' は VRF '{iface.vrf or 'default'}' の{kind}ですが、"
                     f"インスタンス '{v.instance.id}' は {v.vrf or 'default'} VRF です (ADR-0010 D10)",
                 ))
-        if v.transport_mismatch:
+        if v.transport_mismatch and v.index not in wrong_end:
             errors.append(ValidationError(
                 path, _mismatch_message("update_source", v.from_.l3_interface.id, v.to.l3_interface.id, tunnels, labels),
             ))
@@ -1052,19 +999,25 @@ def _validate_control_plane(topology: MLNDLTopology, errors: list[ValidationErro
                 ))
 
 
-def _mismatch_message(field: str, a: str, b: str, tunnels: set[str], labels: dict[str, str]) -> str:
-    """通り道の食い違いのメッセージ。両端の通り道を示し、書き手の意図ごとに次の手を示す (ADR-0018 D6)"""
+def _mismatch_message(field: str, a: str, b: str, tunnels: set[str], labels: dict[str, str],
+                      *, over_tunnel: bool = True) -> str:
+    """通り道の食い違いのメッセージ。両端の通り道を示し、書き手の意図ごとに次の手を示す (ADR-0018 D6)
+
+    over_tunnel: トンネルの上で張る直し方 (c) を示すか。IS-IS の interface はトンネル IF を指せない (ADR-0018 D3)
+    """
     message = (f"両端の {field} から導いた通り道が食い違います (from の {a} の通り道: {labels.get(a, '?')}、"
                f"to の {b} の通り道: {labels.get(b, '?')})。")
     if (a in tunnels) != (b in tunnels):
         tun, other, side = (a, b, "to") if a in tunnels else (b, a, "from")
         message += (f"{side} 側の '{other}' はトンネル IF ではありません。相手の機器のトンネル IF"
                     f" (destination_interface が '{tun}' の source を指すもの) を書いてください。")
-    return message + (
+    message += (
         "次のどれかで直してください: (a) 直結のリンクの上で張るなら、両端の L3 IF を同じ L1 リンクの両端に載せる。"
         "(b) 事業者網をはさむなら、両端のポートの対向 (箱のポート) を同じ layer2.bridges[].ports に書く。"
-        f"(c) トンネルの上で張るなら、両端の {field} を対になるトンネル IF にする (ADR-0018 D6)"
     )
+    if over_tunnel:
+        message += f"(c) トンネルの上で張るなら、両端の {field} を対になるトンネル IF にする。"
+    return message.removesuffix("。") + " (ADR-0018 D6)"
 
 
 # ---------------------------------------------------------------------------
@@ -1082,27 +1035,31 @@ _KIND_LABEL = {
 }
 
 
-def _resolve_ref(kind, target, spaces, path, errors, *, legacy_kinds=()) -> str | None:
+def _resolve_ref(kind, target, spaces, path, errors, accepts=()) -> str | None:
     """キー kind で書かれた参照 target を、そのキーの ID 空間で解決する (ADR-0001 D8)
 
     解決できた種類を返す。未定義なら error を出して None を返す。
-    legacy_kinds: {interface: X} で X が L1 IF 以外を指す旧形式 (ndl_version 1.x の間だけ受け付ける)。
-    X がこれらの空間にあれば warning を出してその種類として扱う
+    accepts: この場所に書けるほかのキー。target がそのどれかの種類なら、正しいキーを示す
+    (旧形式 {interface: <LAG / VLAN / サブ IF の id>} は読み替えない。ADR-0025 D1)
     """
     if target in spaces[kind]:
         return kind
-    if kind == "interface":
-        for k in legacy_kinds:
-            if target in spaces[k]:
-                errors.append(ValidationError(
-                    path,
-                    f"{{interface: {target}}} は{_ja(_KIND_LABEL[k])}を指しています。{{{k}: {target}}} と"
-                    f"書いてください。{{interface:}} は L1 インターフェース専用です (ADR-0001 D8)",
-                    "warning",
-                ))
-                return k
     actual = next((k for k, ids in spaces.items() if target in ids), None)
-    hint = f"。'{target}' は{_ja(_KIND_LABEL[actual])}です。{{{actual}: {target}}} の誤りではありませんか" if actual else ""
+    if actual is not None and actual in accepts:
+        only = "{interface:} は L1 インターフェース専用です。" if kind == "interface" else ""
+        note = "機器上の名前は name に書き、参照先の種類は attaches_to のキーで示します。" if ".attaches_to." in path else ""
+        errors.append(ValidationError(
+            path,
+            f"{only}'{target}' は{_ja(_KIND_LABEL[actual])}なので {{{actual}: {target}}} と書いてください。{note}"
+            f"(ADR-0001 D8・ADR-0025)",
+        ))
+        return None
+    if actual is not None and accepts:
+        hint = f"。'{target}' は{_ja(_KIND_LABEL[actual])}で、ここには書けません"
+    elif actual is not None:
+        hint = f"。'{target}' は{_ja(_KIND_LABEL[actual])}です。{{{actual}: {target}}} の誤りではありませんか"
+    else:
+        hint = ""
     errors.append(ValidationError(path, f"未定義の{_ja(_KIND_LABEL[kind]).rstrip()} '{target}' を参照しています{hint}"))
     return None
 
@@ -1123,7 +1080,7 @@ def _check_id_uniqueness(topology: MLNDLTopology, errors: list[ValidationError])
 
     同じ一覧の中の重複も、別の一覧との重複も error にする。重複を許すと、参照がどれを指すか決まらず、
     索引 (IdIndex) は先に書いたほうだけを引くので、後に書いたほうが黙って見えなくなる。
-    旧形式の {interface: X} の読み替えや、L3 IF とトンネル IF のどちらも指せる update_source も、
+    キーの取り違えのヒントや、L3 IF とトンネル IF のどちらも指せる update_source も、
     id から種類が一意に決まることに頼っている (ADR-0001 D8、ADR-0018 D3)
     """
     first: dict[str, tuple[str, int]] = {}   # id → 最初に書いた (一覧のパス, 位置)

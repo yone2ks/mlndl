@@ -154,4 +154,4 @@ mlndl が両端から導くもの (書かない):
 | ループバックどうしなど、どれにも載らない (multihop) | 導かない |
 | SVI・トポロジー外の相手・宛先が `destination_ip` のトンネル | 導かない |
 
-上のどれにも当てはまらず両端の通り道が食い違うと、BGP は error、OSPF / IS-IS は warning (ndl_version 2.0 で error) になります。メッセージは両端の通り道と直し方を示します。
+上のどれにも当てはまらず両端の通り道が食い違うと、BGP も OSPF / IS-IS も error になります ([ADR-0025](../decisions/0025-end-grace-for-old-forms.md) D2)。メッセージは両端の通り道と直し方を示します。

@@ -151,7 +151,7 @@ NX-OS 構成を素直に書けるのは案 C のみ。
   - `primary_sources` のキー集合が `nodes` と一致すること
   - 単独 VTEP の `source` の node が `node` と一致すること
 
-## 採否 (2026-10-20、[drafts/0014](../../drafts/0014-vteps.md))
+## 採否 (2026-10-20、[ADR-0014](../../0014-vteps.md))
 
 本 README の 4 案 (1 回目の評価) のうち、推奨した案 C (`type: anycast` + `anycast_ip`、MLAG ペアで 1 エンティティ) は**採用しなかった**。
 ユーザーが「なぜ `anycast_ip` なのか。方式が増えるたびに構文が増えるのか」と問い、2 回目の評価で

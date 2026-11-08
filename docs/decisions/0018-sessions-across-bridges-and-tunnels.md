@@ -8,7 +8,7 @@
 - **関連**: ADR-0002 (D5 id の一意性、D7 プレフィックス、D8 severity)、ADR-0003 (role は注釈側)、ADR-0005 (D4 補則 問い 4、D6)、
   [drafts/0007](drafts/0007-vnic-vswitch-bridges.md) (`layer2.bridges` の元の構想)、[ADR-0010](0010-control-plane-separation.md) (D7 通り道、D8、D10)、
   [ADR-0011](0011-layer3-data-plane.md) (D6 トンネル、D11)、[ADR-0013](0013-vlan-ports-on-lag.md) (ポートの形、D7)、
-  [drafts/0015](drafts/0015-declarative-references.md) (Ref)、[ADR-0017](0017-sites-and-wan.md) (D3 線と箱、D4 description、D5-2)
+  [ADR-0015](0015-declarative-references.md) (Ref)、[ADR-0017](0017-sites-and-wan.md) (D3 線と箱、D4 description、D5-2)
 
 ## Context
 
@@ -206,6 +206,7 @@ control_plane:
   - OSPF の `interface` は L3 IF かトンネル IF。
   - IS-IS の `interface` は L1 IF。
 - **食い違いの severity**: ndl_version 1.x の間は warning にとどめ、2.0 で error にする。
+  - **改訂 ([ADR-0025](0025-end-grace-for-old-forms.md) D2, 2026-11-09)**: 1.0 の前に繰り上げ、BGP と同じく error にした。IS-IS のメッセージにはトンネルで直す案を出さない
   - 今まで valid だった OSPF / IS-IS の YAML を、1.x の間に error にしない。
   - BGP の食い違いは今のまま error である。BGP の通り道の検査は ADR-0010 D7 の初めからの約束で、OSPF / IS-IS の検査はこの ADR で新しく足すものだからである。
 - **ADR-0010 D8 との関係**: この決定は 2 端点のセッションの通り道を導くだけで、ADR-0010 D8 のポイントツーポイント前提は変えない。
@@ -301,7 +302,7 @@ OSPF / IS-IS では、1 行目の `update_source` を `interface` と書く。
 - 箱の L1 IF を、`layer1.interfaces` と bridge の `ports` の 2 か所に書く。
 - bridge をはさむとサブ IF のタグを比べないので、タグの書き間違いは検出できない。
 - 拠点の L2 スイッチをはさむ構成は、まだ書けない (D8)。
-- OSPF / IS-IS と BGP で、食い違いの severity が 1.x の間だけ違う。
+- OSPF / IS-IS と BGP で、食い違いの severity が 1.x の間だけ違う ([ADR-0025](0025-end-grace-for-old-forms.md) D2 で揃えた)。
 - bridge を書かない事業者網が「書き忘れ」なのか「透過しない」なのかは、構文からは区別できない。文書で補う (試し書き P1)。
 
 **影響を受けるコンポーネント:**

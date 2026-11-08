@@ -167,6 +167,9 @@ Pass A にあった「短縮形と `attaches_to` の食い違い」の検査は�
 
 ### D10. 移行
 
+> **改訂 ([ADR-0025](0025-end-grace-for-old-forms.md), 2026-11-09)**: 1.0 の前に旧形式の猶予をやめた。下の旧形式はどれも読み替えず、移動先を示す error にする。
+> YAML エクスポーターで書き出す移行の道もなくなった (読めないので)。
+
 ndl_version は 1.x のまま上げない。旧形式は **1.x の間だけ受け付け**、新形式に読み替えて warning を出す
 (`--strict` では error)。2.0 で受け付けをやめる。
 
@@ -242,6 +245,7 @@ IS-IS / OSPF だけの underlay などで外れるため外した。
   旧 `kind` は分類から写す (`vlan` → `svi`、`unattached` → `loopback`、`l1_interface` / `lag` → `routed`)。名前による判定はしない。
   旧 `lo_ip` / `lo_ipv6` は旧ビューワのための互換値で、`unattached` の L3 IF から名前によらず 1 つ選ぶ推定である。
   「推測は出さない」(`docs/exporter-cytoscape.md` の方針) の 1.x 限定の例外とし、選び方は同文書に書く。2.0 で外す
+  - **改訂 ([ADR-0025](0025-end-grace-for-old-forms.md) D3, 2026-11-09)**: 1.0 の前に旧キーをすべて外した。`lo_ip` / `lo_ipv6` の代わりは置かない
 - 出力の語彙は `docs/exporter-cytoscape.md` (informative) にまとめる
 
 ## Consequences
@@ -254,7 +258,7 @@ IS-IS / OSPF だけの underlay などで外れるため外した。
 
 ### 書けないまま残るもの (別 ADR で扱う。network-tech-reviewer の優先順)
 
-1. ~~VXLAN の anycast VTEP (MLAG ペアで共有する VTEP の IP)。`vtep_source` が単数~~ → [drafts/0014](drafts/0014-vteps.md) で解決 (2026-10-20)
+1. ~~VXLAN の anycast VTEP (MLAG ペアで共有する VTEP の IP)。`vtep_source` が単数~~ → [ADR-0014](0014-vteps.md) で解決 (2026-10-20)
 2. MLAG の peer-keepalive
 3. L3 IF 単位の MTU
 4. VXLAN の BUM 配送方式 (ingress replication / multicast)

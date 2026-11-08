@@ -6,7 +6,7 @@
 - **Pass**: C (ラウンド3。[評価メモ](evaluations/round3-evaluation.md) を入力に再設計)
 - **Supersedes**: [drafts/0010](drafts/0010-control-plane-separation.md)
 - **関連**: ADR-0001 (D8 参照キー。本 ADR で改訂)、ADR-0002 (ID)、ADR-0005 (D1・D3-1・D3-2・D3-3・D4 補則・D6。本 ADR で改訂)、ADR-0006 (endpoints)、
-  ADR-0009 (labels)、ADR-0011 (L3 IF・D6 トンネル・D11)、[drafts/0014](drafts/0014-vteps.md) (VTEP)、[drafts/0015](drafts/0015-declarative-references.md) (Ref)、
+  ADR-0009 (labels)、ADR-0011 (L3 IF・D6 トンネル・D11)、[ADR-0014](0014-vteps.md) (VTEP)、[ADR-0015](0015-declarative-references.md) (Ref)、
   [drafts/0016](drafts/0016-router-id-and-management-interface.md) (router_id。本 ADR で置き場所を改訂)
 
 ## Context
@@ -266,7 +266,7 @@ overlay と呼ぶのは運ぶ中身が overlay を作る情報 (EVPN 経路) だ
 - SVI 上のセッション (vPC ペア間の iBGP 等) が peer-link の LAG の上を流れることは、VLAN のポートからたどれば分かる (ADR-0013 D7) が、セッションの通り道としては出さない
 
 > **ADR-0018 で拡張** (2026-11-03): 両端が同じ `layer2.bridges` に届けば `{bridge:}`、両端が対になるトンネル IF なら `{tunnel: [<from>, <to>]}` を通り道とする。
-> OSPF / IS-IS にも同じ規則で通り道を導く (食い違いは 1.x の間 warning)。食い違いのメッセージも改める (2026-11-03 実装)。
+> OSPF / IS-IS にも同じ規則で通り道を導く (食い違いは 1.x の間 warning。[ADR-0025](0025-end-grace-for-old-forms.md) D2 で error に繰り上げた)。食い違いのメッセージも改める (2026-11-03 実装)。
 
 ### D8. OSPF / IS-IS
 
