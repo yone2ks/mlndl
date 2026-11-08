@@ -177,6 +177,8 @@ cumulus_linux:
   ram: 2048
 ```
 
+機器ごとに変える値（1 台だけ RAM を増やす・別のイメージを試す）も、下流のツールの設定で機器の id を引いて書く。mlndl の機器の `overrides` はなくした（[ADR-0024](docs/decisions/0024-remove-node-overrides.md)。書くと error）。ツール向けの汎用の欄は 1.x では足さない
+
 ### 9. 仮想化環境の L1 表現
 
 > **根拠: [ADR-0003](docs/decisions/0003-role-vocabulary.md) D1・D6 / [ADR-0005](docs/decisions/0005-mlndl-expressive-scope.md) D1**
@@ -285,9 +287,7 @@ layer1:
         site: tokyo              # サイト（ADR-0017）。図のサイトの枠になる
         az: ap-northeast-1a
         tenant: acme
-      overrides:                 # 任意: eve-lab-builder のデフォルト値を上書き
-        eve_ng:
-          cpu: 4
+      # overrides はなくした（ADR-0024）。CPU / RAM 等は下流のツールの設定で機器の id を引いて書く
 
   interfaces:
     - id: spine1-swp1
@@ -515,7 +515,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | 制御プレーンの通り道（OSPF / IS-IS） | BGP と同じ規則で両端の `interface` から導いた通り道が食い違わないか。ndl_version 1.x の間は warning、2.0 で error（ADR-0018 D4） | warning |
 | bridge | `ports` は `{interface:}` / `{lag:}` / `{ethernet_segment:}`（型）。参照先がそのキーの種類で定義されているか。同じポートを 2 つの bridge に・同じ bridge に 2 回・LAG とそのメンバー / ES とその脚を併記（error）。ポートが 1 つ、ポートの対向も同じ bridge のポート（ルーターのポートを書いた疑い）、VLAN のポートにもある、LAG のメンバーだけ・ES の脚の一部だけ（warning）（ADR-0018 D1・ADR-0023） | error / warning |
 | 制御プレーンの注意 | default 以外の VRF のセッションに `l2vpn_evpn` / `vpnv4` / `vpnv6` | warning |
-| 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12）。L1 リンクの `mtu` はなくした理由を示すエラー（ADR-0020）。`lag` の `type` / `nodes` / `peer_link` / `peer_link_interface` / `domain_id` / `system_mac` / `client_lag`、ES の `esi` / `system_mac` / `domain_id` / `peer_link(s)`、`anycast_mac`、L3 IF・サブ IF の `attaches_to: {ethernet_segment:}` に移動先か理由を示すエラー（ADR-0022・ADR-0023 D9） | error |
+| 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12）。L1 リンクの `mtu` はなくした理由を示すエラー（ADR-0020）。機器の `overrides` は理由と移動先を示すエラー（ADR-0024）。`lag` の `type` / `nodes` / `peer_link` / `peer_link_interface` / `domain_id` / `system_mac` / `client_lag`、ES の `esi` / `system_mac` / `domain_id` / `peer_link(s)`、`anycast_mac`、L3 IF・サブ IF の `attaches_to: {ethernet_segment:}` に移動先か理由を示すエラー（ADR-0022・ADR-0023 D9） | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
 | VTEP | `sources` が L3 IF に存在するか。同じ L3 IF を 2 つの VTEP / 1 つの VTEP に 2 回書いていないか。1 つの VTEP に同じノードの L3 IF を 2 つ書いていないか。共有（`sources` が複数）なら `address` 必須（型）。アドレスが決まらない / VTEP 間で重複していないか。L2VNI の `vteps` が定義済みか（ADR-0014） | error |
@@ -582,6 +582,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0021](docs/decisions/0021-link-speed-format.md) | `link_speed` の書式 | **C**（2026-11-07 実装） | `<数値><単位>`（単位は K / M / G / T）（10 進のビット毎秒、大文字だけ、bps は付けない、小数の桁は制限なし）。`P` 以上は必要になったら足す。書式違反は直し方を示す error、単位なしは推測しない。正規形（数値が 1 以上 1000 未満になる単位）でなければ warning で、表記は書き換えない。数値への変換は比較が要るまで足さない |
 | [ADR-0022](docs/decisions/0022-diagram-granularity.md) | 記載の粒度 | **C**（2026-11-08 実装） | ADR-0005 D4 補則に問い 5「構成図を読む人が値から関係を読むか、装置に設定するためだけの値か」を追加。MAC 全般・LACP system-id・ESI の値・ドメインの番号・vPC 番号 / clag-id・DF は書かない。VLAN ID・VNI・IP・AS・RT・VRRP の group_id / priority・冗長のモードは書く。`anycast_mac` をなくし、anycast の検査は ip / ipv6 だけ |
 | [ADR-0023](docs/decisions/0023-per-device-lag-and-ethernet-segments.md) | 機器ごとの LAG と `ethernet_segments` | **C**（2026-11-08 実装） | `layer1.lag` は機器 1 台（`type` なし、`name` を追加）。MLAG / vPC / MC-LAG / ESI-LAG は `layer1.ethernet_segments`（`members` は `{lag:}` / `{interface:}`、`redundancy_mode` は任意で既定値なし）。ピアリンクは普通の LAG で構文に書かない。`{ethernet_segment:}` は VLAN / bridge のポートだけが受け、L3 IF・サブ IF は機器ごとの `{lag:}`。旧 `type: mlag` 等は移動先を示す error。エクスポーターは `lag_type` をなくし `ethernet_segment` を出す |
+| [ADR-0024](docs/decisions/0024-remove-node-overrides.md) | 機器の `overrides` をなくす | **C**（2026-11-09 実装） | `layer1.nodes[].overrides`（`dict[str, Any]`）をなくし、書いたら理由と移動先を示す error。下流のツールの値（CPU / RAM / イメージ等）は下流のツールの設定で機器の id を引いて持つ。ツール向けの汎用の欄は 1.x では足さない（補足は `description`、分類は `labels`、それ以外は ADR で専用のフィールド）。要るなら名前空間付きの `map[str, str]` を検討し `dict[str, Any]` には戻さない |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag`。ADR-0023 で機器 1 台の LAG と `ethernet_segments` に分け直した |
 
 ---

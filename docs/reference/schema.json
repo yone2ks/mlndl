@@ -1049,19 +1049,6 @@
           "default": null,
           "title": "Labels"
         },
-        "overrides": {
-          "anyOf": [
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Overrides"
-        },
         "description": {
           "anyOf": [
             {

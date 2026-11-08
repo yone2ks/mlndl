@@ -179,3 +179,12 @@ MLAG と ESI-LAG を最初から 1 つの設計で扱う前提で、L1 の LAG �
 MLAG の固定ペアに寄っていたので廃棄した。ユーザーの 2 つの指摘 (構成図に MAC アドレス相当は書かない / MLAG とスタックで LAG の IF の出方が違う) から、
 ADR-0005 D4 補則に問い 5 (構成図の粒度) を足して `anycast_mac` をなくし (ADR-0022)、LAG を機器ごとにして、
 複数の機器の LAG を相手から 1 本に見せる関係を `layer1.ethernet_segments` に書く形にした (ADR-0023)。ピアリンク・ドメインの番号・ESI の値は書かない。
+
+### L1 の整理: 下流のツールの値 (2026-11-09)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [0024](0024-remove-node-overrides.md) | 機器の `overrides` をなくす (2026-11-09 実装) | **Accepted** | C |
+| [evaluations/adr0024](evaluations/adr0024/) | 試し書き (`overrides` あり / なし + 下流のツールの設定) | — | — |
+
+機器の `overrides` (`dict[str, Any]`) は、EVE-NG の CPU / RAM を mlndl に書く穴で、CLAUDE.md §8 と ADR-0022 の問い 5 に食い違っていた。なくして、下流のツールが自分の設定で機器の id を引く形にした。ツール向けの汎用の欄は 1.x では足さない。

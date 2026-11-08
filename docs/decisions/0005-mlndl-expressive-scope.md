@@ -233,6 +233,8 @@ layer3:
 > `layer1.port_channels` / `layer1.mlag` は §6 設計決定で `layer1.lag` (type: lacp | mlag) に統合済み。
 > `description` は `comment` を併記せず `description` の 1 語に絞り、ADR-0011 で全エンティティに実装した。
 > `link_role` は自由文字列であり、推奨語彙に `trunk` を加えた。実装済みの `MlagLag.system_mac` / `client_lag` は上表にない。
+>
+> **改訂 ([ADR-0024](0024-remove-node-overrides.md), 2026-11-09)**: 上表の `layer1.nodes` の `overrides` はなくした。下流のツールの値は下流のツールの設定で機器の id を引いて持つ。
 
 ##### スコープ内 (Phase 2 以降で実装予定)
 
@@ -530,6 +532,7 @@ VLAN のポートの `node` は、ADR-0013 (Pass A) では「任意 (書けば�
 | D1・D3-1 (制御プレーンの行・(c) の routing_adjacencies 行)・P6・BGP unnumbered の規則 | `control_plane` への分離。VRF ごとの BGP インスタンス、セッションの通り道は導く、unnumbered はアドレスのない L3 IF | ADR-0010 (2026-11-01。Accepted・実装済み) |
 | D3-2・D4 補則 | 問い 5 (構成図の粒度) を追加。`anycast_mac` / `system_mac` をスコープ外に戻した | ADR-0022 (2026-11-08) |
 | D3-2 | EVPN Ethernet Segment を `layer1.ethernet_segments` として扱った (MLAG / vPC / MC-LAG と同じ形) | ADR-0023 (2026-11-08) |
+| D3-1 Phase 1 表 | `layer1.nodes` の `overrides` をなくした | ADR-0024 (2026-11-09) |
 
 ## References
 

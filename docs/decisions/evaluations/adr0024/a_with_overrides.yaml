@@ -1,0 +1,92 @@
+# (a) 今の overrides で機器ごとに CPU / RAM を変えるラボ
+#
+# 想定: 小さな Spine-Leaf (spine x2 / leaf x2 / border x1) を EVE-NG で建てる。
+#       device_type: cumulus_linux の既定値 (eve-lab-builder 側で持つ想定) は
+#         cpu: 2, ram: 2048, template: cumulus-vx
+#       だが、border だけ EVPN のテーブルを多めに持たせたくて ram を増やしたい。
+#       leaf2 はホストが貧弱なので cpu を 1 に絞って動かしたい。
+#       さらに lab 用の管理 IP を下流ツールに渡したい (device_mapping.yaml の既定を使わずに固定する)。
+#
+# ndl_version は必須 (CLAUDE.md §3)。フィールド順は meta → layer1 の順 (CLAUDE.md の例に合わせる)。
+
+ndl_version: "1.0"
+
+meta:
+  name: lab-overrides-a
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - id: eve-01
+      name: EVE-NG host
+      implementation: physical
+      role: hypervisor
+
+    - id: spine1
+      role: spine
+      implementation: vm
+      attaches_to: eve-01
+      device_type: cumulus_linux
+      # overrides を書かない機器は eve-lab-builder の device_mapping.yaml の既定値 (cpu: 2, ram: 2048) を使う
+
+    - id: spine2
+      role: spine
+      implementation: vm
+      attaches_to: eve-01
+      device_type: cumulus_linux
+
+    - id: leaf1
+      role: leaf
+      implementation: vm
+      attaches_to: eve-01
+      device_type: cumulus_linux
+      overrides:                       # 既定より ram を増やしたい
+        eve_ng:
+          ram: 4096
+
+    - id: leaf2
+      role: leaf
+      implementation: vm
+      attaches_to: eve-01
+      device_type: cumulus_linux
+      overrides:
+        eve_ng:
+          cpu: 1                       # ホストが貧弱なので cpu を絞る
+          ram: 1536                    # ついでに ram も削る
+
+    - id: border1
+      role: border
+      implementation: vm
+      attaches_to: eve-01
+      device_type: cumulus_linux
+      overrides:
+        eve_ng:                        # EVPN のテーブルを多めに持たせたくて ram を増やす
+          ram: 6144
+          cpu: 4
+          # ついでにこのラボでは "管理 IP" も固定したい (eve-lab-builder 独自のキー)。
+          # mlndl は中を見ないので、どんなキーを書いてもよい。
+          management_ip: 10.99.0.21/24
+          # template も試験のため上書きしたい (device_type の既定が cumulus-vx でも、ここだけ新しい ISO を使う)
+          template: cumulus-vx-5.9
+
+  interfaces:
+    - {id: spine1-swp1,  node: spine1, name: swp1}
+    - {id: spine1-swp2,  node: spine1, name: swp2}
+    - {id: spine1-swp3,  node: spine1, name: swp3}
+    - {id: spine2-swp1,  node: spine2, name: swp1}
+    - {id: spine2-swp2,  node: spine2, name: swp2}
+    - {id: spine2-swp3,  node: spine2, name: swp3}
+    - {id: leaf1-swp51,  node: leaf1,  name: swp51}
+    - {id: leaf1-swp52,  node: leaf1,  name: swp52}
+    - {id: leaf2-swp51,  node: leaf2,  name: swp51}
+    - {id: leaf2-swp52,  node: leaf2,  name: swp52}
+    - {id: border1-swp51, node: border1, name: swp51}
+    - {id: border1-swp52, node: border1, name: swp52}
+
+  links:
+    - {id: link-spine1-leaf1,   endpoints: [spine1-swp1, leaf1-swp51],  link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf2,   endpoints: [spine1-swp2, leaf2-swp51],  link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-border1, endpoints: [spine1-swp3, border1-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine2-leaf1,   endpoints: [spine2-swp1, leaf1-swp52],  link_speed: 10G, link_role: underlay}
+    - {id: link-spine2-leaf2,   endpoints: [spine2-swp2, leaf2-swp52],  link_speed: 10G, link_role: underlay}
+    - {id: link-spine2-border1, endpoints: [spine2-swp3, border1-swp52], link_speed: 10G, link_role: underlay}

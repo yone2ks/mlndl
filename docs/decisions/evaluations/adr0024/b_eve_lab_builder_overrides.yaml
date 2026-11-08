@@ -1,0 +1,27 @@
+# (b) 対になる下流ツール (eve-lab-builder) 側の設定ファイル (mlndl の外)。
+#     mlndl の YAML (b_no_overrides.yaml) にある機器の id を引いて、EVE-NG 用の
+#     CPU / RAM / template / 管理 IP などを書く。mlndl はこの file を見ない。
+#
+# ファイル名は eve-lab-builder の規約次第 (例: eve-lab-builder/labs/<ラボ名>/overrides.yaml)。
+
+# device_type の既定値 (ラボ横断。CLAUDE.md §8 の device_mapping.yaml に相当)
+device_type_defaults:
+  cumulus_linux:
+    template: cumulus-vx
+    cpu: 2
+    ram: 2048
+
+# このラボだけの機器ごとの上書き。キーは mlndl の node id。
+nodes:
+  leaf1:
+    ram: 4096
+
+  leaf2:
+    cpu: 1
+    ram: 1536
+
+  border1:
+    ram: 6144
+    cpu: 4
+    template: cumulus-vx-5.9
+    management_ip: 10.99.0.21/24
