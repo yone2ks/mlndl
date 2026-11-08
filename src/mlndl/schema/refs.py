@@ -11,7 +11,7 @@ validator は Ref の付いたフィールドをスキーマから見つけ、�
 構文を足すときは Ref を書けば参照の検査が付き、validator に検査を書き足す必要はない。
 
 Ref は「参照先が 1 つに決まっている参照」に使う。参照先の種類をキーで選ぶ参照
-(attaches_to、VLAN のポートの interface / lag。ADR-0001 D8) は、キーごとに参照先を引く別の仕組みで検査する。
+(attaches_to、VLAN のポートの interface / lag / ethernet_segment、Ethernet Segment の脚。ADR-0001 D8) は、キーごとに参照先を引く別の仕組みで検査する。
 複数のコレクションを並べた Ref は、id から種類が決まる参照 (ADR-0002 D5 で id はグローバルに一意) に使う。
 参照先の種類で意味が変わらない参照だけで、キーは要らない (ADR-0018 D3)。
 """
@@ -56,6 +56,7 @@ COLLECTION_LABELS = {
     "layer1.interfaces": "L1 インターフェース",
     "layer1.links": "リンク",
     "layer1.lag": "LAG",
+    "layer1.ethernet_segments": "Ethernet Segment",
     "layer2.vlans": "VLAN",
     "layer2.bridges": "bridge",
     "layer2.vteps": "VTEP",

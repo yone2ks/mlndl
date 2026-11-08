@@ -40,7 +40,7 @@ interfaces:
     vrf: vrf-tenant-a
     attaches_to: {vlan: vlan-100}
     gateway_redundancy:
-      - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+      - {mode: anycast_gateway}             # 全ノードで同じ ip。MAC アドレスは書かない
   - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}   # attaches_to なし (ループバックなど)
 ```
 
@@ -59,10 +59,12 @@ interfaces:
 | `attaches_to` のキー | 参照先 | 分類 | 例 |
 |---|---|---|---|
 | `interface` | `layer1.interfaces` | L1 IF の上 | routed ポート |
-| `lag` | `layer1.lag` | LAG の上 | routed LAG |
+| `lag` | `layer1.lag` | LAG の上 | routed LAG。MLAG / ESI-LAG の上なら機器ごとの LAG を指す |
 | `vlan` | `layer2.vlans` | VLAN の上 | SVI |
 | `subinterface` | `layer2.subinterfaces` | サブ IF の上 | router-on-a-stick |
 | (書かない) | | どれにも載らない | ループバックなど。ループバックとみなすわけではない |
+
+`attaches_to` に `{ethernet_segment:}` は書けません。L3 IF は機器ごとに IP を持つので、機器ごとの LAG を `{lag:}` で指します ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D5)。
 
 分類は `attaches_to` のキーで決まり、`name` では決めません。`ip` も `ipv6` も持たない L3 IF を BGP の `update_source` にすると unnumbered になります ([control-plane.md](control-plane.ja.md))。
 
@@ -82,9 +84,10 @@ gateway_redundancy:
 | | `vip` | IP アドレス | ○ | IPv4 は IF のサブネットの中。IPv6 はリンクローカル (RFC 5798) |
 | | `priority` | 整数 | | |
 | | `preempt` | 真偽値 | | |
-| `anycast_gateway` | `anycast_mac` | MAC アドレス | | 同じ VLAN の anycast gateway の群で `ip` / `ipv6` / `anycast_mac` がすべて一致すること |
+| `anycast_gateway` | (なし) | | | 同じ VLAN の anycast gateway の群で `ip` / `ipv6` が一致すること |
 
 どの mode も `description` を書けます。
+anycast の MAC アドレス (`anycast_mac`) は書きません。MAC アドレスは構成図の粒度ではないためです。書くと error になります ([ADR-0022](../decisions/0022-diagram-granularity.md) D2)。
 
 ## tunnel_interfaces
 

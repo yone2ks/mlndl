@@ -42,7 +42,8 @@ ADR の本文に残る「Phase 2 で」「Phase 3+ で」は、この一覧の�
 |---|---|---|
 | vNIC と vSwitch / dvSwitch (`layer2.bridges` の `type` / `nodes` / `uplinks`、VLAN との関係) | drafts/0007、ADR-0018 | ハイパーバイザの中の L2 を書く必要が出たとき |
 | EVPN の advertise フラグ (`advertise-default-gw` / `advertise-svi-ip` / `advertise-pip`) | ADR-0005 D3-1 (「含む」と予告済み) | ADR-0005 の再設計 (drafts/0005v2) を始めるとき、または MLAG + Symmetric IRB の例で必要になったとき |
-| EVPN の Ethernet Segment (ESI-LAG) | ADR-0005 D3-2 | MLAG の代わりに ESI で冗長化する構成を書くとき |
+| Ethernet Segment の脚にサブ IF (`{subinterface:}`。論理 IF に直接 ESI を付ける構成) | ADR-0023 D3 | その構成を書く必要が出たとき。`members` はキー付きの形なので加算的に足せる |
+| 機器ごとに書く L3 IF・サブ IF が、Ethernet Segment の脚の一部の機器にしかない (warning) | ADR-0023 D7 | routed の MLAG の片側だけに L3 IF を書く誤りを拾いたくなったとき |
 | BUM の配送方式 (HER / PIM) | ADR-0005 D3-2 | 今は HER を暗黙に前提している。マルチキャストのアンダーレイを書くとき |
 | L2 トンネル (EoGRE / L2TPv3 / OTV) | ADR-0005 D3-2 | その構成を書く必要が出たとき |
 | Q-in-Q (`stag_vlan_id` / `ctag_vlan_id`) | ADR-0002 (名前だけ予約) | その構成を書く必要が出たとき |

@@ -154,45 +154,54 @@ layer1:
       link_role: access
 
   lag:
-    # peer-link（leaf1 側 LACP bond）
-    - id: lag-peer-link
-      type: lacp
+    # peer-link。機器ごとの普通の LAG として書く (ADR-0023 D6)
+    - id: lag-leaf1-peer
       node: leaf1
+      name: peerlink
       members: [leaf1-swp49, leaf1-swp50]
       lacp: {mode: active, min_links: 1}
 
-    # Server1 向け MLAG（leaf1 + leaf2）
-    - id: lag-mlag-server1
-      type: mlag
-      nodes: [leaf1, leaf2]
-      members: [leaf1-swp1, leaf2-swp1]
+    - id: lag-leaf2-peer
+      node: leaf2
+      name: peerlink
+      members: [leaf2-swp49, leaf2-swp50]
       lacp: {mode: active, min_links: 1}
-      peer_link: lag-peer-link
-      peer_link_interface: peerlink.4094
-      domain_id: 10
-      system_mac: "44:38:39:ff:00:0a"   # 両 leaf 共通 MLAG system MAC
-      client_lag: lag-server1-bond0      # 対向 server1 bond への単方向参照
+
+    # Server1 向けの bond。MLAG でも LAG は機器ごとにある (ADR-0023 D1)
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+      lacp: {mode: active, min_links: 1}
+
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+      lacp: {mode: active, min_links: 1}
 
     # Server1 側 LACP bond（MLAG 対向）
     - id: lag-server1-bond0
-      type: lacp
       node: server1
       members: [server1-eth0, server1-eth1]
       lacp: {mode: active, min_links: 1}
 
     # Leaf3 → Server2 LACP bond（単一ノード、2本）
     - id: lag-leaf3-server2
-      type: lacp
       node: leaf3
       members: [leaf3-swp1, leaf3-swp2]
       lacp: {mode: active, min_links: 1}
 
     # Server2 側 LACP bond
     - id: lag-server2-bond0
-      type: lacp
       node: server2
       members: [server2-eth0, server2-eth1]
       lacp: {mode: active, min_links: 1}
+
+  ethernet_segments:
+    # leaf1 / leaf2 の bond1 を Server1 から 1 本に見せる (ADR-0023 D2)。clag-id・system MAC は書かない
+    - id: es-server1
+      members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]
 
 layer2:
   vlans:
@@ -200,7 +209,7 @@ layer2:
       vlan_id: 100
       name: tenant-a
       trunk_ports:
-        - {lag: lag-mlag-server1}   # MLAG は 1 エントリで leaf1 / leaf2 の両方 (ADR-0013 D2)
+        - {ethernet_segment: es-server1}   # 1 エントリで leaf1 / leaf2 の両方 (ADR-0023 D5)
 
   vteps:
     # MLAG ペア leaf1 / leaf2 が共有する VTEP (ADR-0014)。各 lo は固有 IP、共有するアドレスは address

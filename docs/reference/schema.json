@@ -5,24 +5,12 @@
   "$defs": {
     "AnycastGateway": {
       "additionalProperties": false,
-      "description": "EVPN distributed anycast gateway (RFC 9135)\n\nプロトコル交換を持たず、全ノードが同時に active。VIP / group_id は持たない\n(L3Interface の ip / ipv6 自体が anycast アドレス)。",
+      "description": "EVPN distributed anycast gateway (RFC 9135)\n\nプロトコル交換を持たず、全ノードが同時に active。VIP / group_id は持たない\n(L3Interface の ip / ipv6 自体が anycast アドレス)。\nanycast の MAC アドレスは書かない。MAC は構成図の粒度ではない (ADR-0022 D2)",
       "properties": {
         "mode": {
           "const": "anycast_gateway",
           "title": "Mode",
           "type": "string"
-        },
-        "anycast_mac": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Anycast Mac"
         },
         "description": {
           "anyOf": [
@@ -408,7 +396,7 @@
     },
     "BridgePort": {
       "additionalProperties": false,
-      "description": "bridge のポート (ADR-0018 D1)。フレームを転送する側 (事業者網なら箱) の L1 IF か LAG。native は持たない",
+      "description": "bridge のポート (ADR-0018 D1)。フレームを転送する側 (事業者網なら箱) の L1 IF・LAG・Ethernet Segment。native は持たない",
       "properties": {
         "interface": {
           "anyOf": [
@@ -433,6 +421,18 @@
           ],
           "default": null,
           "title": "Lag"
+        },
+        "ethernet_segment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ethernet Segment"
         }
       },
       "title": "BridgePort",
@@ -502,6 +502,69 @@
         }
       },
       "title": "ControlPlane",
+      "type": "object"
+    },
+    "EthernetSegment": {
+      "additionalProperties": false,
+      "description": "複数の機器の脚 (LAG か L1 IF) を、相手 (ホスト / CE) から 1 本に見せる関係 (ADR-0023 D2)\n\nRFC 7432 の Ethernet Segment。MLAG / vPC / MC-LAG / EVPN multihoming をこの 1 つの形で書き、方式名は書かない。\n- members: 脚。2 つ以上で、機器はすべて別\n- redundancy_mode: all_active (脚がそろって転送する) / single_active (同時に転送するのは 1 本)。\n  既定値はなく、書かなければ「書いていない」(ADR-0023 D4)。どの脚が転送するか (DF) は書かない\n- ESI の値・LACP system-id・domain_id・vPC 番号 / clag-id・ピアリンクは書かない (ADR-0022)",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/SegmentMember"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "redundancy_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "all_active",
+                "single_active"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Redundancy Mode"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id",
+        "members"
+      ],
+      "title": "EthernetSegment",
       "type": "object"
     },
     "HsrpGateway": {
@@ -787,7 +850,7 @@
     },
     "L1Layer": {
       "additionalProperties": false,
-      "description": "Layer 1 全体（nodes / interfaces / links / lag）",
+      "description": "Layer 1 全体（nodes / interfaces / links / lag / ethernet_segments）",
       "properties": {
         "nodes": {
           "default": [],
@@ -816,23 +879,17 @@
         "lag": {
           "default": [],
           "items": {
-            "discriminator": {
-              "mapping": {
-                "lacp": "#/$defs/LacpLag",
-                "mlag": "#/$defs/MlagLag"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/LacpLag"
-              },
-              {
-                "$ref": "#/$defs/MlagLag"
-              }
-            ]
+            "$ref": "#/$defs/Lag"
           },
           "title": "Lag",
+          "type": "array"
+        },
+        "ethernet_segments": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EthernetSegment"
+          },
+          "title": "Ethernet Segments",
           "type": "array"
         }
       },
@@ -1390,22 +1447,29 @@
       "title": "LacpConfig",
       "type": "object"
     },
-    "LacpLag": {
+    "Lag": {
       "additionalProperties": false,
-      "description": "単一ノードの LACP bond",
+      "description": "機器 1 台の LAG (ADR-0023 D1)\n\nMLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG IF は機器ごとにある。それを 1 台ずつ書き、\n複数の機器の LAG を相手から 1 本に見せる関係は layer1.ethernet_segments で束ねる。\nスタック / VSS / Virtual Chassis は 1 台の論理機器なので、筐体をまたぐ LAG もここに 1 つ書く。",
       "properties": {
         "id": {
           "title": "Id",
           "type": "string"
         },
-        "type": {
-          "const": "lacp",
-          "title": "Type",
-          "type": "string"
-        },
         "node": {
           "title": "Node",
           "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
         },
         "members": {
           "items": {
@@ -1440,11 +1504,10 @@
       },
       "required": [
         "id",
-        "type",
         "node",
         "members"
       ],
-      "title": "LacpLag",
+      "title": "Lag",
       "type": "object"
     },
     "Meta": {
@@ -1473,112 +1536,6 @@
         }
       },
       "title": "Meta",
-      "type": "object"
-    },
-    "MlagLag": {
-      "additionalProperties": false,
-      "description": "マルチシャーシ LAG (MLAG)",
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "string"
-        },
-        "type": {
-          "const": "mlag",
-          "title": "Type",
-          "type": "string"
-        },
-        "nodes": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Nodes",
-          "type": "array"
-        },
-        "members": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Members",
-          "type": "array"
-        },
-        "lacp": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LacpConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "peer_link": {
-          "title": "Peer Link",
-          "type": "string"
-        },
-        "peer_link_interface": {
-          "title": "Peer Link Interface",
-          "type": "string"
-        },
-        "domain_id": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Domain Id"
-        },
-        "system_mac": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "System Mac"
-        },
-        "client_lag": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Client Lag"
-        },
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Description"
-        }
-      },
-      "required": [
-        "id",
-        "type",
-        "nodes",
-        "members",
-        "peer_link",
-        "peer_link_interface"
-      ],
-      "title": "MlagLag",
       "type": "object"
     },
     "OspfAdjacency": {
@@ -1752,6 +1709,18 @@
           "default": null,
           "title": "Lag"
         },
+        "ethernet_segment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ethernet Segment"
+        },
         "node": {
           "anyOf": [
             {
@@ -1795,6 +1764,38 @@
         }
       },
       "title": "RouteTargets",
+      "type": "object"
+    },
+    "SegmentMember": {
+      "additionalProperties": false,
+      "description": "Ethernet Segment の脚。{lag: <LAG の id>} か {interface: <L1 IF の id>} のどちらか一方 (ADR-0023 D3)\n\n脚が LAG でない構成 (single-active で物理 IF に直接 ESI を設定する) は {interface:} で書く",
+      "properties": {
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interface"
+        },
+        "lag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lag"
+        }
+      },
+      "title": "SegmentMember",
       "type": "object"
     },
     "Subinterface": {

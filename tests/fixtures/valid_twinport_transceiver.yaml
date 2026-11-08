@@ -89,7 +89,6 @@ layer1:
 
   lag:
     - id: lag-spine1-to-leaf3
-      type: lacp
       node: spine1
       members: [spine1-eth1-2-a, spine1-eth1-2-b]
       lacp: {mode: active, min_links: 1}

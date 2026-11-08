@@ -28,7 +28,7 @@ SCHEMA_MODULES = (layer1, layer2, layer3, control_plane, topology_mod)
 # 参照でなければここに足す (どちらもしないと test_every_string_field_is_classified が落ちる)
 NOT_REFERENCES = {
     "id", "name", "description", "role", "device_type", "rd", "link_speed", "link_role",
-    "peer_link_interface", "system_mac", "anycast_mac", "import_", "export",
+    "import_", "export",
     "address_families", "network_types", "ndl_version",
     "net", "area", "level",          # 制御プレーン (ADR-0010): IS-IS の NET、OSPF の area、IS-IS の level
 }
@@ -36,7 +36,10 @@ NOT_REFERENCES = {
 # 参照先の種類をキーで選ぶ参照 (ADR-0001 D8 / ADR-0013 D1)。_resolve_ref が検査する
 KEYED_REFERENCES = {
     ("AttachesToObj", name) for name in ("node", "interface", "lag", "vlan", "subinterface")
-} | {(model, key) for model in ("PortTarget", "PortRef", "BridgePort") for key in ("interface", "lag")} | {
+} | {(model, key) for model in ("PortTarget", "PortRef", "BridgePort") for key in ("interface", "lag", "ethernet_segment")} | {
+    # Ethernet Segment の脚 (ADR-0023 D3)。_validate_ethernet_segments が _resolve_ref で検査する
+    ("SegmentMember", key) for key in ("interface", "lag")
+} | {
     # attaches_to は文字列 (ノード id の糖衣構文) か AttachesToObj。_check_attaches_to が検査する
     # (セッションは attaches_to を持たない。ADR-0010 D7)
     (model, "attaches_to") for model in ("L1Node", "L1Interface")

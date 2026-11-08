@@ -43,6 +43,9 @@ IP と VRF は持たず、L3 は `layer3.interfaces` が `attaches_to: {subinter
 ### D2. `node` を持たない
 
 サブ IF はタグ番号だけを持ち、ノードは基盤 (L1 IF / LAG) から決まる (ADR-0005 D6)。MLAG を基盤にすれば両ノードに存在する。
+
+> **改訂 ([ADR-0023](0023-per-device-lag-and-ethernet-segments.md) D5, 2026-11-08)**: LAG は機器 1 台になったので、MLAG / ESI-LAG の上のサブ IF も機器ごとに書き、その機器の LAG を `{lag:}` で指す。
+> サブ IF の基盤に `{ethernet_segment:}` は書けない。
 `node` を書くとスキーマで error。
 
 ### D3. `vlan_id` はタグ番号であり、VLAN への参照ではない

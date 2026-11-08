@@ -34,8 +34,8 @@ layer1:
     - {id: link-r1-r2-a, endpoints: [r1-eth2, r2-eth2]}
     - {id: link-r1-r2-b, endpoints: [r1-eth3, r2-eth3]}
   lag:
-    - {id: lag-r1-po1, type: lacp, node: r1, members: [r1-eth2, r1-eth3]}
-    - {id: lag-r2-po1, type: lacp, node: r2, members: [r2-eth2, r2-eth3]}
+    - {id: lag-r1-po1, node: r1, members: [r1-eth2, r1-eth3]}
+    - {id: lag-r2-po1, node: r2, members: [r2-eth2, r2-eth3]}
 layer2:
   vlans: [{id: vlan-10, vlan_id: 10}, {id: vlan-20, vlan_id: 20}]
 layer3:

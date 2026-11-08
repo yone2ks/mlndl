@@ -171,6 +171,9 @@ D2 のキーに `lag` / `vlan` / `subinterface` を加え、**`interface` は L1
 
 VLAN のポート (`layer2.vlans[].trunk_ports` / `access_ports`) も同じ考え方で `{interface:}` / `{lag:}` と書く (ADR-0013 D1)。
 
+> **改訂 ([ADR-0023](0023-per-device-lag-and-ethernet-segments.md) D5, 2026-11-08)**: VLAN のポートと bridge のポートは `{ethernet_segment:}` も受ける (複数の機器の脚を束ねた `layer1.ethernet_segments`)。
+> `attaches_to` の書けるキー (上の表) は変えない。L3 IF・サブ IF は機器ごとの LAG を `{lag:}` で指し、`{ethernet_segment:}` を書くと error になる。
+
 **経緯**: ADR-0012 / 0013 (Pass A) は `{interface: X}` の X に L1 IF / LAG / VLAN / サブ IF のどれでも書けるようにし、
 どれを受け付けるかを参照元ごとの表で管理した。ラウンド4 Pass B で、(1) 同じキーが参照元によって違う ID 空間を引くのは
 D2「キー名が discriminator」に反する、(2) YAML を見ても何を指しているかが分からない (試し書きで実際に迷った)、

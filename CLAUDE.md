@@ -131,50 +131,35 @@ ID 命名規則も参照: [ADR-0002](docs/decisions/0002-id-naming-convention.md
 
 ---
 
-### 6. `lag` — LACP と MLAG の統一フィールド
+### 6. `lag` は機器 1 台、複数の機器の冗長は `ethernet_segments`
 
-`port_channels`（単一ノード LAG）と `mlag`（マルチシャーシ LAG）を **`lag` フィールドに統合**。`type` で区別する。
+> **→ 詳細: [ADR-0023](docs/decisions/0023-per-device-lag-and-ethernet-segments.md) / 粒度: [ADR-0022](docs/decisions/0022-diagram-granularity.md)**
+
+MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG は機器ごとにある。`layer1.lag` は常に**機器 1 台の LAG**（`type` はなくした。`name` は機器上の名前）。
+複数の機器の LAG（か L1 IF）を相手から 1 本に見せる関係は **`layer1.ethernet_segments`**（RFC 7432 の Ethernet Segment。推奨プレフィックス `es-`）で束ねる。方式名は書かない。
 
 ```yaml
 lag:
-  - id: lag-leaf1-bond0           # LACP: 単一ノードの bond
-    type: lacp
-    node: leaf1                   # 単数形: lacp は 1 ノード
-    members: [leaf1-swp1, leaf1-swp2]
-    lacp: {mode: active, min_links: 1}
-
-  - id: lag-mlag-server1          # MLAG: 2 ノードにまたがる bond
-    type: mlag
-    nodes: [leaf1, leaf2]         # 複数形: mlag は 2 ノード
-    members: [leaf1-swp3, leaf2-swp3]
-    lacp: {mode: active, min_links: 1}
-    peer_link: lag-peer-link      # 同じ lag リスト内の別エントリを参照
-    peer_link_interface: peerlink.4094
-    domain_id: 10
+  - {id: lag-leaf1-peer,    node: leaf1, name: peerlink, members: [leaf1-swp49, leaf1-swp50]}   # ピアリンクは普通の LAG
+  - {id: lag-leaf2-peer,    node: leaf2, name: peerlink, members: [leaf2-swp49, leaf2-swp50]}
+  - {id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1], lacp: {mode: active}}
+  - {id: lag-leaf2-server1, node: leaf2, name: bond1, members: [leaf2-swp1], lacp: {mode: active}}
+ethernet_segments:
+  - id: es-server1                                                  # MLAG / vPC / ESI-LAG (all-active)
+    members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]   # 2 つ以上、機器はすべて別
+  - id: es-fw1                                                      # ESI の single-active。CE は LAG を組まない
+    members: [{interface: leaf3-xe-0-0-4}, {interface: leaf4-xe-0-0-4}]   # 脚は {lag:} か {interface:}
+    redundancy_mode: single_active                                  # 任意。既定値なし (書かなければ「書いていない」)
 ```
 
-pydantic での型定義（Discriminated Union）:
+- スタック / VSS / Virtual Chassis / IRF は 1 つの L1 ノード + 1 つの LAG。ES は書かない
+- **ピアリンクは構文に書かない**（2 台をつなぐ普通の LAG。`link_role: peer-link` は注釈で、検査に使わない。ADR-0020 と同じ理由）
+- **書かない**（ADR-0022 の粒度）: ESI の値・LACP system-id・domain_id・vPC 番号 / clag-id・どの脚が転送するか（DF）
+- `{ethernet_segment:}` を受けるのは VLAN のポートと bridge のポートだけ。L3 IF・サブ IF は機器ごとの LAG を `{lag:}` で指す（`attaches_to` のキーは増やさない）
+- MLAG か EVPN multihoming かは構文で区別しない。上位ツールが `device_type` から導く
 
-```python
-class LacpLag(BaseModel):
-    type: Literal["lacp"]
-    node: str                          # 単一ノード
-    members: list[str]
-    lacp: LacpConfig | None = None
-
-class MlagLag(BaseModel):
-    type: Literal["mlag"]
-    nodes: list[str]                   # 2 ノード固定
-    members: list[str]
-    lacp: LacpConfig | None = None
-    peer_link: str                     # lag.id を参照
-    peer_link_interface: str
-    domain_id: int | None = None
-
-Lag = Annotated[LacpLag | MlagLag, Field(discriminator="type")]
-```
-
-廃止フィールド（使わない）: `port_channels`、`mlag`（トップレベルキー）
+廃止フィールド（書くと移動先を示す error）: `type: lacp` / `type: mlag`、`nodes`、`peer_link`、`peer_link_interface`、`domain_id`、`system_mac`、`client_lag`。
+さらに古い `port_channels`、`mlag`（トップレベルキー）も使わない
 
 ### 8. device_type は抽象キー
 
@@ -315,28 +300,28 @@ layer1:
       link_speed: 10G            # <数値><K|M|G|T>（10 進のビット毎秒。bps は付けない。ADR-0021）
       link_role: underlay        # 自由文字列。推奨: underlay/access/trunk/peer-link/management/uplink
 
-  lag:
-    - id: lag-leaf1-bond0           # LACP: 単一ノードの bond
-      type: lacp
+  lag:                             # ADR-0023。常に機器 1 台の LAG（type はない）
+    - id: lag-leaf1-bond0
       node: leaf1
+      name: bond0                  # 機器上の名前（参照ではない）
       members: [leaf1-swp1, leaf1-swp2]
       lacp: {mode: active, min_links: 1}
+    - {id: lag-leaf1-server1, node: leaf1, name: bond3, members: [leaf1-swp3]}
+    - {id: lag-leaf2-server1, node: leaf2, name: bond3, members: [leaf2-swp3]}
 
-    - id: lag-mlag-server1          # MLAG: 2 ノードにまたがる bond
-      type: mlag
-      nodes: [leaf1, leaf2]
-      members: [leaf1-swp3, leaf2-swp3]
-      lacp: {mode: active, min_links: 1}
-      peer_link: lag-peer-link
-      peer_link_interface: peerlink.4094
-      domain_id: 10
+  ethernet_segments:               # ADR-0023。複数の機器の脚を相手から 1 本に見せる（MLAG / vPC / MC-LAG / ESI-LAG）
+    - id: es-server1               # 推奨プレフィックス es-
+      members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]   # {lag:} か {interface:}。2 つ以上、機器はすべて別
+      # redundancy_mode: single_active   # 任意（all_active / single_active）。既定値なし
+      # ピアリンク・domain_id・system MAC・ESI の値・vPC 番号は書かない（ADR-0022）
 
 layer2:
   vlans:
     - id: vlan-100              # ADR-0002: vlan-<N> 形式
       vlan_id: 100
-      trunk_ports:               # {interface: <L1 IF id>} か {lag: <LAG id>}（ADR-0013）。機器上の名前ではない
-        - {lag: lag-mlag-server1}          # LAG はメンバーでなく LAG を指す。MLAG は 1 行で両ノード
+      trunk_ports:               # {interface:} / {lag:} / {ethernet_segment:}（ADR-0013・ADR-0023）。機器上の名前ではない
+        - {ethernet_segment: es-server1}   # 1 行で脚の全機器に効く
+        - {lag: lag-leaf1-bond0}           # LAG はメンバーでなく LAG を指す
         - {interface: leaf1-swp4}          # node は書かない（参照先から導出。ADR-0005 D6）
       access_ports:
         - {interface: server1-eth0}
@@ -401,7 +386,7 @@ layer3:
       ip: 192.168.100.1/24      # anycast 構成では全 leaf で同一 IP（validator が照合する）
       vrf: vrf-tenant-a
       gateway_redundancy:        # ADR-0011 D4（旧 fhrp）。mode で分岐する Tagged Union
-        - {mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}
+        - {mode: anycast_gateway}       # anycast_mac は書かない（MAC は構成図の粒度ではない。ADR-0022）
         # VRRP の場合（IPv4 と IPv6 は別エントリ。IPv6 の VIP はリンクローカル）:
         # - {mode: vrrp, group_id: 100, vip: 192.168.100.254, priority: 110}
         # - {mode: vrrp, group_id: 100, vip: "fe80::1", priority: 110}
@@ -489,14 +474,14 @@ mlndl/
 │   └── mlndl/
 │       ├── __init__.py
 │       ├── schema/
-│       │   ├── layer1.py       # L1Node, L1Interface, L1Link, LacpLag, MlagLag
+│       │   ├── layer1.py       # L1Node, L1Interface, L1Link, Lag, EthernetSegment
 │       │   ├── layer2.py       # VLAN, Bridge, VxLAN (l2vni/l3vni), Subinterface
 │       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface
 │       │   ├── control_plane.py # BGP / OSPF / IS-IS のインスタンス、BFD、routing_neighbors（ADR-0010）
 │       │   ├── refs.py         # Ref（参照先の宣言。ADR-0015）
 │       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
 │       ├── index.py            # IdIndex（id → エンティティの索引）
-│       ├── derive.py           # 参照をたどって求める関係（VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
+│       ├── derive.py           # 参照をたどって求める関係（Ethernet Segment の脚 ADR-0023、VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
 │       ├── validator.py        # 整合性チェック
 │       └── exporter/
@@ -528,31 +513,31 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | 参照整合性 | スキーマで `Ref` を宣言したフィールドが、参照先に実在する id を指しているか（汎用の検査。ADR-0015）。別の種類の id を指したら何であるかを添える | error |
 | 制御プレーン | `instance` の省略は同じ type のエントリが 1 つのときだけ。端の機器がインスタンスの `nodes` にあるか。`update_source`（OSPF / IS-IS は `interface`）の機器が端の機器と一致するか。`update_source` の VRF がインスタンスの VRF と一致するか。両端から導いた通り道が食い違わないか。トランスポートのアドレスファミリーが一致するか。同じ両端のセッションの重複。`route_reflector_client` は iBGP だけ。同一ノード・同一 VRF で AS は 1 つ、同一 VRF に BGP エントリは 1 つ。`bfd: true` の両端がタイマーの `nodes` にあるか。端点の形・両端ともトポロジー外は型で弾く（ADR-0010 D10）。通り道は同じリンク / LAG、同じ bridge に届く（1 ホップ）、対になるトンネル IF のどれか。食い違いのメッセージは両端の通り道と直し方 (a)(b)(c) を示す（ADR-0018 D2・D3・D6） | error |
 | 制御プレーンの通り道（OSPF / IS-IS） | BGP と同じ規則で両端の `interface` から導いた通り道が食い違わないか。ndl_version 1.x の間は warning、2.0 で error（ADR-0018 D4） | warning |
-| bridge | `ports` は `{interface:}` か `{lag:}`（型）。参照先がそのキーの種類で定義されているか。同じポートを 2 つの bridge に・同じ bridge に 2 回・LAG とそのメンバーを併記（error）。ポートが 1 つ、ポートの対向も同じ bridge のポート（ルーターのポートを書いた疑い）、VLAN のポートにもある、LAG のメンバーだけ（warning）（ADR-0018 D1） | error / warning |
+| bridge | `ports` は `{interface:}` / `{lag:}` / `{ethernet_segment:}`（型）。参照先がそのキーの種類で定義されているか。同じポートを 2 つの bridge に・同じ bridge に 2 回・LAG とそのメンバー / ES とその脚を併記（error）。ポートが 1 つ、ポートの対向も同じ bridge のポート（ルーターのポートを書いた疑い）、VLAN のポートにもある、LAG のメンバーだけ・ES の脚の一部だけ（warning）（ADR-0018 D1・ADR-0023） | error / warning |
 | 制御プレーンの注意 | default 以外の VRF のセッションに `l2vpn_evpn` / `vpnv4` / `vpnv6` | warning |
-| 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12）。L1 リンクの `mtu` はなくした理由を示すエラー（ADR-0020） | error |
+| 旧構造 | `protocols`、`layer3.routing_adjacencies`、`protocols.bgp[].role`、`neighbors[].remote_as` / `type`、`attaches_to: {link:}` に移動先を示すエラー。読み替えはしない（ADR-0010 D12）。L1 リンクの `mtu` はなくした理由を示すエラー（ADR-0020）。`lag` の `type` / `nodes` / `peer_link` / `peer_link_interface` / `domain_id` / `system_mac` / `client_lag`、ES の `esi` / `system_mac` / `domain_id` / `peer_link(s)`、`anycast_mac`、L3 IF・サブ IF の `attaches_to: {ethernet_segment:}` に移動先か理由を示すエラー（ADR-0022・ADR-0023 D9） | error |
 | VNI ユニーク性 | L2VNI と L3VNI がグローバルに重複していないか | error |
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
 | VTEP | `sources` が L3 IF に存在するか。同じ L3 IF を 2 つの VTEP / 1 つの VTEP に 2 回書いていないか。1 つの VTEP に同じノードの L3 IF を 2 つ書いていないか。共有（`sources` が複数）なら `address` 必須（型）。アドレスが決まらない / VTEP 間で重複していないか。L2VNI の `vteps` が定義済みか（ADR-0014） | error |
-| VTEP の注意 | `sources` が 1 つで `address` が L3 IF の ip と食い違う。MLAG ペアの片方だけが VTEP を終端している。旧形式 `vtep_source` / `members` | warning |
+| VTEP の注意 | `sources` が 1 つで `address` が L3 IF の ip と食い違う。ES の脚の機器の一部が、どの VTEP も終端していない（ADR-0023 D7）。旧形式 `vtep_source` / `members` | warning |
 | ノード所属 | L3 IF の `node` が、`attaches_to` の参照先（L1 IF / LAG / サブ IF）のノード（群）に含まれるか（ADR-0011 D9） | error |
-| VLAN のポート | `{interface:}` か `{lag:}` のどちらか一方（型）。同じ VLAN に LAG とそのメンバーを併記していないか（error）。同じ VLAN に同じ端点を 2 回書いていないか（error）。LAG のメンバーだけを書いていたら `{lag:}` を促す（warning）（ADR-0013） | error / warning |
+| VLAN のポート | `{interface:}` / `{lag:}` / `{ethernet_segment:}` のどれか 1 つ（型）。同じ VLAN に LAG とそのメンバー、ES とその脚を併記していないか（error）。同じ VLAN に同じ端点を 2 回書いていないか（error）。LAG のメンバーだけなら `{lag:}`、ES の脚の一部だけなら `{ethernet_segment:}` を促す（warning）（ADR-0013・ADR-0023 D7） | error / warning |
 | 参照キー | `attaches_to` のキーがそのエンティティに書けるものか（型。ADR-0001 D8）。参照先がそのキーの種類で定義されているか。キーの取り違え（`{lag: vlan-100}` 等）には正しいキーを示す | error |
 | ID の文法 | すべてのエンティティの `id` が `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` に従い、63 文字以内か（ADR-0002 D1）。違反理由をまとめて示す | error |
 | ID の一意性 | すべての `id` がトポロジー全体で一意か。同じ一覧の中の重複も、別の一覧との重複も error（ADR-0002 D5） | error |
 | サブ IF | `vlan_id` が 1..4094 か。同じ基盤の上でタグが重複していないか。`attaches_to` が `{interface:}` か `{lag:}` か。タグと `layer2.vlans` の照合は**しない**（ADR-0012 D3） | error |
 | L3 IF 重複 | 同一 `(node, name)` の L3Interface が重複していないか | error |
 | IP アドレス | `ip` は IPv4、`ipv6` は IPv6 の CIDR（型で検証。`ip` に IPv6 を書くと移動先を示すエラー） | error |
-| ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か（IF に `ip` がなければ warning）。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798）。同じ VLAN の anycast gateway 群で `ip` / `ipv6` / `anycast_mac` が一致するか | error |
+| ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か（IF に `ip` がなければ warning）。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798）。同じ VLAN の anycast gateway 群で `ip` / `ipv6` が一致するか | error |
 | トンネル | `source` が同じ node の L3 IF か。`destination_interface` が別 node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。外側のアドレスファミリーが source と destination で一致するか。VRF 参照。対向がトポロジー内なのに逆向きのトンネルがなければ info | error / info |
 | 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
 | 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、`{interface: <LAG / VLAN / サブ IF>}`、VLAN のポートの `node`。ndl_version 1.x の間は読み替えて受け付ける（ADR-0011 D10） | warning |
 | VNI の参加ノード | L2VNI に参加するノード（VTEP から導出）に、その VLAN のポートがあるか | warning |
 | VLAN の端点 | ポート → L1 リンクの対向 → 対向の L3 IF を id でたどって求めた端点（1 ホップ。`derive.vlan_endpoints`）の IP が、その VLAN の SVI のサブネットに入っているか。SVI がなければ検査しない（ADR-0013 D7） | info |
-| LAG 整合性 | `type: mlag` のノードが 2 つか、`peer_link` が同じ `lag` リスト内に存在するか | error |
+| Ethernet Segment | `members` が 2 つ以上・`{lag:}` か `{interface:}`（型）。同じ機器の脚が 2 つ、1 つの脚（と脚の LAG のメンバー）が 2 つの ES に、LAG とそのメンバーの併記、脚どうしが L1 リンクでつながる（ピアリンクの疑い。`link_role` は見ない）（error）。脚に LAG のメンバーの IF（warning）（ADR-0023 D7） | error / warning |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
-| VLAN ID | `vlan_id` が 1..4094 か（スキーマ）。同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。MLAG に載せた VLAN は両ノードで数える） | error |
-| 推奨プレフィックス | `link-` / `lag-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
+| VLAN ID | `vlan_id` が 1..4094 か（スキーマ）。同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。ES に載せた VLAN は脚の全機器で数える） | error |
+| 推奨プレフィックス | `link-` / `lag-` / `es-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
 | SVI の紐づけ忘れ | `name` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
 | link_speed | `<数値><単位>`（単位は K / M / G / T） の書式か（`10g` / `10Gbps` / `10000` 等は直し方を示す error）。正規形（数値が 1 以上 1000 未満になる単位）でなければ warning。表記は書き換えない（ADR-0021） | error / warning |
@@ -595,7 +580,9 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0018](docs/decisions/0018-sessions-across-bridges-and-tunnels.md) | 事業者網やトンネルを越えるセッションの通り道 | **C**（2026-11-03 実装） | `layer2.bridges` を最小の形（`id` / `name` / `ports` / `description`）で先取り。`ports` は転送する側（箱）のポートだけ、`{interface:}` / `{lag:}`、方式名は書かない、書かなければ透過しない。両端が同じ bridge に届けば通り道は `{bridge:}`（1 ホップ）。`update_source` / OSPF の `interface` はトンネル IF も指せ（`Ref` の複数コレクション）、対になれば `{tunnel: [from, to]}`。OSPF / IS-IS も通り道を導き、食い違いは 1.x warning・2.0 error。マルチアクセスは次の ADR |
 | [ADR-0020](docs/decisions/0020-remove-l1-link-mtu.md) | L1 リンクの `mtu` をなくす | **C**（2026-11-07 実装） | MTU はケーブルではなくインターフェースの設定なので `layer1.links[].mtu` をなくし、書いたら理由を示す error。`link_role: underlay` の綴りで決まっていた VXLAN の underlay の MTU 検査もやめた。トンネル IF の `mtu` は残す。インターフェース単位の MTU は先送り |
 | [ADR-0021](docs/decisions/0021-link-speed-format.md) | `link_speed` の書式 | **C**（2026-11-07 実装） | `<数値><単位>`（単位は K / M / G / T）（10 進のビット毎秒、大文字だけ、bps は付けない、小数の桁は制限なし）。`P` 以上は必要になったら足す。書式違反は直し方を示す error、単位なしは推測しない。正規形（数値が 1 以上 1000 未満になる単位）でなければ warning で、表記は書き換えない。数値への変換は比較が要るまで足さない |
-| (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag` (type: lacp \| mlag)。Discriminated Union で `node` (単数) / `nodes` (複数) を区別 |
+| [ADR-0022](docs/decisions/0022-diagram-granularity.md) | 記載の粒度 | **C**（2026-11-08 実装） | ADR-0005 D4 補則に問い 5「構成図を読む人が値から関係を読むか、装置に設定するためだけの値か」を追加。MAC 全般・LACP system-id・ESI の値・ドメインの番号・vPC 番号 / clag-id・DF は書かない。VLAN ID・VNI・IP・AS・RT・VRRP の group_id / priority・冗長のモードは書く。`anycast_mac` をなくし、anycast の検査は ip / ipv6 だけ |
+| [ADR-0023](docs/decisions/0023-per-device-lag-and-ethernet-segments.md) | 機器ごとの LAG と `ethernet_segments` | **C**（2026-11-08 実装） | `layer1.lag` は機器 1 台（`type` なし、`name` を追加）。MLAG / vPC / MC-LAG / ESI-LAG は `layer1.ethernet_segments`（`members` は `{lag:}` / `{interface:}`、`redundancy_mode` は任意で既定値なし）。ピアリンクは普通の LAG で構文に書かない。`{ethernet_segment:}` は VLAN / bridge のポートだけが受け、L3 IF・サブ IF は機器ごとの `{lag:}`。旧 `type: mlag` 等は移動先を示す error。エクスポーターは `lag_type` をなくし `ethernet_segment` を出す |
+| (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag`。ADR-0023 で機器 1 台の LAG と `ethernet_segments` に分け直した |
 
 ---
 

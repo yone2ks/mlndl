@@ -6,7 +6,7 @@
   参照先の種類はキーで示す (ADR-0001 D8)。どのキーを書けるかはエンティティごとに決まる
 - role: ADR-0003 C2 — 自由文字列、コアは値域チェックなし
 - implementation: ADR-0004 — vm | physical | container
-- lag: §6 設計決定 — type: lacp | mlag の Discriminated Union
+- lag: ADR-0023 — 常に機器 1 台の LAG。複数の機器の LAG は ethernet_segments で束ねる
 - labels: ADR-0009 — 多軸分類の注釈側構成子。コアは値域・キー域チェックなし
 - description: ADR-0011 D7 — 全エンティティに任意の自由記述
 - id 命名規則: ADR-0002 — ^[a-z][a-z0-9]*(-[a-z0-9]+)*$（推奨、強制なし）
@@ -49,10 +49,15 @@ class AttachesToObj(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def reject_link(cls, data: Any) -> Any:
-        """{link:} は ADR-0010 で削除した。移動先を示すエラーを返す"""
+        """{link:} は ADR-0010 で削除した。移動先を示すエラーを返す。{ethernet_segment:} は書けない理由を示す"""
         if isinstance(data, dict) and "link" in data:
             raise ValueError(
                 "attaches_to の {link:} は廃止しました。セッションの通り道は update_source の L3 IF から導きます (ADR-0010 D7)"
+            )
+        if isinstance(data, dict) and "ethernet_segment" in data:
+            raise ValueError(
+                "attaches_to に {ethernet_segment:} は書けません。L3 IF とサブ IF は機器ごとに IP や設定が違うので、"
+                "機器ごとの LAG を {lag: <LAG の id>} で指します (ADR-0023 D5)"
             )
         return data
 
@@ -276,7 +281,7 @@ class L1Link(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# LAG (LACP + MLAG 統合) — §6 設計決定
+# LAG — 機器 1 台の上の port-channel / bond / ae (ADR-0023)
 # ---------------------------------------------------------------------------
 
 class LacpConfig(BaseModel):
@@ -288,45 +293,123 @@ class LacpConfig(BaseModel):
     min_links: int = 1
 
 
-class LacpLag(BaseModel):
-    """単一ノードの LACP bond"""
+# 複数の機器にまたがる LAG (旧 type: mlag) だけが持っていたキー。どれも書かない (ADR-0022 / ADR-0023)
+_MULTI_CHASSIS_KEYS = ("nodes", "peer_link", "peer_link_interface", "domain_id", "system_mac", "client_lag")
+
+
+class Lag(BaseModel):
+    """機器 1 台の LAG (ADR-0023 D1)
+
+    MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG IF は機器ごとにある。それを 1 台ずつ書き、
+    複数の機器の LAG を相手から 1 本に見せる関係は layer1.ethernet_segments で束ねる。
+    スタック / VSS / Virtual Chassis は 1 台の論理機器なので、筐体をまたぐ LAG もここに 1 つ書く。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str
-    type: Literal["lacp"]
-    node: Annotated[str, Ref("layer1.nodes")]          # 単数形: 1 ノード
+    id: str                                             # 推奨プレフィックス lag- (ADR-0002 D7)
+    node: Annotated[str, Ref("layer1.nodes")]
+    name: str | None = None                             # 機器上の名前 (Port-Channel10 / bond0 / ae0)
     members: Annotated[list[str], Ref("layer1.interfaces")]
     lacp: LacpConfig | None = None
     description: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_old_forms(cls, data: Any) -> Any:
+        """旧形式の type: lacp / type: mlag と、MLAG だけが持っていたキーに、移動先を示すエラーを返す"""
+        if not isinstance(data, dict):
+            return data
+        old = [k for k in _MULTI_CHASSIS_KEYS if k in data]
+        if data.get("type") == "mlag" or old:
+            raise ValueError(
+                "複数の機器にまたがる LAG (MLAG / vPC / MC-LAG / ESI-LAG) は、機器ごとの LAG を layer1.lag に 1 つずつ"
+                "書き (node は 1 つ)、それらを layer1.ethernet_segments の members で束ねます。"
+                + (f"{' / '.join(old)} は書きません。" if old else "")
+                + "ピアリンクは 2 台をつなぐ普通の LAG として書き、ドメインの番号や MAC は構成図に書きません"
+                " (ADR-0022 / ADR-0023)"
+            )
+        if "type" in data:
+            raise ValueError(
+                "layer1.lag の type はなくしました。LAG は常に機器 1 台の LAG なので、type を消してください (ADR-0023 D1)"
+            )
+        return data
 
-class MlagLag(BaseModel):
-    """マルチシャーシ LAG (MLAG)"""
+
+# ---------------------------------------------------------------------------
+# Ethernet Segment — 複数の機器の脚を相手から 1 本に見せる関係 (ADR-0023)
+# ---------------------------------------------------------------------------
+
+class SegmentMember(BaseModel):
+    """Ethernet Segment の脚。{lag: <LAG の id>} か {interface: <L1 IF の id>} のどちらか一方 (ADR-0023 D3)
+
+    脚が LAG でない構成 (single-active で物理 IF に直接 ESI を設定する) は {interface:} で書く
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str
-    type: Literal["mlag"]
-    nodes: Annotated[list[str], Ref("layer1.nodes")]    # 複数形: 必ず 2 ノード
-    members: Annotated[list[str], Ref("layer1.interfaces")]  # 両ノード分
-    lacp: LacpConfig | None = None
-    peer_link: Annotated[str, Ref("layer1.lag")]   # 同一 lag リスト内の LacpLag
-    peer_link_interface: str        # 例: "peerlink.4094"
-    domain_id: int | None = None
-    system_mac: str | None = None   # 両ノード共通の MLAG system MAC（例: "44:38:39:ff:00:0a"）
-    client_lag: Annotated[str | None, Ref("layer1.lag")] = None   # 対向ノード側の LacpLag（単方向参照）
-    description: str | None = None
+    interface: str | None = None
+    lag: str | None = None
 
     @model_validator(mode="after")
-    def exactly_two_nodes(self) -> "MlagLag":
-        if len(self.nodes) != 2:
-            raise ValueError("MLAG は正確に 2 ノードが必要です")
+    def exactly_one_target(self) -> "SegmentMember":
+        if (self.interface is None) == (self.lag is None):
+            raise ValueError(
+                "Ethernet Segment の脚は lag (LAG) か interface (L1 IF) のどちらか一方で指してください (ADR-0023 D3)"
+            )
         return self
 
+    @property
+    def kind(self) -> str:
+        """書かれたキー名 (interface / lag)"""
+        return "interface" if self.interface is not None else "lag"
 
-# Discriminated Union — type フィールドで分岐
-Lag = Annotated[LacpLag | MlagLag, Field(discriminator="type")]
+    @property
+    def target(self) -> str:
+        """参照先の ID"""
+        return self.interface if self.interface is not None else self.lag
+
+
+class EthernetSegment(BaseModel):
+    """複数の機器の脚 (LAG か L1 IF) を、相手 (ホスト / CE) から 1 本に見せる関係 (ADR-0023 D2)
+
+    RFC 7432 の Ethernet Segment。MLAG / vPC / MC-LAG / EVPN multihoming をこの 1 つの形で書き、方式名は書かない。
+    - members: 脚。2 つ以上で、機器はすべて別
+    - redundancy_mode: all_active (脚がそろって転送する) / single_active (同時に転送するのは 1 本)。
+      既定値はなく、書かなければ「書いていない」(ADR-0023 D4)。どの脚が転送するか (DF) は書かない
+    - ESI の値・LACP system-id・domain_id・vPC 番号 / clag-id・ピアリンクは書かない (ADR-0022)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str                                             # 推奨プレフィックス es- (ADR-0002 D7)
+    name: str | None = None
+    members: list[SegmentMember]
+    redundancy_mode: Literal["all_active", "single_active"] | None = None
+    description: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_granularity(cls, data: Any) -> Any:
+        """構成図の粒度に合わない値に、書かない理由を示すエラーを返す (ADR-0022)"""
+        if isinstance(data, dict):
+            old = [k for k in ("esi", "system_mac", "domain_id", "peer_link", "peer_links") if k in data]
+            if old:
+                raise ValueError(
+                    f"ethernet_segments に {' / '.join(old)} は書きません。ESI の値・MAC・ドメインの番号は装置の設定の"
+                    f"粒度で、ピアリンクは 2 台をつなぐ普通の LAG として書きます (ADR-0022 / ADR-0023)"
+                )
+        return data
+
+    @field_validator("members")
+    @classmethod
+    def at_least_two(cls, v: list[SegmentMember]) -> list[SegmentMember]:
+        if len(v) < 2:
+            raise ValueError(
+                "ethernet_segments の members は 2 つ以上書きます。1 台の機器だけの LAG は layer1.lag に書けば足ります"
+                " (ADR-0023 D2)"
+            )
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +417,7 @@ Lag = Annotated[LacpLag | MlagLag, Field(discriminator="type")]
 # ---------------------------------------------------------------------------
 
 class L1Layer(BaseModel):
-    """Layer 1 全体（nodes / interfaces / links / lag）"""
+    """Layer 1 全体（nodes / interfaces / links / lag / ethernet_segments）"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -342,3 +425,4 @@ class L1Layer(BaseModel):
     interfaces: list[L1Interface] = []
     links: list[L1Link] = []
     lag: list[Lag] = []
+    ethernet_segments: list[EthernetSegment] = []

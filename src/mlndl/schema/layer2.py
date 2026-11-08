@@ -11,30 +11,40 @@ from .layer1 import AttachesToObj, restrict_attach_keys
 from .refs import Ref
 
 
+PORT_KEYS = ("interface", "lag", "ethernet_segment")
+
+
 class PortTarget(BaseModel):
     """ポートへの参照の共通の形。VLAN のポート (ADR-0013) と bridge のポート (ADR-0018) が使う
 
-    interface / lag: どちらか一方。参照先の種類をキーで示す (ADR-0001 D8)
-               lag のときはメンバーではなく LAG を指す
+    interface / lag / ethernet_segment: どれか 1 つ。参照先の種類をキーで示す (ADR-0001 D8)
+               lag のときはメンバーではなく LAG を指す。ethernet_segment は束ねたすべての機器の脚に効く (ADR-0023 D5)
     """
 
     model_config = ConfigDict(extra="forbid")
 
     interface: str | None = None
     lag: str | None = None
+    ethernet_segment: str | None = None
 
     @model_validator(mode="after")
     def exactly_one_target(self) -> "PortTarget":
-        if (self.interface is None) == (self.lag is None):
+        if sum(1 for k in PORT_KEYS if getattr(self, k) is not None) != 1:
             raise ValueError(
-                "ポートは interface (L1 IF) か lag (LAG) のどちらか一方で指してください (ADR-0013 D1)"
+                "ポートは interface (L1 IF)・lag (LAG)・ethernet_segment (Ethernet Segment) のどれか 1 つで指してください"
+                " (ADR-0013 D1 / ADR-0023 D5)"
             )
         return self
 
     @property
+    def kind(self) -> str:
+        """書かれたキー名 (interface / lag / ethernet_segment)"""
+        return next(k for k in PORT_KEYS if getattr(self, k) is not None)
+
+    @property
     def target(self) -> str:
         """参照先の ID"""
-        return self.interface if self.interface is not None else self.lag
+        return getattr(self, self.kind)
 
 
 class PortRef(PortTarget):
@@ -52,7 +62,7 @@ class PortRef(PortTarget):
 
 
 class BridgePort(PortTarget):
-    """bridge のポート (ADR-0018 D1)。フレームを転送する側 (事業者網なら箱) の L1 IF か LAG。native は持たない"""
+    """bridge のポート (ADR-0018 D1)。フレームを転送する側 (事業者網なら箱) の L1 IF・LAG・Ethernet Segment。native は持たない"""
 
 
 class VLAN(BaseModel):

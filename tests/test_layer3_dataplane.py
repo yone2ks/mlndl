@@ -258,14 +258,16 @@ class TestGatewayRedundancy:
         _parse_error(_svi(f"        - {{mode: vrrp, group_id: {gid}, vip: 192.168.100.1}}\n"))
 
     def test_anycast_gateway(self):
-        assert _errors(_svi("        - {mode: anycast_gateway, anycast_mac: '44:38:39:be:ef:aa'}\n")) == []
+        assert _errors(_svi("        - {mode: anycast_gateway}\n")) == []
 
     def test_anycast_rejects_group_id(self):
         """単一モデルで optional にすると通ってしまう組み合わせ。Tagged Union で弾く"""
         _parse_error(_svi("        - {mode: anycast_gateway, group_id: 10}\n"))
 
-    def test_anycast_mac_format(self):
-        _parse_error(_svi("        - {mode: anycast_gateway, anycast_mac: not-a-mac}\n"))
+    def test_anycast_mac_is_removed(self):
+        """MAC アドレスは構成図の粒度ではないので書かない (ADR-0022 D2)"""
+        with pytest.raises(pydantic.ValidationError, match="ADR-0022"):
+            parse('ndl_version: "1.0"\n' + _svi("        - {mode: anycast_gateway, anycast_mac: '44:38:39:be:ef:aa'}\n"))
 
     def test_mode_anycast_short_name_is_rejected(self):
         _parse_error(_svi("        - {mode: anycast}\n"))
@@ -339,7 +341,7 @@ layer1:
   nodes: [{id: n1, description: d}]
   interfaces: [{id: n1-e0, node: n1, description: d}, {id: n1-e1, node: n1}]
   links: []
-  lag: [{id: lag-n1, type: lacp, node: n1, members: [n1-e0, n1-e1], description: d}]
+  lag: [{id: lag-n1, node: n1, members: [n1-e0, n1-e1], description: d}]
 layer2:
   vlans: [{id: vlan-10, vlan_id: 10, description: d}]
 layer3:
@@ -400,7 +402,7 @@ class TestExport:
                    " attaches_to: {interface: lag-leaf1-po1}}\n").replace(
             "    - {id: leaf2-swp1, node: leaf2, name: swp1}\n",
             "    - {id: leaf2-swp1, node: leaf2, name: swp1}\n"
-            "  lag: [{id: lag-leaf1-po1, type: lacp, node: leaf1, members: [leaf1-swp2]}]\n")
+            "  lag: [{id: lag-leaf1-po1, node: leaf1, members: [leaf1-swp2]}]\n")
         (entry,) = self._leaf1(_topo(body))["l3_interfaces"]
         assert entry["attachment"] == "lag"
 
@@ -456,31 +458,27 @@ class TestExport:
 # ラウンド4 Pass B で見つかった検出漏れ (evaluations/round4-evaluation.md E1〜E4)
 # ---------------------------------------------------------------------------
 
-def _anycast_pair(ip2: str = "192.168.100.1/24", mac2: str = "44:38:39:be:ef:aa",
+def _anycast_pair(ip2: str = "192.168.100.1/24",
                   ipv6_2: str = "2001:db8:100::1/64", vlan2: str = "vlan-100") -> str:
     return _l3(
         "    - id: leaf1-vlan-100\n      node: leaf1\n      name: Vlan100\n      attaches_to: {vlan: vlan-100}\n"
         "      ip: 192.168.100.1/24\n      ipv6: 2001:db8:100::1/64\n"
-        "      gateway_redundancy: [{mode: anycast_gateway, anycast_mac: '44:38:39:be:ef:aa'}]\n"
+        "      gateway_redundancy: [{mode: anycast_gateway}]\n"
         f"    - id: leaf2-svi\n      node: leaf2\n      name: Vlan100\n"
         f"      attaches_to: {{vlan: {vlan2}}}\n      ip: {ip2}\n      ipv6: {ipv6_2}\n"
-        f"      gateway_redundancy: [{{mode: anycast_gateway, anycast_mac: '{mac2}'}}]\n"
+        f"      gateway_redundancy: [{{mode: anycast_gateway}}]\n"
     )
 
 
 class TestAnycastConsistency:
-    """E1: anycast gateway は全ノードが同じアドレスと MAC で応答する"""
+    """E1: anycast gateway は全ノードが同じアドレスで応答する (MAC は書かない。ADR-0022 D2)"""
 
     def test_consistent_pair(self):
         assert _errors(_anycast_pair()) == []
 
-    def test_mac_notation_does_not_matter(self):
-        assert _errors(_anycast_pair(mac2="4438.39be.efaa")) == []
-
     @pytest.mark.parametrize("kw,field", [
         ({"ip2": "192.168.100.9/24"}, "layer3.interfaces[1].ip"),
         ({"ipv6_2": "2001:db8:100::9/64"}, "layer3.interfaces[1].ipv6"),
-        ({"mac2": "44:38:39:be:ef:bb"}, "layer3.interfaces[1].gateway_redundancy[0].anycast_mac"),
     ])
     def test_mismatch_is_error(self, kw, field):
         errs = validate(_topo(_anycast_pair(**kw)))

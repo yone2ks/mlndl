@@ -1,0 +1,383 @@
+# ADR-0023 の最終形の記述例 (12 パターン)。説明のための抜粋で、L1 IF やリンクを省いたものはそのままでは valid にならない
+# (パターン 1 と 5 は省かずに書いた)。検査の結果は tests/test_ethernet_segments.py などで確かめている
+#
+# 最終形 (案 ii) の記述例。4 回目の検討 (redundancy_mode・members の型) を反映した版
+#
+# 考え方
+#   - layer1.lag        = 機器 1 台の上の port-channel / bond / ae。node は常に 1 つ。name は機器上の名前
+#   - layer1.ethernet_segments = 複数の機器の脚 (LAG か L1 IF) を「相手から 1 本に見せる」関係
+#       * layer1 に置く: 中身は L1 の LAG / L1 IF を束ねるだけで、VLAN / VNI などの L2 の転送属性を持たない。
+#         L2 (VLAN・bridge) は {ethernet_segment:} で ES を「参照する側」。layer1.lag が L1 IF を束ねるのと同じ構図
+#       * members は {lag:} か {interface:}。物理 IF に直接 ESI を設定する構成 (Juniper / Arista / SR Linux) もそのまま書ける
+#       * redundancy_mode は任意 (all_active / single_active)。既定値はない。書かなければ「書いていない」
+#   - 方式名 (MLAG / vPC / MC-LAG / ESI-LAG) は構文に出さない。どの方式かは device_type から上位ツールが判断する
+#   - ピアリンクは構文に書かない。2 台をつなぐ普通の LAG と L1 リンク (link_role: peer-link は注釈で、検査には使わない)
+#   - 構成図の粒度に合わないもの (MAC 相当・LACP system-id・ESI の値・domain_id・vPC 番号 / clag-id・DF の preference) は書かない
+
+# ==========================================================================
+# 1. MLAG (Cumulus clag / Arista MLAG)  ※ここだけ interfaces / links も全部書く
+# ==========================================================================
+# 解説:
+#   実機では leaf1 と leaf2 にそれぞれ bond1 がある (clag-id 1 で結ぶ)。MLNDL もそのとおり機器ごとに LAG を 2 つ書き、
+#   それを es-server1 で束ねる。clag-id・system-mac は書かない。
+#   サーバー側から見れば相手が 2 台でも普通の LACP なので、サーバーの bond0 は 1 台の LAG として書く。
+#   VLAN は {ethernet_segment: es-server1} の 1 行で leaf1・leaf2 の両方の bond1 に載る。
+#   ピアリンクに VLAN を通す場合は、機器ごとのピアリンク LAG をそれぞれ書く。
+ndl_version: "1.0"
+meta: {name: p1-mlag}
+layer1:
+  nodes:
+    - {id: leaf1, role: leaf, device_type: cumulus_linux}
+    - {id: leaf2, role: leaf, device_type: cumulus_linux}
+    - {id: server1, role: server}
+  interfaces:
+    - {id: leaf1-swp1,  node: leaf1, name: swp1}
+    - {id: leaf1-swp49, node: leaf1, name: swp49}
+    - {id: leaf1-swp50, node: leaf1, name: swp50}
+    - {id: leaf2-swp1,  node: leaf2, name: swp1}
+    - {id: leaf2-swp49, node: leaf2, name: swp49}
+    - {id: leaf2-swp50, node: leaf2, name: swp50}
+    - {id: server1-eth0, node: server1, name: eth0}
+    - {id: server1-eth1, node: server1, name: eth1}
+  links:
+    - {id: link-leaf1-leaf2-peer1, endpoints: [leaf1-swp49, leaf2-swp49], link_role: peer-link}  # 注釈だけ
+    - {id: link-leaf1-leaf2-peer2, endpoints: [leaf1-swp50, leaf2-swp50], link_role: peer-link}
+    - {id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_role: access}
+    - {id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_role: access}
+  lag:
+    - {id: lag-leaf1-peer, node: leaf1, name: peerlink, members: [leaf1-swp49, leaf1-swp50]}
+    - {id: lag-leaf2-peer, node: leaf2, name: peerlink, members: [leaf2-swp49, leaf2-swp50]}
+    - {id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1], lacp: {mode: active}}
+    - {id: lag-leaf2-server1, node: leaf2, name: bond1, members: [leaf2-swp1], lacp: {mode: active}}
+    - {id: lag-server1-bond0, node: server1, name: bond0, members: [server1-eth0, server1-eth1], lacp: {mode: active}}
+  ethernet_segments:
+    - id: es-server1
+      members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]
+      # redundancy_mode は書かない (MLAG は常に all-active。書いてもよい)
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {ethernet_segment: es-server1}   # leaf1 / leaf2 の両方に効く
+        - {lag: lag-server1-bond0}         # サーバー側
+        - {lag: lag-leaf1-peer}            # ピアリンクにも VLAN を通すなら機器ごとに書く
+        - {lag: lag-leaf2-peer}
+
+---
+# ==========================================================================
+# 2. Cisco vPC (物理のピアリンクあり) と peer-keepalive
+# ==========================================================================
+# 解説:
+#   書き方は 1 と同じ。vpc 10 の番号・vpc domain の番号は書かない。
+#   vPC はピアリンクに VLAN を通すのが前提なので、trunk_ports にピアリンク LAG を機器ごとに 2 行書く。
+#   peer-keepalive には専用の構文がない。管理ポートの L3 IF として普通に書けば、図にはその IP が出る。
+ndl_version: "1.0"
+meta: {name: p2-vpc}
+layer1:
+  nodes:
+    - {id: nx1, role: leaf, device_type: nxos}
+    - {id: nx2, role: leaf, device_type: nxos}
+  # interfaces / links は省略 (nx1-eth1-1 ... の形)
+  lag:
+    - {id: lag-nx1-peer, node: nx1, name: port-channel1, members: [nx1-eth1-49, nx1-eth1-50]}
+    - {id: lag-nx2-peer, node: nx2, name: port-channel1, members: [nx2-eth1-49, nx2-eth1-50]}
+    - {id: lag-nx1-po10, node: nx1, name: port-channel10, members: [nx1-eth1-1]}
+    - {id: lag-nx2-po10, node: nx2, name: port-channel10, members: [nx2-eth1-1]}
+  ethernet_segments:
+    - {id: es-server1, members: [{lag: lag-nx1-po10}, {lag: lag-nx2-po10}]}
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {ethernet_segment: es-server1}
+        - {lag: lag-nx1-peer}
+        - {lag: lag-nx2-peer}
+layer3:
+  vrfs: [{id: vrf-mgmt}]
+  interfaces:
+    - {id: nx1-mgmt0, node: nx1, name: mgmt0, attaches_to: {interface: nx1-mgmt0-l1}, ip: 192.0.2.1/24, vrf: vrf-mgmt}
+    - {id: nx2-mgmt0, node: nx2, name: mgmt0, attaches_to: {interface: nx2-mgmt0-l1}, ip: 192.0.2.2/24, vrf: vrf-mgmt}
+
+---
+# ==========================================================================
+# 3. vPC Fabric Peering (物理のピアリンクなし)
+# ==========================================================================
+# 解説:
+#   ピアリンクの LAG とリンクがないだけ。ピアの協調はファブリック越しなので、図に描く物理の線がない。
+#   構文の上では ESI-LAG (4) と同じ形になる。どちらかは device_type (nxos) から上位ツールが判断する。
+ndl_version: "1.0"
+meta: {name: p3-vpc-fabric-peering}
+layer1:
+  nodes:
+    - {id: nx1, role: leaf, device_type: nxos}
+    - {id: nx2, role: leaf, device_type: nxos}
+  lag:
+    - {id: lag-nx1-po10, node: nx1, name: port-channel10, members: [nx1-eth1-1]}
+    - {id: lag-nx2-po10, node: nx2, name: port-channel10, members: [nx2-eth1-1]}
+  ethernet_segments:
+    - {id: es-server1, members: [{lag: lag-nx1-po10}, {lag: lag-nx2-po10}]}
+
+---
+# ==========================================================================
+# 4. ESI-LAG (EVPN multihoming, all-active)。2 台・3 台・組み合わせが bond ごとに違う
+# ==========================================================================
+# 解説:
+#   MLAG と違って固定のペアがないので、ES ごとに機器の組み合わせが自由 (server1 は leaf1+leaf2、server2 は leaf2+leaf3)。
+#   3 台以上も書ける。Juniper は機器ごとに ae の番号が違ってよいので、name も機器ごとに書く。
+#   ESI の値 (00:11:...) は書かない。多くは LACP / MAC から自動で作る値で、構成図の粒度ではない。
+ndl_version: "1.0"
+meta: {name: p4-esi-lag}
+layer1:
+  nodes:
+    - {id: leaf1, role: leaf, device_type: arista_eos}
+    - {id: leaf2, role: leaf, device_type: arista_eos}
+    - {id: leaf3, role: leaf, device_type: junos}
+    - {id: leaf4, role: leaf, device_type: junos}
+  lag:
+    - {id: lag-leaf1-server1, node: leaf1, name: Port-Channel10, members: [leaf1-et1]}
+    - {id: lag-leaf2-server1, node: leaf2, name: Port-Channel10, members: [leaf2-et1]}
+    - {id: lag-leaf2-server2, node: leaf2, name: Port-Channel20, members: [leaf2-et2]}
+    - {id: lag-leaf3-server2, node: leaf3, name: ae0, members: [leaf3-xe-0-0-2]}
+    - {id: lag-leaf1-server3, node: leaf1, name: Port-Channel30, members: [leaf1-et3]}
+    - {id: lag-leaf3-server3, node: leaf3, name: ae1, members: [leaf3-xe-0-0-3]}
+    - {id: lag-leaf4-server3, node: leaf4, name: ae5, members: [leaf4-xe-0-0-3]}
+  ethernet_segments:
+    - {id: es-server1, members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]}
+    - {id: es-server2, members: [{lag: lag-leaf2-server2}, {lag: lag-leaf3-server2}]}
+    - {id: es-server3, members: [{lag: lag-leaf1-server3}, {lag: lag-leaf3-server3}, {lag: lag-leaf4-server3}]}
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100, trunk_ports: [{ethernet_segment: es-server1}, {ethernet_segment: es-server3}]}
+    - {id: vlan-200, vlan_id: 200, access_ports: [{ethernet_segment: es-server2}]}
+
+---
+# ==========================================================================
+# 5. ESI の single-active (CE は LAG を組まない)
+# ==========================================================================
+# 解説:
+#   single-active では、CE (ファイアウォールなど) は LAG を組まず、2 本の独立したリンクを active-standby で使うのが普通。
+#   PE 側も port-channel / ae を作らず、物理 IF に直接 ESI を設定する (Juniper の xe-0/0/4 に esi、Arista の EthernetN に evpn ethernet-segment)。
+#   そこで members に {interface:} で L1 IF を直接書く (中身 1 本の「見せかけの LAG」を作らなくてよい)。
+#   redundancy_mode: single_active は「この ES の脚は同時に 1 本しか転送しない」ことを図に残す。
+#   どちらの脚が転送するか (DF) は VLAN ごとに DF 選出で決まるので、構成図には書けない・書かない。
+ndl_version: "1.0"
+meta: {name: p5-esi-single-active}
+layer1:
+  nodes:
+    - {id: leaf3, role: leaf, device_type: junos}
+    - {id: leaf4, role: leaf, device_type: junos}
+    - {id: fw1, role: firewall}
+  interfaces:
+    - {id: leaf3-xe-0-0-4, node: leaf3, name: xe-0/0/4}
+    - {id: leaf4-xe-0-0-4, node: leaf4, name: xe-0/0/4}
+    - {id: fw1-eth1, node: fw1, name: eth1}
+    - {id: fw1-eth2, node: fw1, name: eth2}
+  links:
+    - {id: link-leaf3-fw1, endpoints: [leaf3-xe-0-0-4, fw1-eth1]}
+    - {id: link-leaf4-fw1, endpoints: [leaf4-xe-0-0-4, fw1-eth2]}
+  ethernet_segments:
+    - id: es-fw1
+      members: [{interface: leaf3-xe-0-0-4}, {interface: leaf4-xe-0-0-4}]
+      redundancy_mode: single_active
+layer2:
+  vlans:
+    - {id: vlan-300, vlan_id: 300, trunk_ports: [{ethernet_segment: es-fw1}, {interface: fw1-eth1}, {interface: fw1-eth2}]}
+
+---
+# ==========================================================================
+# 6. MLAG ペアと ESI を同じファブリックで混在
+# ==========================================================================
+# 解説:
+#   どちらも同じ ethernet_segments で書く。違いはピアリンクの LAG があるかどうかだけ。
+ndl_version: "1.0"
+meta: {name: p6-mixed}
+layer1:
+  nodes:
+    - {id: leaf1, role: leaf}
+    - {id: leaf2, role: leaf}
+    - {id: leaf3, role: leaf}
+    - {id: leaf4, role: leaf}
+  lag:
+    - {id: lag-leaf1-peer, node: leaf1, members: [leaf1-swp49, leaf1-swp50]}   # leaf1-leaf2 は MLAG ペア
+    - {id: lag-leaf2-peer, node: leaf2, members: [leaf2-swp49, leaf2-swp50]}
+    - {id: lag-leaf1-server1, node: leaf1, members: [leaf1-swp1]}
+    - {id: lag-leaf2-server1, node: leaf2, members: [leaf2-swp1]}
+    - {id: lag-leaf3-server2, node: leaf3, members: [leaf3-swp1]}               # leaf3-leaf4 は ESI (ピアリンクなし)
+    - {id: lag-leaf4-server2, node: leaf4, members: [leaf4-swp1]}
+  ethernet_segments:
+    - {id: es-server1, members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]}   # MLAG
+    - {id: es-server2, members: [{lag: lag-leaf3-server2}, {lag: lag-leaf4-server2}]}   # ESI
+
+---
+# ==========================================================================
+# 7. スタック / VSS / Virtual Chassis / IRF
+# ==========================================================================
+# 解説:
+#   複数の筐体が 1 台の論理機器として動き、筐体をまたぐ LAG も論理機器の上の 1 つの port-channel になる。
+#   だから L1 ノードは 1 つ、LAG も 1 つで、ethernet_segments は書かない (束ねる「複数の機器」がない)。
+#   どの IF がどの筐体にあるかは書かない (筐体を書く parent は先送り)。
+ndl_version: "1.0"
+meta: {name: p7-stack}
+layer1:
+  nodes:
+    - {id: core-stack, role: core, device_type: cisco_ios}
+    - {id: server1, role: server}
+  interfaces:
+    - {id: core-stack-gi1-0-1, node: core-stack, name: Gi1/0/1}
+    - {id: core-stack-gi2-0-1, node: core-stack, name: Gi2/0/1}
+    - {id: server1-eth0, node: server1, name: eth0}
+    - {id: server1-eth1, node: server1, name: eth1}
+  links:
+    - {id: link-core-server1-a, endpoints: [core-stack-gi1-0-1, server1-eth0]}
+    - {id: link-core-server1-b, endpoints: [core-stack-gi2-0-1, server1-eth1]}
+  lag:
+    - {id: lag-core-po10, node: core-stack, name: Port-channel10, members: [core-stack-gi1-0-1, core-stack-gi2-0-1]}
+    - {id: lag-server1-bond0, node: server1, name: bond0, members: [server1-eth0, server1-eth1]}
+layer2:
+  vlans:
+    - {id: vlan-100, vlan_id: 100, trunk_ports: [{lag: lag-core-po10}]}
+
+---
+# ==========================================================================
+# 8. routed MLAG と、MLAG 上のサブ IF
+# ==========================================================================
+# 解説:
+#   L3 IF とサブ IF は機器ごとに IP や設定が違うので、ES ではなく機器ごとの LAG を {lag:} で指す
+#   (L3 IF の node と、その LAG の node が一致することを検査できる)。
+#   routed だけの構成でも es-fw1 を書いておけば、「2 台の bond5 が相手から 1 本に見える」ことが YAML に残る。
+ndl_version: "1.0"
+meta: {name: p8-routed-and-subif}
+layer1:
+  nodes:
+    - {id: leaf1, role: leaf}
+    - {id: leaf2, role: leaf}
+  lag:
+    - {id: lag-leaf1-peer, node: leaf1, members: [leaf1-swp49]}
+    - {id: lag-leaf2-peer, node: leaf2, members: [leaf2-swp49]}
+    - {id: lag-leaf1-fw1, node: leaf1, name: bond5, members: [leaf1-swp5]}
+    - {id: lag-leaf2-fw1, node: leaf2, name: bond5, members: [leaf2-swp5]}
+  ethernet_segments:
+    - {id: es-fw1, members: [{lag: lag-leaf1-fw1}, {lag: lag-leaf2-fw1}]}
+layer2:
+  subinterfaces:
+    - {id: subif-leaf1-bond5-200, attaches_to: {lag: lag-leaf1-fw1}, vlan_id: 200, name: bond5.200}
+    - {id: subif-leaf2-bond5-200, attaches_to: {lag: lag-leaf2-fw1}, vlan_id: 200, name: bond5.200}
+layer3:
+  interfaces:
+    - {id: leaf1-bond5, node: leaf1, name: bond5, attaches_to: {lag: lag-leaf1-fw1}, ip: 10.250.0.1/29}
+    - {id: leaf2-bond5, node: leaf2, name: bond5, attaches_to: {lag: lag-leaf2-fw1}, ip: 10.250.0.2/29}
+    - {id: leaf1-bond5-200, node: leaf1, name: bond5.200, attaches_to: {subinterface: subif-leaf1-bond5-200}, ip: 10.200.0.1/29}
+    - {id: leaf2-bond5-200, node: leaf2, name: bond5.200, attaches_to: {subinterface: subif-leaf2-bond5-200}, ip: 10.200.0.2/29}
+
+---
+# ==========================================================================
+# 9. SVI の anycast gateway と VRRP
+# ==========================================================================
+# 解説:
+#   anycast gateway は全 leaf で同じ IP。anycast_mac は MAC なので書かない。検査は ip / ipv6 の一致だけになる。
+#   VRRP は group_id・vip・priority を書く (priority で「どちらが master か」が図から読める = 構成図の粒度)。
+#   VRRP は L3 のアドレスの共有で、ES (L1/L2 の脚の束ね) とはレイヤが違うので、ES には入れない。
+ndl_version: "1.0"
+meta: {name: p9-gateway}
+layer3:
+  interfaces:
+    - {id: leaf1-vlan100, node: leaf1, name: vlan100, attaches_to: {vlan: vlan-100}, ip: 192.168.100.1/24, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan100, node: leaf2, name: vlan100, attaches_to: {vlan: vlan-100}, ip: 192.168.100.1/24, gateway_redundancy: [{mode: anycast_gateway}]}
+    - id: leaf1-vlan200
+      node: leaf1
+      name: vlan200
+      attaches_to: {vlan: vlan-200}
+      ip: 192.168.200.2/24
+      gateway_redundancy: [{mode: vrrp, group_id: 200, vip: 192.168.200.1, priority: 110}]
+    - id: leaf2-vlan200
+      node: leaf2
+      name: vlan200
+      attaches_to: {vlan: vlan-200}
+      ip: 192.168.200.3/24
+      gateway_redundancy: [{mode: vrrp, group_id: 200, vip: 192.168.200.1, priority: 90}]
+
+---
+# ==========================================================================
+# 10. MLAG ペアで VTEP を共有 (EVPN + MLAG)
+# ==========================================================================
+# 解説:
+#   MLAG ペアは 2 台で 1 つの VTEP アドレスを共有する (ADR-0014)。ES の機器がそろって VTEP を終端しているかを
+#   validator が見る。片方だけだと、ホストからの通信が片方の機器に来たときに VXLAN へ出られない。
+ndl_version: "1.0"
+meta: {name: p10-mlag-vtep}
+layer1:
+  lag:
+    - {id: lag-leaf1-server1, node: leaf1, members: [leaf1-swp1]}
+    - {id: lag-leaf2-server1, node: leaf2, members: [leaf2-swp1]}
+  ethernet_segments:
+    - {id: es-server1, members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]}
+layer2:
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+    # sources: [leaf1-lo] だけにすると warning:
+    #   es-server1 の機器 leaf1, leaf2 のうち leaf2 が VTEP を終端していない
+
+---
+# ==========================================================================
+# 11. 事業者網の中の EVPN multihoming (bridge のポート)
+# ==========================================================================
+# 解説:
+#   事業者網を箱ノード 1 つで書く ADR-0017 の基本形では使わない。事業者網を PE 単位で複数のノードに分けて書き、
+#   拠点の CE が 2 台の PE に冗長接続している場合だけ、bridge のポートに {ethernet_segment:} を書く。
+ndl_version: "1.0"
+meta: {name: p11-bridge}
+layer1:
+  nodes:
+    - {id: pe1, role: provider-network}
+    - {id: pe2, role: provider-network}
+    - {id: pe3, role: provider-network}
+  ethernet_segments:
+    - {id: es-tokyo, members: [{interface: pe1-ge0}, {interface: pe2-ge0}]}
+layer2:
+  bridges:
+    - id: bridge-wideether
+      ports:
+        - {ethernet_segment: es-tokyo}    # 東京は PE 2 台に冗長接続
+        - {interface: pe3-ge0}            # 大阪は PE 1 台
+
+---
+# ==========================================================================
+# 12. error / warning になる書き方
+# ==========================================================================
+ndl_version: "1.0"
+meta: {name: p12-errors}
+layer1:
+  lag:
+    - {id: lag-leaf1-a, node: leaf1, members: [leaf1-swp1]}
+    - {id: lag-leaf1-b, node: leaf1, members: [leaf1-swp2]}
+    - {id: lag-leaf2-a, node: leaf2, members: [leaf2-swp1]}
+    - {id: lag-leaf1-peer, node: leaf1, members: [leaf1-swp49]}
+    - {id: lag-leaf2-peer, node: leaf2, members: [leaf2-swp49]}
+  ethernet_segments:
+    - {id: es-bad1, members: [{lag: lag-leaf1-a}, {lag: lag-leaf1-b}]}         # error: 同じ機器 (leaf1) の脚が 2 つ
+    - {id: es-ok,   members: [{lag: lag-leaf1-a}, {lag: lag-leaf2-a}]}
+    - {id: es-bad2, members: [{lag: lag-leaf2-a}, {lag: lag-leaf1-b}]}         # error: lag-leaf2-a が 2 つの ES に入っている
+    - {id: es-bad3, members: [{lag: lag-leaf1-peer}, {lag: lag-leaf2-peer}]}   # error: 脚どうしがリンクでつながっている (ピアリンクの疑い)
+    - {id: es-bad4, members: [{lag: lag-leaf1-a}, {interface: leaf1-swp1}]}    # error: LAG とそのメンバーの IF を併記
+    - id: es-sa
+      members: [{interface: leaf3-xe-0-0-4}, {interface: leaf4-xe-0-0-4}]
+      redundancy_mode: single_active
+      # leaf3 / leaf4 の同じ VLAN の SVI がどちらも anycast_gateway なら warning (片方しか転送しない)
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {ethernet_segment: es-ok}
+        - {lag: lag-leaf1-a}             # error: ES とその脚を併記
+    - id: vlan-200
+      vlan_id: 200
+      trunk_ports:
+        - {lag: lag-leaf1-a}             # warning: es-ok の脚の一部だけ ({ethernet_segment: es-ok} を促す)
+# 旧形式 (どれも移動先を示す error):
+#   - {id: lag-x, type: mlag, nodes: [leaf1, leaf2], members: [...], peer_link: ..., peer_link_interface: ..., domain_id: 10, system_mac: ..., client_lag: ...}
+#   - gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "44:38:39:be:ef:aa"}]

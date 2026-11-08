@@ -39,6 +39,10 @@ layer2:
 
 ノードは `interface` / `lag` から決まる (ADR-0005 D6)。MLAG を指すエントリは両ノードに効く。
 
+> **改訂 ([ADR-0023](0023-per-device-lag-and-ethernet-segments.md) D5・D7, 2026-11-08)**: LAG は機器 1 台になり、MLAG / ESI-LAG は機器ごとの LAG を `layer1.ethernet_segments` で束ねる。
+> ポートは `{interface:}` / `{lag:}` / `{ethernet_segment:}` のどれか 1 つで、ES は脚のすべての機器に効く (D1 の「MLAG: 1 エントリで両ノード」は `{ethernet_segment:}` に読み替える)。
+> ES とその脚の併記は error、脚の一部だけは warning (D3 と同じ形)。D5 の展開も ES の脚の機器で行う。ES に `node` を書くと error。
+
 Pass A では「任意 (書けば照合)」だったが、サブ IF (ADR-0012 D2) と揃えて書かない形に改めた (ユーザー判断)。
 ndl_version 1.x の間は旧形式として受け付け、warning を出したうえで照合する (食い違えば error。MLAG に `node` を書くのも error)。
 

@@ -106,17 +106,19 @@ MLAG_L1 = """
     - {id: link-leaf1-srv1, endpoints: [leaf1-swp1, srv1-eth0]}
     - {id: link-leaf2-srv1, endpoints: [leaf2-swp1, srv1-eth1]}
   lag:
-    - {id: lag-peer, type: lacp, node: leaf1, members: [leaf1-swp49]}
-    - {id: lag-mlag-srv1, type: mlag, nodes: [leaf1, leaf2], members: [leaf1-swp1, leaf2-swp1],
-       peer_link: lag-peer, peer_link_interface: peerlink.4094}
-    - {id: lag-srv1-bond0, type: lacp, node: srv1, members: [srv1-eth0, srv1-eth1]}
+    - {id: lag-peer, node: leaf1, members: [leaf1-swp49]}
+    - {id: lag-leaf1-srv1, node: leaf1, members: [leaf1-swp1]}
+    - {id: lag-leaf2-srv1, node: leaf2, members: [leaf2-swp1]}
+    - {id: lag-srv1-bond0, node: srv1, members: [srv1-eth0, srv1-eth1]}
+  ethernet_segments:
+    - {id: es-srv1, members: [{lag: lag-leaf1-srv1}, {lag: lag-leaf2-srv1}]}
 """
 
 
 def test_mlag_to_host_bond():
-    """MLAG の両脚は、ポートのノードごとに 1 つの端点。L3 IF は bond の上のもの"""
+    """Ethernet Segment の脚は、ポートのノードごとに 1 つの端点。L3 IF は bond の上のもの (ADR-0023)"""
     t = _topo(MLAG_L1,
-              "  vlans: [{id: vlan-10, vlan_id: 10, access_ports: [{lag: lag-mlag-srv1}]}]\n",
+              "  vlans: [{id: vlan-10, vlan_id: 10, access_ports: [{ethernet_segment: es-srv1}]}]\n",
               "  interfaces:\n"
               "    - {id: srv1-bond0, node: srv1, name: bond0, ip: 10.1.10.10/24, attaches_to: {lag: lag-srv1-bond0}}\n")
     eps = _eps(t, "vlan-10")

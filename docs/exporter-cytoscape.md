@@ -19,9 +19,9 @@
 | `id` / `label` / `role` / `implementation` / `device_type` / `labels` | L1 ノードの値 (`label` は `name`、なければ `id`) |
 | `l3_interfaces` | このノードの L3 IF (IP を持つもの)。下の「L3 IF」 |
 | `vrfs` | このノードの L3 IF が属する VRF の id |
-| `vlans` | このノードにポートがある VLAN の id (MLAG は両ノード。ADR-0013 D5) |
+| `vlans` | このノードにポートがある VLAN の id (Ethernet Segment は脚のすべてのノード。ADR-0013 D5・ADR-0023 D8) |
 | `vteps` | このノードが終端する VTEP: `{id, source, address?, address_v6?, shared_with?}`。`source` は L3 IF の name、`shared_with` は共有相手のノード (ADR-0014) |
-| `subinterfaces` | このノードのサブ IF: `{id, parent, vlan_id, name?}` (MLAG 上は両ノード。ADR-0012) |
+| `subinterfaces` | このノードのサブ IF: `{id, parent, vlan_id, name?}` (ADR-0012) |
 | `tunnels` | このノードのトンネル IF (ADR-0011 D6) |
 | `local_as` | BGP の AS 番号 (default VRF のインスタンスのもの。なければ最初に出てくるインスタンス) |
 | `bgp_sessions` | このノードの BGP セッションすべて (相手がトポロジー外のものを含む。トンネルの `tunnels` と同じ形)。下の「BGP セッション」に `local` (この機器の端) と `peer` (相手の端) を足したもの (ADR-0010 D11) |
@@ -70,8 +70,16 @@ D11 で `unattached` をループバックとみなさないと決めたので�
 ### `type: bridge`
 
 番号を持たない L2 セグメント (`layer2.bridges`。[ADR-0018](decisions/0018-sessions-across-bridges-and-tunnels.md) D1・D5)。事業者網の箱の中の転送に使う。
-`id` / `label` (`name` がなければ id) / `name`、`ports` (`{"interface": <L1 IF>}` か `{"lag": <LAG>}` に、そのポートのノードを `nodes` として添えたもの)、
+`id` / `label` (`name` がなければ id) / `name`、`ports` (`{"interface": <L1 IF>}`・`{"lag": <LAG>}`・`{"ethernet_segment": <ES>}` に、そのポートのノードを `nodes` として添えたもの)、
 `nodes` (ポートのノードを重複なく並べたもの。ふつうは事業者網の箱 1 つ)。辺は出さない。描き方 (箱の中に描くか、描かないか) はビューワが決める。
+
+### `type: ethernet_segment`
+
+複数の機器の脚を相手から 1 本に見せる関係 (`layer1.ethernet_segments`。[ADR-0023](decisions/0023-per-device-lag-and-ethernet-segments.md) D8)。
+`id` / `label` (`name` がなければ id) / `name`、`members` (YAML と同じ形 `{"lag": <LAG>}` / `{"interface": <L1 IF>}` に、脚の機器を `node` として添えたもの)、
+`nodes` (脚の機器を重複なく並べたもの)、`redundancy_mode` (書かれていれば。書かれていなければ出さず、`all_active` で埋めない)。
+辺は出さない。脚のリンクには `ethernet_segment` を載せる (下の「エッジ」)。枠などの描き方はビューワが決める。
+MLAG か EVPN multihoming かは出さない (構文に方式名がない。ビューワが区別したければ `device_type` を見る)。
 
 ### `type: l2vni` / `type: l3vni`
 
@@ -81,7 +89,7 @@ D11 で `unattached` をループバックとみなさないと決めたので�
 ## `description`
 
 YAML に `description` があれば、人が読む補足としてそのまま出す (ADR-0011 D7)。出すのは、対応する要素があるもの:
-機器ノード、`vlan`、`bridge`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
+機器ノード、`vlan`、`bridge`、`ethernet_segment`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
 要素を持たないもの (L1 IF、LAG、VRF、VTEP、インスタンス) の `description` は出さない。
 受け取るツールは表示するだけで、パースせず、一部を取り出しもしない。回線 ID などを書く場所でもある ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
 `role: provider-network` (事業者網の箱) も、ほかの role と同じくそのまま出す。
@@ -90,10 +98,10 @@ YAML に `description` があれば、人が読む補足としてそのまま出
 
 | `type` | 内容 |
 |---|---|
-| `link` | L1 リンク。`source` / `target` は L1 ノード、`source_if` / `target_if` は L1 IF の name。`link_speed` / `link_role` / `lag_id` / `lag_type` |
-| `lag_bundle` | LAG のメンバーリンクを束ねたもの |
+| `link` | L1 リンク。`source` / `target` は L1 ノード、`source_if` / `target_if` は L1 IF の name。`link_speed` / `link_role` / `lag_id` (端の L1 IF がメンバーの LAG) / `ethernet_segment` (端の L1 IF が脚の Ethernet Segment)。`lag_type` は ADR-0023 でなくした |
+| `lag_bundle` | LAG のメンバーリンクを束ねたもの。`lag_id`、脚なら `ethernet_segment` |
 | `attaches_to` | L1 ノードの `attaches_to` (ノードがどこで動くか。ADR-0001) |
-| `vlan_member` | VLAN → ポートのあるノード。`tagged_on` / `untagged_on` はポートの name か LAG の id。`endpoints` は下の「VLAN の端点」 |
+| `vlan_member` | VLAN → ポートのあるノード。`tagged_on` / `untagged_on` はポートの name か LAG の id (Ethernet Segment のポートは、そのノードの脚の LAG の id か L1 IF の name に開く)。`endpoints` は下の「VLAN の端点」 |
 | `routing_neighbor` | `control_plane.routing_neighbors` の 1 セッション = 1 辺。`protocol` (bgp / ospf / isis)。BGP は両端がトポロジー内のものだけ。下の「BGP セッション」 (ADR-0010 D11) |
 | `tunnel` | 対向がトポロジー内のトンネル IF (A→B と B→A は 1 本) |
 

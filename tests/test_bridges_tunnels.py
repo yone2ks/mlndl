@@ -56,7 +56,7 @@ def test_fixture_is_valid_without_warnings():
 
 class TestSchema:
     def test_port_needs_exactly_one_key(self):
-        with pytest.raises(PydanticValidationError, match="どちらか一方"):
+        with pytest.raises(PydanticValidationError, match="どれか 1 つ"):
             _topo((PORTS, "        - {interface: net-wideether-tokyo, lag: lag-x}\n"))
 
     def test_port_has_no_native_or_node(self):
@@ -102,7 +102,7 @@ class TestTransport:
             ("    - {id: link-osaka-wideether,",
              "    - {id: link-tokyo-wideether-2, endpoints: [tokyo-rtr-ge2, net-wideether-tokyo2]}\n"
              "    - {id: link-osaka-wideether,"),
-            ("layer2:\n", "  lag:\n    - {id: lag-tokyo-po1, type: lacp, node: tokyo-rtr, members: [tokyo-rtr-ge0, tokyo-rtr-ge2]}\n\nlayer2:\n"),
+            ("layer2:\n", "  lag:\n    - {id: lag-tokyo-po1, node: tokyo-rtr, members: [tokyo-rtr-ge0, tokyo-rtr-ge2]}\n\nlayer2:\n"),
             (PORTS, PORTS + "        - {interface: net-wideether-tokyo2}\n"),
             ("attaches_to: {interface: tokyo-rtr-ge0}}", "attaches_to: {lag: lag-tokyo-po1}}"),
         )
@@ -231,7 +231,7 @@ class TestChecks:
         assert any("VLAN のポートにも書かれています" in m for m in _msgs(topo, "warning"))
 
     def test_lag_and_member(self):
-        lag = ("layer2:\n", "  lag:\n    - {id: lag-we-tokyo, type: lacp, node: net-wideether, members: [net-wideether-tokyo]}\n\nlayer2:\n")
+        lag = ("layer2:\n", "  lag:\n    - {id: lag-we-tokyo, node: net-wideether, members: [net-wideether-tokyo]}\n\nlayer2:\n")
         both = _topo(lag, (PORTS, PORTS + "        - {lag: lag-we-tokyo}\n"))
         assert any("LAG とそのメンバーを同じ bridge に書くことはできません" in m for m in _msgs(both))
         member_only = _topo(lag)

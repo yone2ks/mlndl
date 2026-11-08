@@ -19,7 +19,8 @@ vlans:
   - id: vlan-100
     vlan_id: 100
     trunk_ports:
-      - {lag: lag-mlag-server1}     # LAG はメンバーではなく LAG を指す。MLAG は 1 行で両方の機器
+      - {ethernet_segment: es-server1}   # Ethernet Segment は 1 行で脚の全機器 (MLAG / vPC / ESI-LAG)
+      - {lag: lag-leaf3-po1}             # LAG はメンバーではなく LAG を指す
       - {interface: leaf1-swp4}
     access_ports:
       - {interface: server1-eth0}
@@ -36,16 +37,19 @@ vlans:
 
 ### ポート
 
-`{interface:}` か `{lag:}` のどちらか一方を書きます ([ADR-0013](../decisions/0013-vlan-ports-on-lag.md))。
+`{interface:}`・`{lag:}`・`{ethernet_segment:}` のどれか 1 つを書きます ([ADR-0013](../decisions/0013-vlan-ports-on-lag.md)、[ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D5)。
 
 | キー | 型 | 参照先 | 説明 |
 |---|---|---|---|
 | `interface` | id | `layer1.interfaces` | L1 IF |
-| `lag` | id | `layer1.lag` | LAG。MLAG を指せば 2 台のポートを 1 行で書ける |
+| `lag` | id | `layer1.lag` | 機器 1 台の LAG |
+| `ethernet_segment` | id | `layer1.ethernet_segments` | Ethernet Segment。脚の全機器のポートを 1 行で書ける |
 | `native` | 真偽値 (`false`) | | trunk でこの VLAN をタグなし (native VLAN) で流すなら `true` |
 
 `node` は書きません (参照先から導く。1.x の間は書いても warning で受け付ける)。
 同じ VLAN に LAG とそのメンバーを併記すると error、メンバーだけを書くと `{lag:}` を促す warning です。
+同じように、Ethernet Segment とその脚 (脚の LAG のメンバーを含む) を併記すると error、脚の一部だけを書くと `{ethernet_segment:}` を促す warning です
+(MLAG の片側にだけ VLAN を載せる誤りを拾う)。脚をすべて機器ごとに書くのは `{ethernet_segment:}` と同じ意味なので warning にしません。
 
 VLAN のポートの対向にある L3 IF (サーバーの IP など) は、mlndl がリンクをたどって導きます (VLAN の端点。[ADR-0013](../decisions/0013-vlan-ports-on-lag.md) D7)。
 
@@ -67,7 +71,7 @@ bridges:
 |---|---|---|---|
 | `id` | id | ○ | 推奨プレフィックス `bridge-` |
 | `name` | 文字列 | | |
-| `ports` | [`{interface:}` / `{lag:}`] | | 転送する側 (箱) のポート。`node` と `native` は持たない |
+| `ports` | [`{interface:}` / `{lag:}` / `{ethernet_segment:}`] | | 転送する側 (箱) のポート。`node` と `native` は持たない。事業者網を PE ごとに書き、拠点が 2 台の PE に冗長に接続するなら `{ethernet_segment:}` |
 | `description` | 文字列 | | |
 
 方式名 (E-LINE、VPLS など) は書きません。両端のルーターの L1 リンクの対向が同じ bridge のポートなら、そのあいだのセッションの通り道は `{bridge: <id>}` になります ([control-plane.md](control-plane.ja.md#通り道))。
@@ -142,3 +146,4 @@ subinterfaces:
 | `description` | 文字列 | | | |
 
 `node` は持ちません。基盤の L1 IF・LAG から機器を導きます。
+MLAG / ESI-LAG の上のサブ IF も、機器ごとの LAG を `{lag:}` で指して機器ごとに書きます。`{ethernet_segment:}` は指せません ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D5)。

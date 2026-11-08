@@ -26,9 +26,6 @@ VLAN_SHORTHAND = re.compile(r"^vlan-\d+$")
 # L3Interface の attaches_to に書けるキー (ADR-0001 D8)
 L3_ATTACH_KEYS = frozenset({"interface", "lag", "vlan", "subinterface"})
 
-_MAC_PATTERN = re.compile(r"^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$|^[0-9a-fA-F]{4}(\.[0-9a-fA-F]{4}){2}$")
-
-
 def _reject_ipv6_in_ip(value: Any) -> Any:
     """`ip` に IPv6 を書いた場合に、移動先を示すエラーを返す (ADR-0011 D5)"""
     if isinstance(value, str) and ":" in value:
@@ -113,20 +110,23 @@ class AnycastGateway(BaseModel):
 
     プロトコル交換を持たず、全ノードが同時に active。VIP / group_id は持たない
     (L3Interface の ip / ipv6 自体が anycast アドレス)。
+    anycast の MAC アドレスは書かない。MAC は構成図の粒度ではない (ADR-0022 D2)
     """
 
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["anycast_gateway"]
-    anycast_mac: str | None = None   # Cisco anycast-gateway-mac / Arista virtual-router mac 等
     description: str | None = None
 
-    @field_validator("anycast_mac")
+    @model_validator(mode="before")
     @classmethod
-    def mac_format(cls, v: str | None) -> str | None:
-        if v is not None and not _MAC_PATTERN.match(v):
-            raise ValueError(f"anycast_mac の形式が不正です: '{v}'")
-        return v
+    def reject_anycast_mac(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "anycast_mac" in data:
+            raise ValueError(
+                "anycast_mac はなくしました。MAC アドレスは構成図の粒度ではないので書きません。"
+                "anycast gateway は ip / ipv6 が全ノードで同じことだけを書きます (ADR-0022 D2)"
+            )
+        return data
 
 
 GatewayRedundancy = Annotated[

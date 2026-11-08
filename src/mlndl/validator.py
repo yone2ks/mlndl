@@ -8,15 +8,15 @@
      _resolve_ref がキーごとに参照先を引く。旧形式 {interface: <LAG 等>} の読み替えもここ
   3. 意味の検査 — ネットワークとしての整合性。手書き。主なもの:
      - ID: 文法 (ADR-0002 D1)、L1 IF / LAG / VLAN / サブ IF の ID 重複、L3 IF とトンネルの ID 重複 (ADR-0002 D5)
-     - L1: MLAG の client_lag が LACP を指し、メンバー数が合うか
-     - L2: VLAN のポートのノード (旧形式の node との照合、MLAG に node)、LAG とメンバーの併記、
-       同じ端点の重複、同一ノード上の vlan_id 重複 (MLAG は両ノードで数える)、サブ IF のタグ重複、
+     - L1: Ethernet Segment の脚 (機器の重複、2 つの ES に入る脚、LAG とメンバーの併記、脚どうしのリンク。ADR-0023 D7)
+     - L2: VLAN のポートのノード (旧形式の node との照合、ES に node)、LAG とメンバー・ES と脚の併記、
+       ES の脚の一部だけ (warning)、同じ端点の重複、同一ノード上の vlan_id 重複 (ES は脚の全機器で数える)、サブ IF のタグ重複、
        VNI 番号の重複、VNI に参加するノードの VLAN、VTEP の検査 (ADR-0014 D5)、
        VLAN の端点の IP が SVI のサブネット外 (info。ADR-0013 D7)、
        bridge のポート (同じポートを 2 つの bridge に、LAG とメンバー、ポートが 1 つ、ルーターのポートらしいもの、
        VLAN と bridge の両方にあるポート。ADR-0018 D1)
      - L3: VRF ↔ L3VNI の双方向一致、RD / RT の形式、L3 IF の (node, name) 重複と参照先のノード所属、
-       gateway_redundancy (VIP のサブネット・group_id 重複)、anycast gateway の一致、
+       gateway_redundancy (VIP のサブネット・group_id 重複)、anycast gateway の ip / ipv6 の一致、
        トンネル (source のノード、自己トンネル、外側の AF、片側だけのトンネル)
      - control_plane (ADR-0010 D10): インスタンスの省略、端の機器とインスタンス・update_source の機器と VRF、
        両端から導いた通り道の食い違い (BGP は error、OSPF / IS-IS は ndl_version 1.x の間 warning。ADR-0018 D4)、
@@ -44,11 +44,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .derive import (bgp_session_views, end_path_labels, igp_adjacency_views, l3_and_tunnels, outside_svi_subnet,
-                     vlan_endpoints, vlan_svi_networks)
+from .derive import (bgp_session_views, end_path_labels, ethernet_segments, igp_adjacency_views,
+                     l3_and_tunnels, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
 from .schema.control_plane import BgpInsideEndpoint, BgpSession, OspfAdjacency
 from .schema.layer3 import TunnelInterface
-from .schema.layer1 import AttachesToObj, LacpLag, MlagLag, canonical_link_speed
+from .schema.layer1 import AttachesToObj, canonical_link_speed
 from .schema.layer2 import L2VxLAN, L3VxLAN
 from .schema.topology import MLNDLTopology
 from .schema.refs import COLLECTION_LABELS, Ref
@@ -131,7 +131,8 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     vrf_ids: set[str] = set()
     l3interface_ids: set[str] = set()
     iface_node: dict[str, str] = {}      # L1 interface id → node id
-    lag_nodes: dict[str, set[str]] = {}  # LAG id → node id 群 (lacp は 1、mlag は 2)
+    lag_nodes: dict[str, set[str]] = {}  # LAG id → node id (LAG は機器 1 台。ADR-0023 D1)
+    es_ids: set[str] = set()
     member_lag: dict[str, str] = {}      # LAG のメンバー L1 IF id → LAG id
     subif_ids: set[str] = set()
     subif_nodes: dict[str, set[str]] = {}  # サブ IF id → 親から導出した node id 群
@@ -143,10 +144,10 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         interface_ids = {i.id for i in l1.interfaces}
         lag_ids = {lag.id for lag in l1.lag}
         iface_node = {i.id: i.node for i in l1.interfaces}
-        lag_nodes = {
-            lag.id: ({lag.node} if isinstance(lag, LacpLag) else set(lag.nodes)) for lag in l1.lag
-        }
+        lag_nodes = {lag.id: {lag.node} for lag in l1.lag}
         member_lag = {m: lag.id for lag in l1.lag for m in lag.members}
+        es_ids = {es.id for es in l1.ethernet_segments}
+    segments = ethernet_segments(topology)
 
     if topology.layer2:
         l2 = topology.layer2
@@ -183,7 +184,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     # attaches_to / VLAN のポートのキーが指す ID 空間 (ADR-0001 D8)
     spaces = {
         "node": node_ids, "interface": interface_ids, "lag": lag_ids,
-        "vlan": vlan_ids, "subinterface": subif_ids,
+        "vlan": vlan_ids, "subinterface": subif_ids, "ethernet_segment": es_ids,
     }
 
     # ── ID の一意性 (ADR-0002 D5) ───────────────────────────────────────
@@ -191,20 +192,20 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
 
     # ── Layer 1 ──────────────────────────────────────────────────────────
     if topology.layer1:
-        _validate_l1(topology.layer1, node_ids, interface_ids, lag_ids, spaces, errors)
+        _validate_l1(topology.layer1, iface_node, member_lag, spaces, errors)
 
     # ── Layer 2 ──────────────────────────────────────────────────────────
     if topology.layer2:
         _validate_l2(
             topology.layer2,
-            node_ids, iface_node, lag_nodes, member_lag, spaces,
+            node_ids, iface_node, lag_nodes, member_lag, spaces, segments, _segment_of_leg(topology.layer1),
             vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vtep_nodes,
             errors,
         )
 
     # ── bridge (ADR-0018 D1) ─────────────────────────────────────────────
     if topology.layer2 and topology.layer2.bridges:
-        _validate_bridges(topology, spaces, member_lag, errors)
+        _validate_bridges(topology, spaces, member_lag, segments, errors)
 
     # ── Layer 3 ──────────────────────────────────────────────────────────
     if topology.layer3:
@@ -217,7 +218,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
 
     # ── VTEP (ADR-0014) ──────────────────────────────────────────────────
     if topology.layer2 and topology.layer2.vteps:
-        _validate_vteps(topology, vtep_nodes, errors)
+        _validate_vteps(topology, vtep_nodes, segments, errors)
 
     # ── VLAN の端点 (ADR-0013 D7) ─────────────────────────────────────────
     _check_vlan_endpoints(topology, errors)
@@ -236,24 +237,9 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
 # Layer 1
 # ---------------------------------------------------------------------------
 
-def _validate_l1(l1, node_ids, interface_ids, lag_ids, spaces, errors):
-    # 参照の存在 (node / endpoints / members / peer_link / client_lag) は _check_refs が検査する (ADR-0015)
-    for i, lag in enumerate(l1.lag):
-        # client_lag: 同一 lag リスト内の LacpLag を参照していること
-        if not isinstance(lag, MlagLag) or lag.client_lag not in lag_ids:
-            continue
-        client = next(x for x in l1.lag if x.id == lag.client_lag)
-        if not isinstance(client, LacpLag):
-            errors.append(ValidationError(
-                f"layer1.lag[{i}].client_lag",
-                f"client_lag は LacpLag (type: lacp) を参照する必要があります",
-            ))
-        elif len(client.members) != len(lag.nodes):            # members 数の対称性
-            errors.append(ValidationError(
-                f"layer1.lag[{i}].client_lag",
-                f"client_lag '{lag.client_lag}' の members 数 ({len(client.members)}) が"
-                f" MLAG の nodes 数 ({len(lag.nodes)}) と一致しません",
-            ))
+def _validate_l1(l1, iface_node, member_lag, spaces, errors):
+    # 参照の存在 (node / endpoints / members) は _check_refs が検査する (ADR-0015)
+    _validate_ethernet_segments(l1, iface_node, member_lag, spaces, errors)
 
     # attaches_to
     for i, node in enumerate(l1.nodes):
@@ -264,20 +250,103 @@ def _validate_l1(l1, node_ids, interface_ids, lag_ids, spaces, errors):
             _check_attaches_to(iface.attaches_to, f"layer1.interfaces[{i}].attaches_to", spaces, errors)
 
 
+def _validate_ethernet_segments(l1, iface_node, member_lag, spaces, errors):
+    """Ethernet Segment の脚 (ADR-0023 D7)
+
+    - 脚は機器ごとに 1 つ (同じ機器の中で束ねるのは LAG)
+    - 1 つの脚 (と、その L1 IF) は 1 つの ES にだけ入る
+    - LAG とそのメンバーを同じ ES に併記しない。LAG のメンバーだけを書いたら LAG を促す (warning)
+    - 脚どうしが L1 リンクでつながっていたら、2 台をつなぐピアリンクを脚にした疑い
+    """
+    peer: dict[str, str] = {}
+    for link in l1.links:
+        x, y = link.endpoints
+        peer[x], peer[y] = y, x
+    lags = {g.id: g for g in l1.lag}
+    owner: dict[str, str] = {}              # 脚の参照先・脚の L1 IF → それを脚に持つ最初の ES
+    for i, es in enumerate(l1.ethernet_segments):
+        written = {m.target for m in es.members}
+        node_of: dict[str, str] = {}        # 機器 → その機器の脚
+        legs_of: dict[str, set[str]] = {}   # 脚 → 脚の L1 IF
+        for j, m in enumerate(es.members):
+            path = f"layer1.ethernet_segments[{i}].members[{j}].{m.kind}"
+            kind = _resolve_ref(m.kind, m.target, spaces, path, errors)
+            if kind is None:
+                continue
+            if m.target in legs_of:
+                errors.append(ValidationError(path, f"'{m.target}' はこの Ethernet Segment にすでに書かれています (ADR-0023 D7)"))
+                continue
+            if kind == "interface" and member_lag.get(m.target) is not None:
+                lag = member_lag[m.target]
+                if lag in written:
+                    errors.append(ValidationError(
+                        path,
+                        f"'{m.target}' は LAG '{lag}' のメンバーです。LAG とそのメンバーを同じ Ethernet Segment に"
+                        f"書くことはできません。LAG だけを書いてください (ADR-0023 D7)",
+                    ))
+                    continue
+                errors.append(ValidationError(
+                    path,
+                    f"'{m.target}' は LAG '{lag}' のメンバーです。脚が LAG なら LAG を指して書いてください (lag: {lag})"
+                    f" (ADR-0023 D3)",
+                    "warning",
+                ))
+            if kind == "lag":
+                node, legs = lags[m.target].node, set(lags[m.target].members)
+            else:
+                node, legs = iface_node[m.target], {m.target}
+            legs_of[m.target] = legs
+            if node in node_of:
+                errors.append(ValidationError(
+                    path,
+                    f"機器 '{node}' の脚が '{node_of[node]}' と '{m.target}' の 2 つあります。Ethernet Segment の脚は"
+                    f"機器ごとに 1 つです。同じ機器のポートを束ねるなら、その機器の LAG にまとめてください (ADR-0023 D2)",
+                ))
+            node_of.setdefault(node, m.target)
+            for key in sorted({m.target} | legs):
+                if key in owner and owner[key] != es.id:
+                    errors.append(ValidationError(
+                        path,
+                        f"'{key}' は Ethernet Segment '{owner[key]}' の脚でもあります。1 つの脚は 1 つの"
+                        f" Ethernet Segment にだけ入ります (ADR-0023 D7)",
+                    ))
+                    break
+            for key in {m.target} | legs:
+                owner.setdefault(key, es.id)
+
+        # 脚どうしがリンクでつながっている = ピアリンクを脚にした疑い
+        leg_owner = {leg: t for t, legs in legs_of.items() for leg in legs}
+        reported: set[frozenset[str]] = set()
+        for j, m in enumerate(es.members):
+            for leg in sorted(legs_of.get(m.target, ())):
+                other = leg_owner.get(peer.get(leg, ""))
+                pair = frozenset((m.target, other or ""))
+                if other is None or other == m.target or pair in reported:
+                    continue
+                reported.add(pair)
+                errors.append(ValidationError(
+                    f"layer1.ethernet_segments[{i}].members[{j}]",
+                    f"脚 '{m.target}' と '{other}' が L1 リンクでつながっています。Ethernet Segment の脚は相手 (ホスト / CE)"
+                    f" に向かうポートです。2 台をつなぐピアリンクは脚にせず、普通の LAG として書きます (ADR-0023 D6)",
+                ))
+
+
 # ---------------------------------------------------------------------------
 # Layer 2
 # ---------------------------------------------------------------------------
 
-def _port_nodes(pr, kind, path, iface_node, lag_nodes, node_ids, errors) -> set[str]:
+def _port_nodes(pr, kind, path, iface_node, lag_nodes, segments, node_ids, errors) -> set[str]:
     """VLAN のポートが載るノード群を返す (ADR-0013 D2)
 
-    node は書かない (interface / lag から導出する)。ndl_version 1.x の間は旧形式として受け付けて
-    warning を出し、導出したノードと照合する。MLAG は両ノードに効くので node を書くと error
+    node は書かない (interface / lag / ethernet_segment から導出する)。ndl_version 1.x の間は旧形式として受け付けて
+    warning を出し、導出したノードと照合する。Ethernet Segment は脚の全機器に効くので node を書くと error
     """
     if kind == "interface":
         owners = {iface_node[pr.target]}
     elif kind == "lag":
         owners = set(lag_nodes[pr.target])
+    elif kind == "ethernet_segment":
+        owners = set(segments[pr.target].nodes) if pr.target in segments else set()
     else:
         return set()
     if pr.node is None:
@@ -290,49 +359,98 @@ def _port_nodes(pr, kind, path, iface_node, lag_nodes, node_ids, errors) -> set[
     ))
     if pr.node not in node_ids:
         return owners                           # 未定義のノードは _check_refs が検査する
-    if kind == "lag" and len(owners) > 1:
+    if kind == "ethernet_segment":
         errors.append(ValidationError(
             f"{path}.node",
-            f"MLAG '{pr.target}' は {' / '.join(sorted(owners))} の両方に効くため、node は書けません (ADR-0013 D2)",
+            f"Ethernet Segment '{pr.target}' は {' / '.join(sorted(owners))} のすべてに効くため、node は書けません"
+            f" (ADR-0013 D2 / ADR-0023 D5)",
         ))
     elif pr.node not in owners:
         what = "インターフェース" if kind == "interface" else "LAG"
         errors.append(ValidationError(
-            f"{path}.{pr_key(pr)}",
+            f"{path}.{pr.kind}",
             f"{what} '{pr.target}' はノード '{next(iter(owners))}' に属しており、"
             f"'{pr.node}' のものではありません (ADR-0013 D2)",
         ))
     return owners
 
 
-def pr_key(pr) -> str:
-    """PortRef に書かれた参照キー (interface / lag)"""
-    return "interface" if pr.interface is not None else "lag"
+def _segment_of_leg(l1) -> dict[str, str]:
+    """Ethernet Segment の脚 (LAG / L1 IF の id) と、脚の LAG のメンバー → ES の id"""
+    if l1 is None:
+        return {}
+    lag_members = {g.id: g.members for g in l1.lag}
+    out: dict[str, str] = {}
+    for es in l1.ethernet_segments:
+        for m in es.members:
+            out.setdefault(m.target, es.id)
+            for leg in (lag_members.get(m.target, []) if m.lag is not None else []):
+                out.setdefault(leg, es.id)
+    return out
 
 
-def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
+def _check_segment_ports(ports, listed, segment_of, segments, what, adr, errors) -> set[int]:
+    """ポートの並び (VLAN / bridge) で、Ethernet Segment とその脚の併記 (error) と、脚の一部だけ (warning) を検査する
+
+    ports: (パス, ポート) の並び。戻り値は ES との併記で error にしたポートの位置 (ほかの検査を重ねないため)
+    """
+    skipped: set[int] = set()
+    partial: dict[str, list[tuple[str, str]]] = {}      # ES id → この並びに書かれた脚 (パス, 参照先)
+    for k, (path, pr) in enumerate(ports):
+        if pr.kind == "ethernet_segment":
+            continue
+        es = segment_of.get(pr.target)
+        if es is None:
+            continue
+        if es in listed:
+            skipped.add(k)
+            errors.append(ValidationError(
+                f"{path}.{pr.kind}",
+                f"'{pr.target}' は Ethernet Segment '{es}' の脚です。Ethernet Segment とその脚を同じ{what}に"
+                f"書くことはできません。{{ethernet_segment: {es}}} だけを書いてください ({adr} / ADR-0023 D7)",
+            ))
+        elif es in segments and pr.target in segments[es].members:
+            partial.setdefault(es, []).append((path, pr.target))
+    for es, got in partial.items():
+        written = {t for _, t in got}
+        missing = [m for m in segments[es].members if m not in written]
+        if missing:
+            path, target = got[0]
+            errors.append(ValidationError(
+                path,
+                f"'{target}' は Ethernet Segment '{es}' の脚ですが、この{what}には同じ Ethernet Segment の"
+                f" {' / '.join(missing)} がありません。脚のすべての機器に載せるなら {{ethernet_segment: {es}}} と"
+                f"書いてください (ADR-0023 D7)",
+                "warning",
+            ))
+    return skipped
+
+
+def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segments, segment_of,
                  vlan_ids, l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vtep_nodes, errors):
     # VLAN trunk_ports / access_ports (ADR-0013)
-    # interface (L1 IF) か lag (LAG) で指す。node は書かず、参照先から導出する
+    # interface (L1 IF)・lag (LAG)・ethernet_segment (ES) で指す。node は書かず、参照先から導出する
     vlans_on_node: dict[tuple[str, int], list[str]] = {}
     vlan_nodes: dict[str, set[str]] = {}
     for i, vlan in enumerate(l2.vlans):
         ports = [(f"trunk_ports[{j}]", pr) for j, pr in enumerate(vlan.trunk_ports)]
         ports += [(f"access_ports[{j}]", pr) for j, pr in enumerate(vlan.access_ports)]
         listed = {pr.target for _, pr in ports}
+        skipped = _check_segment_ports([(f"layer2.vlans[{i}].{w}", pr) for w, pr in ports], listed,
+                                       segment_of, segments, " VLAN ", "ADR-0013 D3", errors)
         seen: dict[str, str] = {}
-        for where, pr in ports:
+        for k, (where, pr) in enumerate(ports):
             path = f"layer2.vlans[{i}].{where}"
             if pr.target in seen:
                 errors.append(ValidationError(
-                    f"{path}.{pr_key(pr)}",
+                    f"{path}.{pr.kind}",
                     f"'{pr.target}' はこの VLAN の {seen[pr.target]} にも書かれています (ADR-0013 D4)",
                 ))
             else:
                 seen[pr.target] = where
-            kind = _resolve_ref(pr_key(pr), pr.target, spaces, f"{path}.{pr_key(pr)}", errors,
+            kind = _resolve_ref(pr.kind, pr.target, spaces, f"{path}.{pr.kind}", errors,
                                 legacy_kinds=("lag",))
-            nodes = _port_nodes(pr, kind, path, iface_node, lag_nodes, node_ids, errors)
+            nodes = _port_nodes(pr, kind, path, iface_node, lag_nodes, segments, node_ids, errors)
             vlan_nodes.setdefault(vlan.id, set()).update(nodes)
             for node in nodes:
                 owners = vlans_on_node.setdefault((node, vlan.vlan_id), [])
@@ -341,7 +459,7 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
 
             # LAG のメンバーに VLAN は設定しない。設定は LAG 側にあり、メンバーはそれを継承する
             lag = member_lag.get(pr.target) if kind == "interface" else None
-            if lag is None:
+            if lag is None or k in skipped:
                 continue
             if lag in listed:
                 errors.append(ValidationError(
@@ -412,8 +530,8 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces,
                         ))
 
 
-def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, errors) -> None:
-    """bridge のポート (ADR-0018 D1)。ポートの形は VLAN のポートと同じ (ADR-0013)"""
+def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, segments, errors) -> None:
+    """bridge のポート (ADR-0018 D1)。ポートの形は VLAN のポートと同じ (ADR-0013 / ADR-0023 D5)"""
     l2 = topology.layer2
     peer: dict[str, str] = {}
     if topology.layer1:
@@ -421,6 +539,7 @@ def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, errors) -> No
             x, y = link.endpoints
             peer[x], peer[y] = y, x
     lag_members = {g.id: set(g.members) for g in topology.layer1.lag} if topology.layer1 else {}
+    segment_of = _segment_of_leg(topology.layer1)
     vlan_ports = {pr.target for v in l2.vlans for pr in [*v.trunk_ports, *v.access_ports]}
     owner: dict[str, str] = {}          # ポートの参照先 → それを書いた最初の bridge
     for i, br in enumerate(l2.bridges):
@@ -432,15 +551,24 @@ def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, errors) -> No
                 "warning",
             ))
         listed = {p.target for p in br.ports}
+        skipped = _check_segment_ports([(f"layer2.bridges[{i}].ports[{j}]", p) for j, p in enumerate(br.ports)],
+                                       listed, segment_of, segments, " bridge ", "ADR-0018 D1", errors)
         legs_of: dict[str, set[str]] = {}
         for j, port in enumerate(br.ports):
-            key = pr_key(port)
+            key = port.kind
             path = f"layer2.bridges[{i}].ports[{j}].{key}"
             kind = _resolve_ref(key, port.target, spaces, path, errors)
             if port.target in legs_of:
                 errors.append(ValidationError(path, f"'{port.target}' はこの bridge にすでに書かれています (ADR-0018 D1)"))
                 continue
-            legs_of[port.target] = lag_members.get(port.target, set()) if kind == "lag" else {port.target}
+            if kind == "lag":
+                legs_of[port.target] = lag_members.get(port.target, set())
+            elif kind == "ethernet_segment":
+                legs_of[port.target] = set(segments[port.target].legs) if port.target in segments else set()
+            else:
+                legs_of[port.target] = {port.target}
+            if j in skipped:
+                continue
             if port.target in owner and owner[port.target] != br.id:
                 errors.append(ValidationError(
                     path,
@@ -469,7 +597,7 @@ def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, errors) -> No
         for j, port in enumerate(br.ports):
             if any(peer.get(leg) in all_legs for leg in legs_of.get(port.target, ())):
                 errors.append(ValidationError(
-                    f"layer2.bridges[{i}].ports[{j}].{pr_key(port)}",
+                    f"layer2.bridges[{i}].ports[{j}].{port.kind}",
                     f"'{port.target}' の L1 リンクの対向も、この bridge のポートです。ports には転送する側 (事業者網の箱) の"
                     f"ポートだけを書き、拠点のルーターのポートは書きません (ADR-0018 D1)",
                     "warning",
@@ -508,7 +636,7 @@ def _check_legacy_vtep_source(vx, i, node_ids, l3interface_ids, l3iface_node, er
     return set(vx.members or []) | ({vtep_node} if vtep_node else set())
 
 
-def _validate_vteps(topology: MLNDLTopology, vtep_nodes: dict[str, set[str]], errors) -> None:
+def _validate_vteps(topology: MLNDLTopology, vtep_nodes: dict[str, set[str]], segments, errors) -> None:
     """layer2.vteps の検証 (ADR-0014 D5)"""
     l3ifs = {i.id: i for i in topology.layer3.interfaces} if topology.layer3 else {}
     used_by: dict[str, str] = {}             # L3 IF id → それを使う VTEP の id
@@ -573,23 +701,21 @@ def _validate_vteps(topology: MLNDLTopology, vtep_nodes: dict[str, set[str]], er
             else:
                 by_address[addr] = vtep.id
 
-    # MLAG ペアの片方だけが VTEP を終端している (相方の書き忘れの可能性)
-    if topology.layer1:
-        for lag in topology.layer1.lag:
-            if not isinstance(lag, MlagLag):
-                continue
-            pair = set(lag.nodes)
-            for i, vtep in enumerate(topology.layer2.vteps):
-                inside = vtep_nodes.get(vtep.id, set()) & pair
-                if len(inside) == 1:
-                    (one,) = inside
-                    (other,) = pair - inside
-                    errors.append(ValidationError(
-                        f"layer2.vteps[{i}].sources",
-                        f"MLAG '{lag.id}' のノード '{one}' はこの VTEP を終端していますが、相方 '{other}' は"
-                        f"含まれていません。MLAG ペアは通常 VTEP を共有します (ADR-0014 D5)",
-                        "warning",
-                    ))
+    # Ethernet Segment の機器の一部だけが VTEP を終端している (書き忘れの可能性。ADR-0014 D5 / ADR-0023 D7)
+    # 脚の機器がそろって VTEP を終端していないと、VTEP のない機器に着いたホストの通信が VXLAN に出られない
+    terminating = set().union(*vtep_nodes.values()) if vtep_nodes else set()
+    for i, es in enumerate(topology.layer1.ethernet_segments if topology.layer1 else []):
+        nodes = segments.get(es.id).nodes if es.id in segments else []
+        having = [n for n in nodes if n in terminating]
+        missing = [n for n in nodes if n not in terminating]
+        if having and missing:
+            errors.append(ValidationError(
+                f"layer1.ethernet_segments[{i}]",
+                f"Ethernet Segment '{es.id}' の機器のうち {' / '.join(having)} は VTEP を終端していますが、"
+                f"{' / '.join(missing)} はどの VTEP も終端していません。脚の機器はそろって VTEP を終端します"
+                f" (ADR-0014 D5 / ADR-0023 D7)",
+                "warning",
+            ))
 
 
 # ---------------------------------------------------------------------------
@@ -952,7 +1078,7 @@ def _ja(label: str) -> str:
 
 _KIND_LABEL = {
     "node": "ノード", "interface": "L1 インターフェース", "lag": "LAG", "vlan": "VLAN",
-    "subinterface": "サブインターフェース",
+    "subinterface": "サブインターフェース", "ethernet_segment": "Ethernet Segment",
 }
 
 
@@ -1140,15 +1266,12 @@ def _af_names(afs: set[int]) -> str:
     return " / ".join(f"IPv{af}" for af in sorted(afs))
 
 
-def _normalize_mac(mac: str) -> str:
-    return "".join(c for c in mac.lower() if c in "0123456789abcdef")
-
-
 def _check_anycast_consistency(l3, vlan_ids, errors: list[ValidationError]) -> None:
-    """同じ VLAN に載る anycast gateway の SVI 群で、IP と MAC が揃っているか (ADR-0011 D4)
+    """同じ VLAN に載る anycast gateway の SVI 群で、ip / ipv6 が揃っているか (ADR-0011 D4)
 
-    anycast gateway は全ノードが同じアドレスと MAC で応答する。1 台でも違えば、
+    anycast gateway は全ノードが同じアドレスで応答する。1 台でも違えば、
     そのノードに着いたホストのゲートウェイが変わってしまう。未指定の値は比べない。
+    MAC アドレスは書かないので比べない (ADR-0022 D2)
     """
     groups: dict[str, list[tuple[int, object]]] = {}
     for i, iface in enumerate(l3.interfaces):
@@ -1159,8 +1282,6 @@ def _check_anycast_consistency(l3, vlan_ids, errors: list[ValidationError]) -> N
         if len(members) < 2:
             continue
         first_i, first = members[0]
-        first_mac = next((gw.anycast_mac for gw in first.gateway_redundancy
-                          if gw.mode == "anycast_gateway" and gw.anycast_mac), None)
         for i, iface in members[1:]:
             path = f"layer3.interfaces[{i}]"
             for fld in ("ip", "ipv6"):
@@ -1171,14 +1292,6 @@ def _check_anycast_consistency(l3, vlan_ids, errors: list[ValidationError]) -> N
                         f"VLAN '{vlan}' の anycast gateway で {fld} が {b} ですが、"
                         f"layer3.interfaces[{first_i}] ('{first.id}') は {a} です。"
                         f"anycast gateway は全ノードで同じアドレスにします (ADR-0011 D4)",
-                    ))
-            for j, gw in enumerate(iface.gateway_redundancy):
-                if (gw.mode == "anycast_gateway" and gw.anycast_mac and first_mac
-                        and _normalize_mac(gw.anycast_mac) != _normalize_mac(first_mac)):
-                    errors.append(ValidationError(
-                        f"{path}.gateway_redundancy[{j}].anycast_mac",
-                        f"VLAN '{vlan}' の anycast gateway で anycast_mac が {gw.anycast_mac} ですが、"
-                        f"'{first.id}' は {first_mac} です (ADR-0011 D4)",
                     ))
 
 
@@ -1208,6 +1321,8 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
                 ))
         for i, lag in enumerate(topology.layer1.lag):
             _warn_prefix(errors, f"layer1.lag[{i}].id", lag.id, "lag-", "LAG")
+        for i, es in enumerate(topology.layer1.ethernet_segments):
+            _warn_prefix(errors, f"layer1.ethernet_segments[{i}].id", es.id, "es-", "Ethernet Segment")
         for i, node in enumerate(topology.layer1.nodes):
             for key in (node.labels or {}):
                 if not _ID_PATTERN.match(key):
