@@ -92,7 +92,7 @@ control_plane: {...}    # 制御プレーン: BGP・OSPF・IS-IS・BFD・セッ�
 
 - **参照先が 1 種類に決まるキー**: 値に id をそのまま書きます (例: L1 IF の `node: leaf1`、リンクの `endpoints: [spine1-swp1, leaf1-swp51]`)。
   各ページの表の「参照先」の列が、どの一覧の id を書けるかを示します。
-- **キーで参照先の種類を選ぶもの**: `{種類: id}` の形で書きます (例: `attaches_to: {interface: leaf1-swp51}`、VLAN のポートの `{lag: lag-mlag-server1}`)。
+- **キーで参照先の種類を選ぶもの**: `{種類: id}` の形で書きます (例: `attaches_to: {interface: leaf1-swp51}`、VLAN のポートの `{ethernet_segment: es-server1}`)。
   キーの名前が参照先の種類を示し、どのキーを書けるかはエンティティごとに決まっています ([ADR-0001](../decisions/0001-attaches-to.md) D8)。
 
 参照先にない id を書くと error です。別の種類の id を書いた場合は、それが何であるかを添えて知らせます。

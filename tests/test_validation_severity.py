@@ -139,7 +139,7 @@ class TestPrefixWarnings:
     ])
     def test_lag_prefix(self, lag_id, warns):
         topo = _topo(L1_TWO_NODES + (
-            "  lag:\n    - {id: %s, type: lacp, node: leaf1, members: [leaf1-swp1, leaf1-swp2]}\n" % lag_id
+            "  lag:\n    - {id: %s, node: leaf1, members: [leaf1-swp1, leaf1-swp2]}\n" % lag_id
         ))
         assert self._warn_paths(topo) == (["layer1.lag[0].id"] if warns else [])
 

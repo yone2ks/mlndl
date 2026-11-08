@@ -116,8 +116,9 @@ NetBox / neteye からのアダプターは次のルールを守る:
 | `bgp-peer-` | BGP 隣接関係 | D2 で `bgp-adj-` から変更 |
 | `ospf-adj-` | OSPF 隣接関係 | OSPF の "adjacency" は業界標準語彙 |
 | `bfd-` | BFD セッション | |
-| `mlag-` | MLAG ドメイン（独立エンティティとして将来導入する場合） | Pass A から継続。`lag` リストの `type: mlag` エントリはこれではなく `lag-` を使う |
-| `lag-` | LAG（`layer1.lag` の全エントリ。`type: lacp` / `type: mlag` とも） | 2026-09-17 に `bond-` から変更。構成子名 `lag`（§6 設計決定）と一致し、CLAUDE.md・全 fixture の実態とも一致する |
+| ~~`mlag-`~~ | ~~MLAG ドメイン（独立エンティティとして将来導入する場合）~~ | [ADR-0023](0023-per-device-lag-and-ethernet-segments.md) で取り下げ (2026-11-08)。MLAG のドメインのエンティティは作らない |
+| `lag-` | LAG（`layer1.lag` の全エントリ。機器 1 台の LAG） | 2026-09-17 に `bond-` から変更。構成子名 `lag`（§6 設計決定）と一致し、CLAUDE.md・全 fixture の実態とも一致する。[ADR-0023](0023-per-device-lag-and-ethernet-segments.md) で `type` をなくした |
+| `es-` | 複数の機器の脚を束ねる関係 (`layer1.ethernet_segments`) | [ADR-0023](0023-per-device-lag-and-ethernet-segments.md) D2 (2026-11-08 追加)。RFC 7432 の Ethernet Segment の慣用の略 |
 | `isis-adj-` | IS-IS 隣接関係 | ADR-0005 D3-1 でスコープ内確定 (Phase 2 以降) |
 | `tunnel-` | L3 トンネルインターフェース (GRE/IPIP/IPSec-VTI) | ADR-0005 D3-1 `layer3.tunnel_interfaces` (Phase 2 以降) |
 | `subif-` | L2 サブインターフェース (`swp1.100` 等) | ADR-0005 D3-1 `layer2.subinterfaces` (Phase 2 以降) |

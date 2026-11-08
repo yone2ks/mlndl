@@ -4,9 +4,9 @@ from .layer1 import (
     L1Interface,
     L1Link,
     LacpConfig,
-    LacpLag,
-    MlagLag,
     Lag,
+    SegmentMember,
+    EthernetSegment,
     L1Layer,
 )
 from .layer2 import PortTarget, PortRef, BridgePort, Bridge, VLAN, Vtep, L2VxLAN, L3VxLAN, VxLAN, Subinterface, L2Layer
@@ -44,7 +44,7 @@ from .topology import Meta, MLNDLTopology
 __all__ = [
     # layer1
     "AttachesToObj", "L1Node", "L1Interface", "L1Link",
-    "LacpConfig", "LacpLag", "MlagLag", "Lag", "L1Layer",
+    "LacpConfig", "Lag", "SegmentMember", "EthernetSegment", "L1Layer",
     # layer2
     "PortTarget", "PortRef", "BridgePort", "Bridge", "VLAN", "Vtep", "L2VxLAN", "L3VxLAN", "VxLAN", "Subinterface", "L2Layer",
     # layer3

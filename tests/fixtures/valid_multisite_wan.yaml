@@ -160,42 +160,28 @@ layer1:
 
   lag:
     # ── DC MLAG (Leaf1 + Leaf2) ────────────────────────────────────────
-    - id: lag-dc-leaf-peerlink
-      type: lacp
+    # ピアリンクも Server 向けの bond も、機器ごとの LAG として書く (ADR-0023 D1・D6)
+    - id: lag-dc-leaf1-peer
       node: dc-leaf1
       members: [dc-leaf1-swp49, dc-leaf1-swp50]
       lacp: {mode: active, min_links: 1}
 
-    - id: lag-dc-mlag-server1
-      type: mlag
-      nodes: [dc-leaf1, dc-leaf2]
-      members: [dc-leaf1-swp1, dc-leaf2-swp1]
+    - id: lag-dc-leaf2-peer
+      node: dc-leaf2
+      members: [dc-leaf2-swp49, dc-leaf2-swp50]
       lacp: {mode: active, min_links: 1}
-      peer_link: lag-dc-leaf-peerlink
-      peer_link_interface: peerlink.4094
-      domain_id: 10
-      system_mac: "44:38:39:ff:00:0a"
-      client_lag: lag-dc-server1-bond0
+
+    - {id: lag-dc-leaf1-server1, node: dc-leaf1, name: bond1, members: [dc-leaf1-swp1], lacp: {mode: active, min_links: 1}}
+    - {id: lag-dc-leaf2-server1, node: dc-leaf2, name: bond1, members: [dc-leaf2-swp1], lacp: {mode: active, min_links: 1}}
+    - {id: lag-dc-leaf1-server2, node: dc-leaf1, name: bond2, members: [dc-leaf1-swp2], lacp: {mode: active, min_links: 1}}
+    - {id: lag-dc-leaf2-server2, node: dc-leaf2, name: bond2, members: [dc-leaf2-swp2], lacp: {mode: active, min_links: 1}}
 
     - id: lag-dc-server1-bond0
-      type: lacp
       node: dc-server1
       members: [dc-server1-eth0, dc-server1-eth1]
       lacp: {mode: active, min_links: 1}
 
-    - id: lag-dc-mlag-server2
-      type: mlag
-      nodes: [dc-leaf1, dc-leaf2]
-      members: [dc-leaf1-swp2, dc-leaf2-swp2]
-      lacp: {mode: active, min_links: 1}
-      peer_link: lag-dc-leaf-peerlink
-      peer_link_interface: peerlink.4094
-      domain_id: 10
-      system_mac: "44:38:39:ff:00:0a"
-      client_lag: lag-dc-server2-bond0
-
     - id: lag-dc-server2-bond0
-      type: lacp
       node: dc-server2
       members: [dc-server2-eth0, dc-server2-eth1]
       lacp: {mode: active, min_links: 1}
@@ -205,16 +191,19 @@ layer1:
     #       bundle として core1 から見た bond。対向 core2 にも同様の bond
     #       が必要 (1 つの LAG オブジェクトで両端を書けない -> feedback).
     - id: lag-cm-core1-interconnect
-      type: lacp
       node: cm-core1
       members: [cm-core1-te2-1, cm-core1-te2-2]
       lacp: {mode: active, min_links: 1}
 
     - id: lag-cm-core2-interconnect
-      type: lacp
       node: cm-core2
       members: [cm-core2-te2-1, cm-core2-te2-2]
       lacp: {mode: active, min_links: 1}
+
+  ethernet_segments:
+    # DC の leaf1 / leaf2 の bond を、Server から 1 本に見せる (ADR-0023 D2)
+    - {id: es-dc-server1, members: [{lag: lag-dc-leaf1-server1}, {lag: lag-dc-leaf2-server1}]}
+    - {id: es-dc-server2, members: [{lag: lag-dc-leaf1-server2}, {lag: lag-dc-leaf2-server2}]}
 
 layer2:
   vlans:
@@ -223,8 +212,8 @@ layer2:
       vlan_id: 100
       name: dc-tenant-a
       trunk_ports:
-        - {lag: lag-dc-mlag-server1}   # MLAG は両 leaf に効く (ADR-0013 D2)
-        - {lag: lag-dc-mlag-server2}
+        - {ethernet_segment: es-dc-server1}   # 両 leaf に効く (ADR-0023 D5)
+        - {ethernet_segment: es-dc-server2}
 
     # ── Campus VLAN (tag x3, Core-Agg トランク全通し, Dist-Host access) ─
     # NOTE: トランクポートは Core/Agg 間/Agg-Dist 間で全通し。

@@ -12,10 +12,9 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, igp_adjacency_views, l3_and_tunnels,
-                      l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
+from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, ethernet_segments, igp_adjacency_views,
+                      l3_and_tunnels, l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
 from ..schema.control_plane import BgpSession
-from ..schema.layer1 import LacpLag, MlagLag
 from ..schema.layer2 import L2VxLAN, L3VxLAN
 from ..schema.topology import MLNDLTopology
 
@@ -33,6 +32,7 @@ def export(topology: MLNDLTopology) -> dict:
 
     _export_nodes(topology, elements)
     _export_l1_edges(topology, if_to_node, if_to_name, elements)
+    _export_ethernet_segments(topology, elements)
     _export_l2_overlay(topology, if_to_name, elements)
     _export_bridges(topology, elements)
     _export_tunnels(topology, elements)
@@ -46,13 +46,15 @@ def export_json(topology: MLNDLTopology, indent: int = 2) -> str:
 
 
 def _interface_nodes(topology: MLNDLTopology) -> dict[str, list[str]]:
-    """L1 IF / LAG の id → それが載るノード群。MLAG は 2 ノード"""
+    """L1 IF / LAG / Ethernet Segment の id → それが載るノード群。Ethernet Segment は脚の全機器 (ADR-0023)"""
     nodes: dict[str, list[str]] = {}
     if topology.layer1:
         for iface in topology.layer1.interfaces:
             nodes[iface.id] = [iface.node]
         for lag in topology.layer1.lag:
-            nodes[lag.id] = [lag.node] if isinstance(lag, LacpLag) else list(lag.nodes)
+            nodes[lag.id] = [lag.node]
+        for es_id, info in ethernet_segments(topology).items():
+            nodes[es_id] = list(info.nodes)
     return nodes
 
 
@@ -79,6 +81,20 @@ def _legacy_lo(cands: list, roles: dict[str, list[str]]):
 def _port_nodes(pr, interface_nodes: dict[str, list[str]]) -> list[str]:
     """PortRef が載るノード群。ノードは interface / lag から導出する (ADR-0013 D2)"""
     return interface_nodes.get(pr.target) or ([pr.node] if pr.node else [])
+
+
+def _port_names(pr, interface_nodes, if_to_name, segment_members) -> list[tuple[str, str]]:
+    """VLAN のポートを (ノード, ポートの名前) に開く。名前は L1 IF なら name、LAG なら LAG の id
+
+    Ethernet Segment は脚ごとに、その機器の LAG の id (または L1 IF の name) に開く。ビューワはリンクの lag_id と照合できる
+    """
+    targets = segment_members.get(pr.target, []) if pr.kind == "ethernet_segment" else [pr.target]
+    out = []
+    for t in targets:
+        name = if_to_name.get(t, t)
+        nodes = interface_nodes.get(t) or ([pr.node] if pr.node and pr.kind != "ethernet_segment" else [])
+        out.extend((nid, name) for nid in nodes)
+    return out
 
 
 def _vtep_info(topology: MLNDLTopology) -> dict[str, dict]:
@@ -138,7 +154,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     node_vteps: dict[str, list[dict]] = defaultdict(list)
     vlan_ids = {v.id for v in topology.layer2.vlans} if topology.layer2 else set()
 
-    # サブ IF は親 (L1 IF / LAG) のノードに埋め込む。MLAG 上のサブ IF は両ノードに存在する (ADR-0012)
+    # サブ IF は親 (L1 IF / LAG) のノードに埋め込む (ADR-0012)
     parent_nodes = _interface_nodes(topology)
     subifs = {si.id: si for si in topology.layer2.subinterfaces} if topology.layer2 else {}
     for si in subifs.values():
@@ -270,14 +286,15 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
         return
     l1 = topology.layer1
 
-    # LAG メンバーシップマップ
+    # LAG メンバーシップマップ。LAG が Ethernet Segment の脚なら、その ES も載せる (ADR-0023 D8)
+    segment_of: dict[str, str] = {}      # 脚の L1 IF → Ethernet Segment の id
+    for es_id, info in ethernet_segments(topology).items():
+        for leg in info.legs:
+            segment_of.setdefault(leg, es_id)
     lag_membership: dict[str, dict] = {}
     for lag in l1.lag:
         for member in lag.members:
-            lag_membership[member] = {
-                "lag_id":   lag.id,
-                "lag_type": lag.type,
-            }
+            lag_membership[member] = {"lag_id": lag.id}
 
     for link in l1.links:
         ep0, ep1 = link.endpoints[0], link.endpoints[1]
@@ -300,8 +317,10 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
 
         lag_info = lag_membership.get(ep0) or lag_membership.get(ep1)
         if lag_info:
-            data["lag_id"]   = lag_info["lag_id"]
-            data["lag_type"] = lag_info["lag_type"]
+            data["lag_id"] = lag_info["lag_id"]
+        segment = segment_of.get(ep0) or segment_of.get(ep1)
+        if segment:
+            data["ethernet_segment"] = segment
 
         elements["edges"].append({"data": data})
 
@@ -321,7 +340,7 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
         if key not in bundle_counts:
             bundle_counts[key] = {"src": src, "tgt": tgt,
                                   "lag_id": lag_info["lag_id"],
-                                  "lag_type": lag_info["lag_type"],
+                                  "segment": segment_of.get(ep0) or segment_of.get(ep1),
                                   "count": 0,
                                   "speed": link.link_speed or ""}
         bundle_counts[key]["count"] += 1
@@ -329,17 +348,19 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
     for key, info in bundle_counts.items():
         n = info["count"]
         speed_label = f" {info['speed']}" if info["speed"] else ""
-        elements["edges"].append({"data": {
+        bundle = {
             "id":           f"bundle-{info['lag_id']}-{info['src']}-{info['tgt']}",
             "source":       info["src"],
             "target":       info["tgt"],
             "layer":        "layer1",
             "type":         "lag_bundle",
             "lag_id":       info["lag_id"],
-            "lag_type":     info["lag_type"],
             "member_count": n,
             "label":        f"×{n}{speed_label}",
-        }})
+        }
+        if info["segment"]:
+            bundle["ethernet_segment"] = info["segment"]
+        elements["edges"].append({"data": bundle})
 
     # attaches_to（supporting 関係）
     for node in l1.nodes:
@@ -355,6 +376,32 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
                 "layer":  "cross",
                 "type":   "attaches_to",
             }})
+
+
+def _export_ethernet_segments(topology, elements):
+    """Ethernet Segment を要素として出す (ADR-0023 D8)。描き方 (枠など) はビューワが決める
+
+    members は YAML と同じ形 ({lag:} / {interface:}) に、脚の機器 node を添える。
+    redundancy_mode は書かれていれば出し、書かれていなければ出さない (既定値で埋めない)
+    """
+    if not topology.layer1 or not topology.layer1.ethernet_segments:
+        return
+    l1 = topology.layer1
+    node_of = {i.id: i.node for i in l1.interfaces} | {g.id: g.node for g in l1.lag}
+    infos = ethernet_segments(topology)
+    for es in l1.ethernet_segments:
+        data: dict = {
+            "id":      es.id,
+            "label":   es.name or es.id,
+            "layer":   "layer1",
+            "type":    "ethernet_segment",
+            "members": [{m.kind: m.target, "node": node_of.get(m.target)} for m in es.members],
+            "nodes":   list(infos[es.id].nodes),
+        }
+        if es.name:            data["name"] = es.name
+        if es.redundancy_mode: data["redundancy_mode"] = es.redundancy_mode
+        if es.description:     data["description"] = es.description
+        elements["nodes"].append({"data": data})
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +432,9 @@ def _export_l2_overlay(topology, if_to_name, elements):
             if iface.vrf and "vrf" not in seg:
                 seg["vrf"] = iface.vrf
 
+    # Ethernet Segment の id → 脚 (LAG / L1 IF の id)。ES のポートは機器ごとの脚に開いて出す (ADR-0023 D8)
+    segment_members = {es_id: info.members for es_id, info in ethernet_segments(topology).items()}
+
     # VLAN の端点 (ADR-0013 D7)。vlan_member エッジ (VLAN, ポートのノード) ごとに出す
     endpoints = _vlan_endpoint_data(topology)
 
@@ -409,18 +459,13 @@ def _export_l2_overlay(topology, if_to_name, elements):
         # メンバーエッジ（VLAN → L1 ノード）。trunk(tagged) と access(untagged) を
         # 区別して保持する（ビューワのリンク沿い VLAN 表示用）。
         # trunk_ports のうち native=True は untagged 扱い。
-        # LAG を指すポートは LAG の id のまま出す。MLAG は両ノードに出す (ADR-0013)
+        # LAG を指すポートは LAG の id のまま出す。Ethernet Segment は脚の全機器に、ES の id で出す (ADR-0013 / ADR-0023)
         tagged: dict[str, list[str]] = {}
         untagged: dict[str, list[str]] = {}
-        for pr in vlan.trunk_ports:
-            name = if_to_name.get(pr.target, pr.target)
-            for nid in _port_nodes(pr, interface_nodes):
-                (untagged if pr.native else tagged).setdefault(nid, []).append(name)
-        for pr in vlan.access_ports:
-            name = if_to_name.get(pr.target, pr.target)
-            for nid in _port_nodes(pr, interface_nodes):
-                untagged.setdefault(nid, []).append(name)
-        for node_id in {*tagged, *untagged}:
+        for pr, is_tagged in [*((p, not p.native) for p in vlan.trunk_ports), *((p, False) for p in vlan.access_ports)]:
+            for nid, name in _port_names(pr, interface_nodes, if_to_name, segment_members):
+                (tagged if is_tagged else untagged).setdefault(nid, []).append(name)
+        for node_id in dict.fromkeys([*tagged, *untagged]):     # ポートを書いた順 (集合の順序に頼らない)
             data_e: dict = {
                 "id":     f"vlan-{vlan.id}-{node_id}",
                 "source": vlan.id,
@@ -463,8 +508,7 @@ def _export_bridges(topology, elements):
     for br in topology.layer2.bridges:
         ports = []
         for port in br.ports:
-            entry = {"interface": port.interface} if port.interface is not None else {"lag": port.lag}
-            entry["nodes"] = interface_nodes.get(port.target, [])
+            entry = {port.kind: port.target, "nodes": interface_nodes.get(port.target, [])}
             ports.append(entry)
         data: dict = {
             "id":    br.id,

@@ -95,6 +95,7 @@ layer2:
 - **ポートの形は VLAN のポートと同じ** (ADR-0013): `{interface: <L1 IF>}` か `{lag: <LAG>}` のちょうど一方を書く。
   - `node` は書かず、参照先から導く (ADR-0005 D6)。
   - bridge のポートは `native` を持たない。
+  - [ADR-0023](0023-per-device-lag-and-ethernet-segments.md) D5 (2026-11-08) で `{ethernet_segment:}` も書けるようにした。事業者網を PE ごとのノードで書き、拠点が 2 台の PE に冗長に接続する場合に使う。
 - **方式名は書かない** (ADR-0005 D4 補則 問い 4): E-LINE / E-LAN / VPLS / EVPN のどれで実現しているかは構文に出さない。
   - 2 拠点も 3 拠点以上も、違うのは `ports` の数だけである。
   - 方式・契約 ID・EVC ID は `name` や `description` に書く。

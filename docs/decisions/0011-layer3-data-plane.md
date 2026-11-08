@@ -82,6 +82,7 @@ layer3:
 - **`attaches_to`** が参照の唯一の手段である。キーは `interface` (L1 IF) / `lag` / `vlan` / `subinterface` のいずれか
   (ADR-0001 D8)。ほかのキーと文字列形式はスキーマで弾く
 - **`node`** は必須 (ノードごとに別の IP を持つため。ADR-0005 D6)。MLAG を基盤にする L3 IF も、ノードごとに 1 つずつ書く
+  ([ADR-0023](0023-per-device-lag-and-ethernet-segments.md) で LAG を機器ごとにしたので、L3 IF はその機器の LAG を `{lag:}` で指す)
 - SVI の短縮形 `interface: vlan-N` は廃止した。「名前を参照として解決する」唯一の例外だったため (D10 で移行)
 
 ### D4. `gateway_redundancy`
@@ -98,6 +99,9 @@ layer3:
 - `anycast_mac` は `:` / `-` / `.` 区切りの 3 表記を受け付ける
 - 同じ VLAN に載る anycast gateway の SVI 群は、`ip` / `ipv6` / `anycast_mac` が一致しなければならない
   (全ノードが同じアドレスで応答するため)
+
+> **改訂 ([ADR-0022](0022-diagram-granularity.md) D2, 2026-11-08)**: `anycast_mac` はなくした。MAC アドレスは構成図の粒度ではないためである。
+> 書くと error になり、anycast gateway の一致の検査は `ip` / `ipv6` だけになった。
 
 旧名 `fhrp` と `protocol` は廃止し、移動先を示す error にする。
 
@@ -152,7 +156,7 @@ layer3:
 | IPv4 VIP が IF のサブネット内か | error |
 | IPv4 VIP があるのに IF に `ip` がない | warning |
 | 同じ IF・同じ mode・同じ AF で `group_id` が重複していないか | error |
-| 同じ VLAN の anycast gateway 群で `ip` / `ipv6` / `anycast_mac` が一致するか | error |
+| 同じ VLAN の anycast gateway 群で `ip` / `ipv6` / `anycast_mac` が一致するか (`anycast_mac` は ADR-0022 でなくした) | error |
 | トンネル: `source` が同じノードの L3 IF か、`destination_interface` が別ノードの L3 IF か、destination がちょうど一方か | error |
 | トンネル: 外側のアドレスファミリーが source と destination で一致するか (両側にアドレスがある場合) | error |
 | トンネル: 対向がトポロジー内なのに逆向きのトンネルがない | info |

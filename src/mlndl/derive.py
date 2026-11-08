@@ -1,5 +1,6 @@
 """導出する関係 — 構文を足さず、既存の参照 (id) をたどって求める
 
+  ethernet_segments(topology) Ethernet Segment の脚・機器・脚の L1 IF (ADR-0023)
   vlan_endpoints(topology)    VLAN の端点 (ADR-0013 D7)
   vlan_svi_networks(topology) VLAN の SVI のサブネット
   l3_attachments(topology)    L3 IF が何の上に載るか (ADR-0011 D11)
@@ -54,6 +55,61 @@ class VlanEndpoint:
     l3_interfaces: list[L3Interface] = field(default_factory=list)
 
 
+@dataclass
+class SegmentInfo:
+    """Ethernet Segment の脚をたどった結果 (ADR-0023)
+
+    - members: 脚 (LAG / L1 IF の id)。書いた順。参照先が未定義のものは除く
+    - nodes: 脚の機器。書いた順で重複なし
+    - legs: 脚の L1 IF。LAG はメンバーに展開する
+    """
+
+    members: list[str] = field(default_factory=list)
+    nodes: list[str] = field(default_factory=list)
+    legs: list[str] = field(default_factory=list)
+
+
+def ethernet_segments(topology: MLNDLTopology) -> dict[str, SegmentInfo]:
+    """Ethernet Segment の id → 脚・機器・脚の L1 IF。参照先が存在しない脚は飛ばす"""
+    if not topology.layer1:
+        return {}
+    l1 = topology.layer1
+    iface_node = {i.id: i.node for i in l1.interfaces}
+    lags = {g.id: g for g in l1.lag}
+    out: dict[str, SegmentInfo] = {}
+    for es in l1.ethernet_segments:
+        info = SegmentInfo()
+        for m in es.members:
+            if m.lag is not None and m.lag in lags:
+                node, legs = lags[m.lag].node, list(lags[m.lag].members)
+            elif m.interface is not None and m.interface in iface_node:
+                node, legs = iface_node[m.interface], [m.interface]
+            else:
+                continue
+            info.members.append(m.target)
+            if node not in info.nodes:
+                info.nodes.append(node)
+            info.legs.extend(leg for leg in legs if leg not in info.legs)
+        out[es.id] = info
+    return out
+
+
+def port_legs(port, topology: MLNDLTopology, segments: dict[str, SegmentInfo] | None = None) -> list[str]:
+    """VLAN / bridge のポートが指す L1 IF。LAG はメンバーに、Ethernet Segment は脚の L1 IF に展開する
+
+    旧形式 {interface: <LAG id>} (ADR-0011 D10) も LAG として読む
+    """
+    lags = {g.id: g for g in topology.layer1.lag} if topology.layer1 else {}
+    if port.ethernet_segment is not None:
+        segs = segments if segments is not None else ethernet_segments(topology)
+        info = segs.get(port.ethernet_segment)
+        return list(info.legs) if info else []
+    lag_id = port.lag if port.lag is not None else (port.interface if port.interface in lags else None)
+    if lag_id is not None:
+        return list(lags[lag_id].members) if lag_id in lags else []
+    return [port.interface]
+
+
 def vlan_endpoints(topology: MLNDLTopology) -> list[VlanEndpoint]:
     """VLAN の端点を、ポート → L1 リンクの対向 → 対向の L3 IF の順にたどって求める (1 ホップ)"""
     if not topology.layer1 or not topology.layer2:
@@ -79,21 +135,21 @@ def vlan_endpoints(topology: MLNDLTopology) -> list[VlanEndpoint]:
             if ref is not None:
                 l3_on[ref].append(iface)
 
+    segments = ethernet_segments(topology)
     result: list[VlanEndpoint] = []
     for vlan in topology.layer2.vlans:
         ports = [(pr, False) for pr in vlan.access_ports] + [(pr, not pr.native) for pr in vlan.trunk_ports]
-        port_ids = {pr.target for pr, _ in ports}
+        # ポートの脚 (LAG はメンバー、Ethernet Segment は脚の L1 IF に展開。ADR-0023)
+        legs_of_port = [(pr, tagged, port_legs(pr, topology, segments)) for pr, tagged in ports]
+        port_l1 = {x for _, _, legs in legs_of_port for x in legs}
         groups: dict[tuple[str, str, str], VlanEndpoint] = {}
-        for pr, tagged in ports:
-            # 旧形式 {interface: <LAG id>} (ADR-0011 D10) も LAG として読む
-            lag_id = pr.lag if pr.lag is not None else (pr.interface if pr.interface in lags else None)
-            legs = list(lags[lag_id].members) if lag_id else [pr.interface]
+        for pr, tagged, legs in legs_of_port:
             for x in legs:
                 y = peer.get(x)
                 if x not in l1ifs or y not in l1ifs:
                     continue
                 # 対向もこの VLAN のポートなら、ポートを持つノード同士のリンク (D7 手順 3)
-                if y in port_ids or any(g in port_ids for g in lags_of[y]):
+                if y in port_l1:
                     continue
                 host = l1ifs[y].node
                 host_lag = next((g for g in lags_of[y] if g in lags), None)
@@ -448,10 +504,10 @@ class _Fabric:
         # L1 IF id → それをポートに持つ bridge (LAG のポートはメンバーに展開する)
         self.bridges_of: dict[str, set[str]] = defaultdict(set)
         if topology.layer2:
+            segments = ethernet_segments(topology)
             for br in topology.layer2.bridges:
                 for port in br.ports:
-                    legs = self.lag_members.get(port.lag, set()) if port.lag is not None else {port.interface}
-                    for leg in legs:
+                    for leg in port_legs(port, topology, segments):
                         self.bridges_of[leg].add(br.id)
         self.tunnels = {t.id: t for t in topology.layer3.tunnel_interfaces} if topology.layer3 else {}
 

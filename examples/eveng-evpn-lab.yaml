@@ -213,7 +213,7 @@ layer3:
       ip: 172.16.10.1/24
       vrf: vrf-tenant-a
       gateway_redundancy:
-        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+        - {mode: anycast_gateway}
 
     - id: leaf1-vlan-20
       node: leaf1
@@ -222,7 +222,7 @@ layer3:
       ip: 172.16.20.1/24
       vrf: vrf-tenant-a
       gateway_redundancy:
-        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+        - {mode: anycast_gateway}
 
     - id: leaf2-vlan-10
       node: leaf2
@@ -231,7 +231,7 @@ layer3:
       ip: 172.16.10.1/24
       vrf: vrf-tenant-a
       gateway_redundancy:
-        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+        - {mode: anycast_gateway}
 
     - id: leaf2-vlan-20
       node: leaf2
@@ -240,7 +240,7 @@ layer3:
       ip: 172.16.20.1/24
       vrf: vrf-tenant-a
       gateway_redundancy:
-        - {mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}
+        - {mode: anycast_gateway}
 
     # L3VNI の transit SVI（ip forward、アドレスなし）
     - { id: leaf1-vlan-3001, node: leaf1, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }

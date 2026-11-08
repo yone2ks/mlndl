@@ -33,7 +33,7 @@ Cumulus の `clagd-vxlan-anycast-ip` など) は、機器の種類 (`device_type
 
 | 構成子 | 分けている理由 |
 |---|---|
-| `lag.type: lacp \| mlag` | `node` (単数) と `nodes` + `peer_link` で、持つフィールドが違う |
+| `lag.type: lacp \| mlag` | `node` (単数) と `nodes` + `peer_link` で、持つフィールドが違う。[ADR-0023](../0023-per-device-lag-and-ethernet-segments.md) で LAG を機器ごとにし、`type` はなくした |
 | `gateway_redundancy.mode` | VRRP / HSRP は `group_id` / `vip` / `priority`、anycast gateway は `anycast_mac` |
 | `vxlan.type: l2vni \| l3vni` | `vlan` を指すか `vrf` を指すか |
 | `tunnel_interfaces.type` | カプセル化の種類 (列挙値。フィールドの形は同じなので型は分けていない) |
@@ -97,7 +97,7 @@ L3VNI には今回 `vteps` を持たせない。L3VNI が載るノードは、�
 | `sources` が 1 つで `address` がなく、その L3 IF にも ip / ipv6 がない (アドレスが決まらない) | error |
 | `sources` が 1 つで、`address` とその L3 IF の ip が食い違う | warning |
 | 2 つの VTEP のアドレスが重複していないか (共有なら 1 つの VTEP にまとめる) | error |
-| MLAG ペアの片方だけが VTEP を終端している (相方の書き忘れの可能性) | warning |
+| MLAG ペアの片方だけが VTEP を終端している (相方の書き忘れの可能性)。[ADR-0023](../0023-per-device-lag-and-ethernet-segments.md) D7 で「Ethernet Segment の脚の機器の一部が、どの VTEP も終端していない」に付け替えた | warning |
 | L2VNI の `vteps` が定義済みの VTEP か、重複していないか | error |
 | L2VNI に `vteps` も旧 `vtep_source` もない (型) | error |
 | L2VNI に参加するノードに、その VLAN のポートがない (ADR-0011 D9) | warning |

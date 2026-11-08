@@ -19,13 +19,12 @@ layer1:
     - {id: leaf1-swp49, node: leaf1}
     - {id: leaf2-swp49, node: leaf2}
   lag:
-    - {id: lag-peer, type: lacp, node: leaf1, members: [leaf1-swp49]}
-    - id: lag-mlag-a
-      type: mlag
-      nodes: [leaf1, leaf2]
-      members: [leaf1-swp1, leaf2-swp1]
-      peer_link: lag-peer
-      peer_link_interface: peerlink.4094
+    - {id: lag-leaf1-peer, node: leaf1, members: [leaf1-swp49]}
+    - {id: lag-leaf2-peer, node: leaf2, members: [leaf2-swp49]}
+    - {id: lag-leaf1-a, node: leaf1, members: [leaf1-swp1]}
+    - {id: lag-leaf2-a, node: leaf2, members: [leaf2-swp1]}
+  ethernet_segments:
+    - {id: es-a, members: [{lag: lag-leaf1-a}, {lag: lag-leaf2-a}]}
 """
 
 L3 = """
@@ -156,12 +155,18 @@ class TestChecks:
         )
         assert len(errs) == 1 and "10.0.0.13" in errs[0] and "vtep-leaf3" in errs[0]
 
-    def test_one_side_of_mlag_is_warning(self):
-        """MLAG ペアの片方だけが VTEP を終端している (相方の書き忘れ)"""
+    def test_one_side_of_segment_is_warning(self):
+        """Ethernet Segment の機器の片方だけが VTEP を終端している (書き忘れ。ADR-0014 D5 / ADR-0023 D7)"""
         r = validate_all(_topo("    - {id: vtep-leaf1, sources: [leaf1-lo1]}\n"))
         assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer2.vteps[0].sources"]
-        assert "lag-mlag-a" in r.warnings[0].message and "leaf2" in r.warnings[0].message
+        assert [w.path for w in r.warnings] == ["layer1.ethernet_segments[0]"]
+        assert "es-a" in r.warnings[0].message and "leaf2" in r.warnings[0].message
+
+    def test_each_node_own_vtep_is_not_warning(self):
+        """EVPN multihoming では脚の機器がそれぞれ自分の VTEP を終端する。これは書き忘れではない"""
+        r = validate_all(_topo("    - {id: vtep-leaf1, sources: [leaf1-lo1]}\n",
+                               "    - {id: vtep-leaf2, sources: [leaf2-lo1]}\n"))
+        assert r.errors == [] and r.warnings == []
 
     def test_prefix_warning(self):
         r = validate_all(_topo("    - {id: border1-nve, sources: [border1-lo1]}\n"))

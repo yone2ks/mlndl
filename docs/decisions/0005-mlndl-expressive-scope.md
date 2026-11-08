@@ -322,6 +322,9 @@ NetBox → mlndl アダプター実装時の参照表:
 > `anycast_mac` (anycast gateway の MAC) と `MlagLag.system_mac` はスコープ内に確定した。前者は設定生成に必須であり、
 > 後者は実装済みだった。それ以外の MAC は引き続きスコープ外。
 
+> **改訂 ([ADR-0022](0022-diagram-granularity.md), 2026-11-08)**: 上の注記を取り消す。`anycast_mac` も `system_mac` も書かない (MAC アドレスは構成図の粒度ではない。D4 補則の問い 5)。
+> 上表の「MAC アドレス全般」は例外なくスコープ外に戻る。「EVPN Ethernet Segment (ESI/ES-LAG)」の行は [ADR-0023](0023-per-device-lag-and-ethernet-segments.md) で `layer1.ethernet_segments` として扱った (ESI の値は書かない)。
+
 #### D3-3. 唯一の例外: BFD timer
 
 BFD の `min_tx` / `min_rx` / `multiplier` は、timer の値が隣接形成の可否を直接決めるため**隣接の存在条件**として扱い、スコープ内に保持する。BGP / OSPF / IS-IS の timer (keepalive / hold-time) は隣接確立後のチューニングであり、スコープ外。
@@ -371,6 +374,13 @@ mlndl は「VRF が存在する」「この SVI がゲートウェイである�
 4. **違いは関係の形 (持つフィールド・参照先・多重度) の違いか、同じ関係を実現する方式の違いか** →
    形が同じなら 1 つの構文で書き、方式名 (anycast / vPC / virtual VTEP など) は構文に入れない。
    型を分けるのは持つフィールドの形が違うときだけ。方式による設定の違いは `device_type` から上位ツールが導く
+
+問い 1〜3 で「書く」となったものも、次の問いで書かないことがある ([ADR-0022](0022-diagram-granularity.md) D1 で追加, 2026-11-08)。
+
+5. **構成図を読む人が、その値から関係を読み取るか。それとも装置に設定するためだけの値か** →
+   装置に設定するためだけの値 (識別子の具体的な値・MAC アドレス・自動で作られる値) は書かない。関係は id の参照で書く。
+   書く: VLAN ID・VNI・IP・AS・RD / RT・VRRP の `group_id` / `priority`・冗長のモード。
+   書かない: MAC アドレス全般・LACP system-id・ESI の値・MLAG のドメインの番号・vPC 番号 / clag-id・DF の preference
 
 | 書く | 書かない |
 |---|---|
@@ -518,6 +528,8 @@ VLAN のポートの `node` は、ADR-0013 (Pass A) では「任意 (書けば�
 | D3-2 | ポリシールーティングと VRF 間のスタティックリークをスコープ外に追加 | ラウンド4 Pass C |
 | D4 補則 | 問い 4 (方式中立。型を分けるのはフィールドの形が違うときだけ) を追加 | drafts/0014 D1 |
 | D1・D3-1 (制御プレーンの行・(c) の routing_adjacencies 行)・P6・BGP unnumbered の規則 | `control_plane` への分離。VRF ごとの BGP インスタンス、セッションの通り道は導く、unnumbered はアドレスのない L3 IF | ADR-0010 (2026-11-01。Accepted・実装済み) |
+| D3-2・D4 補則 | 問い 5 (構成図の粒度) を追加。`anycast_mac` / `system_mac` をスコープ外に戻した | ADR-0022 (2026-11-08) |
+| D3-2 | EVPN Ethernet Segment を `layer1.ethernet_segments` として扱った (MLAG / vPC / MC-LAG と同じ形) | ADR-0023 (2026-11-08) |
 
 ## References
 

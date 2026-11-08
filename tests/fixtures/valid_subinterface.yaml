@@ -35,8 +35,8 @@ layer1:
     - {id: link-sw1-pc10, endpoints: [sw1-g10, pc10-eth0], link_speed: 1G, link_role: access}
     - {id: link-sw1-pc20, endpoints: [sw1-g20, pc20-eth0], link_speed: 1G, link_role: access}
   lag:
-    - {id: lag-br1-bond0, type: lacp, node: br1, members: [br1-eth1, br1-eth2]}
-    - {id: lag-sw1-po1, type: lacp, node: sw1, members: [sw1-g2, sw1-g3]}
+    - {id: lag-br1-bond0, node: br1, members: [br1-eth1, br1-eth2]}
+    - {id: lag-sw1-po1, node: sw1, members: [sw1-g2, sw1-g3]}
 
 layer2:
   vlans:

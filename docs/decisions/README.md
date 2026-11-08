@@ -166,3 +166,16 @@ OSPF / IS-IS にも通り道を導く (食い違いは 1.x の間 warning、2.0 
 `link_role` の綴りで決まっていた VXLAN の underlay の MTU 検査もやめた。トンネル IF の `mtu` は残し、インターフェース単位の MTU は先送りした。
 `link_speed` は `10G` / `2.5G` / `1.544M` / `64K` / `1.6T` のように `<数値><K|M|G|T>` で書く (10 進のビット毎秒)。書式違反は error、
 `1000G` のように同じ値の別の書き方は `1T` を促す warning (表記は書き換えない)。
+
+### L1 の整理: 複数の機器にまたがる冗長 (2026-11-07〜2026-11-08)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [0022](0022-diagram-granularity.md) | 記載の粒度 — 構成図に書くものと、装置の設定に任せるもの (2026-11-08 実装) | **Accepted** | C |
+| [0023](0023-per-device-lag-and-ethernet-segments.md) | 機器ごとの LAG と `ethernet_segments` (2026-11-08 実装) | **Accepted** | C |
+| [evaluations/adr0023](evaluations/adr0023/) | 最終形の記述例 (12 パターン) | — | — |
+
+MLAG と ESI-LAG を最初から 1 つの設計で扱う前提で、L1 の LAG を整理した。最初の案 (MLAG の bond を `type: multi_chassis` にし、ペアの属性をノードに置く) は
+MLAG の固定ペアに寄っていたので廃棄した。ユーザーの 2 つの指摘 (構成図に MAC アドレス相当は書かない / MLAG とスタックで LAG の IF の出方が違う) から、
+ADR-0005 D4 補則に問い 5 (構成図の粒度) を足して `anycast_mac` をなくし (ADR-0022)、LAG を機器ごとにして、
+複数の機器の LAG を相手から 1 本に見せる関係を `layer1.ethernet_segments` に書く形にした (ADR-0023)。ピアリンク・ドメインの番号・ESI の値は書かない。

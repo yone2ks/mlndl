@@ -46,19 +46,20 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | リンクの `endpoints` がちょうど 2 つ | error |
 | リンクの `link_speed` が [速度](types.ja.md#速度) の書式に従う。違反には直し方を示す | error |
 | リンクの `link_speed` が正規形 (数値が 1 以上 1000 未満になる単位。`1000G` は `1T`) | warning |
-| MLAG の `nodes` がちょうど 2 つ。`peer_link` が同じ `lag` の一覧にある | error |
+| **Ethernet Segment**: `members` が 2 つ以上で、`{lag:}` か `{interface:}` のどちらか一方 (型)。同じ機器の脚が 2 つない。1 つの脚 (と、その L1 IF) が 2 つの ES に入っていない。LAG とそのメンバーを併記していない。脚どうしが L1 リンクでつながっていない (ピアリンクを脚にした疑い) | error |
+| **Ethernet Segment**: 脚に LAG のメンバーの IF を書いている (`{lag:}` を促す) | warning |
 
 ## layer2 ([layer2.md](layer2.ja.md))
 
 | 検査 | 重さ |
 |---|---|
-| **VLAN のポート**: `{interface:}` か `{lag:}` のどちらか一方。同じ VLAN に LAG とそのメンバーを併記していない。同じ VLAN に同じポートを 2 回書いていない | error |
-| **VLAN のポート**: LAG のメンバーだけを書いている (`{lag:}` を促す) | warning |
-| **VLAN ID**: `vlan_id` が 1〜4094。同じ機器の上で、別の VLAN のエントリが同じ `vlan_id` を使っていない (別の機器での番号の再利用はよい。MLAG に載せた VLAN は両方の機器で数える) | error |
-| **bridge**: 同じポートを 2 つの bridge に、同じ bridge に 2 回、LAG とそのメンバーを併記して書いていない | error |
-| **bridge**: ポートが 1 つ。ポートの対向も同じ bridge のポート (ルーターのポートを書いた疑い)。ポートが VLAN のポートにもある。LAG のメンバーだけを書いている | warning |
+| **VLAN のポート**: `{interface:}`・`{lag:}`・`{ethernet_segment:}` のどれか 1 つ。同じ VLAN に LAG とそのメンバー、ES とその脚を併記していない。同じ VLAN に同じポートを 2 回書いていない | error |
+| **VLAN のポート**: LAG のメンバーだけを書いている (`{lag:}` を促す)。ES の脚の一部だけを書いている (`{ethernet_segment:}` を促す) | warning |
+| **VLAN ID**: `vlan_id` が 1〜4094。同じ機器の上で、別の VLAN のエントリが同じ `vlan_id` を使っていない (別の機器での番号の再利用はよい。ES に載せた VLAN は脚のすべての機器で数える) | error |
+| **bridge**: 同じポートを 2 つの bridge に、同じ bridge に 2 回、LAG とそのメンバー・ES とその脚を併記して書いていない | error |
+| **bridge**: ポートが 1 つ。ポートの対向も同じ bridge のポート (ルーターのポートを書いた疑い)。ポートが VLAN のポートにもある。LAG のメンバーだけ・ES の脚の一部だけを書いている | warning |
 | **VTEP**: 同じ L3 IF を 2 つの VTEP に・1 つの VTEP に 2 回書いていない。1 つの VTEP に同じ機器の L3 IF を 2 つ書いていない。`sources` が複数なら `address` がある。アドレスが決まり、VTEP の間で重複しない | error |
-| **VTEP**: `sources` が 1 つで、`address` がその L3 IF の `ip` と食い違う。MLAG のペアの片方だけが VTEP を終端している | warning |
+| **VTEP**: `sources` が 1 つで、`address` がその L3 IF の `ip` と食い違う。ES の脚の機器の一部だけが VTEP を終端している (どの VTEP も終端していない機器がある) | warning |
 | **VNI**: L2VNI と L3VNI を通して `vni` が重複しない | error |
 | **VNI**: L2VNI に参加する機器 (VTEP から導く) に、その VLAN のポートがある | warning |
 | **VRF と L3VNI**: VRF の `l3vni` が定義されている。VRF の `l3vni` と L3VNI の `vrf` が互いに一致する | error |
@@ -72,7 +73,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | **所属**: L3 IF の `node` が、`attaches_to` の参照先 (L1 IF・LAG・サブ IF) の機器 (群) に含まれる | error |
 | **重複**: 同じ `(node, name)` の L3 IF が 2 つない | error |
 | **SVI の紐づけ忘れ**: `name` が VLAN らしい名前 (`Vlan100` など) なのに `attaches_to` がない | warning |
-| **ゲートウェイ冗長**: IPv4 の VIP が IF のサブネットに入る (IF に `ip` がなければ warning)。同じ IF・同じ mode・同じアドレスファミリーで `group_id` が重複しない。IPv6 の VIP はリンクローカル。同じ VLAN の anycast gateway の群で `ip` / `ipv6` / `anycast_mac` が一致する | error |
+| **ゲートウェイ冗長**: IPv4 の VIP が IF のサブネットに入る (IF に `ip` がなければ warning)。同じ IF・同じ mode・同じアドレスファミリーで `group_id` が重複しない。IPv6 の VIP はリンクローカル。同じ VLAN の anycast gateway の群で `ip` / `ipv6` が一致する | error |
 | **トンネル**: `source` が同じ機器の L3 IF。`destination_interface` が別の機器の L3 IF。`destination_ip` と `destination_interface` のちょうど一方がある。外側のアドレスファミリーが `source` と宛先で一致する | error |
 | **トンネル**: 対向がトポロジー内なのに、逆向きのトンネルがない | info |
 | **Route Target / RD**: [書き方](types.ja.md#route-target-と-route-distinguisher) に従う | error |
@@ -106,6 +107,11 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | L3 IF の `fhrp` | `gateway_redundancy` |
 | `gateway_redundancy[].protocol` | `gateway_redundancy[].mode` |
 | `layer1.links[].mtu` | 書かない。MTU はインターフェースの設定 ([ADR-0020](../decisions/0020-remove-l1-link-mtu.md)) |
+| `layer1.lag[].type` (`lacp`) | 書かない。LAG は常に機器 1 台 ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D1) |
+| `layer1.lag[]` の `type: mlag`・`nodes`・`peer_link`・`peer_link_interface`・`domain_id`・`system_mac`・`client_lag` | 機器ごとの LAG と `layer1.ethernet_segments`。番号と MAC は書かない ([ADR-0022](../decisions/0022-diagram-granularity.md)・[ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D9) |
+| `ethernet_segments[]` の `esi`・`system_mac`・`domain_id`・`peer_link(s)` | 書かない ([ADR-0022](../decisions/0022-diagram-granularity.md)) |
+| `gateway_redundancy[]` の `anycast_mac` | 書かない。MAC アドレスは構成図の粒度ではない ([ADR-0022](../decisions/0022-diagram-granularity.md) D2) |
+| `attaches_to: {ethernet_segment:}` (L3 IF・サブ IF) | 機器ごとの LAG を `{lag:}` で指す ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D5) |
 
 ## 旧形式
 

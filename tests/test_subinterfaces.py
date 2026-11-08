@@ -34,14 +34,12 @@ layer1:
     - {id: r2-eth1, node: r2}
     - {id: r3-eth0, node: r3}
   lag:
-    - {id: lag-r1-bond0, type: lacp, node: r1, members: [r1-eth1, r1-eth2]}
-    - {id: lag-peer, type: lacp, node: r2, members: [r2-eth1]}
-    - id: lag-mlag-a
-      type: mlag
-      nodes: [r1, r2]
-      members: [r1-eth0, r2-eth0]
-      peer_link: lag-peer
-      peer_link_interface: peerlink.4094
+    - {id: lag-r1-bond0, node: r1, members: [r1-eth1, r1-eth2]}
+    - {id: lag-peer, node: r2, members: [r2-eth1]}
+    - {id: lag-r1-a, node: r1, members: [r1-eth0]}
+    - {id: lag-r2-a, node: r2, members: [r2-eth0]}
+  ethernet_segments:
+    - {id: es-a, members: [{lag: lag-r1-a}, {lag: lag-r2-a}]}
 """
 
 
@@ -172,13 +170,19 @@ class TestL3OnSubinterface:
         )))
         assert any("LAG" in e and "r2" in e for e in errs)
 
-    @pytest.mark.parametrize("node,ok", [("r1", True), ("r2", True), ("r3", False)])
-    def test_subif_on_mlag_belongs_to_both_nodes(self, node, ok):
+    @pytest.mark.parametrize("node,ok", [("r1", True), ("r2", False), ("r3", False)])
+    def test_subif_on_segment_lag_belongs_to_its_node(self, node, ok):
+        """Ethernet Segment の脚の LAG の上のサブ IF は、その LAG の機器だけのもの (ADR-0023 D5)"""
         errs = _errors(_subifs(
-            "    - {id: subif-mlag-a-10, attaches_to: {lag: lag-mlag-a}, vlan_id: 10}\n",
-            l3=f"    - {{id: {node}-x, node: {node}, name: po1.10, attaches_to: {{subinterface: subif-mlag-a-10}}}}\n",
+            "    - {id: subif-r1-a-10, attaches_to: {lag: lag-r1-a}, vlan_id: 10}\n",
+            l3=f"    - {{id: {node}-x, node: {node}, name: po1.10, attaches_to: {{subinterface: subif-r1-a-10}}}}\n",
         ))
         assert (errs == []) is ok
+
+    def test_subif_on_ethernet_segment_is_error(self):
+        """サブ IF は Ethernet Segment を指せない。機器ごとの LAG を指す (ADR-0023 D5)"""
+        with pytest.raises(pydantic.ValidationError, match="ethernet_segment"):
+            _topo(_subifs("    - {id: subif-a-10, attaches_to: {ethernet_segment: es-a}, vlan_id: 10}\n"))
 
 
 # ---------------------------------------------------------------------------
@@ -204,12 +208,12 @@ class TestExport:
         assert kinds["eth0.10"]["kind"] == "subinterface" and kinds["eth0.10"]["vlan_id"] == 10
         assert kinds["bond0"]["kind"] == "routed" and kinds["bond0"]["lag"] == "lag-r1-bond0"
 
-    def test_cytoscape_mlag_subif_on_both_nodes(self):
+    def test_cytoscape_segment_subif_on_its_node(self):
         out = cytoscape.export(_topo(_subifs(
-            "    - {id: subif-mlag-a-10, attaches_to: {lag: lag-mlag-a}, vlan_id: 10}\n"
+            "    - {id: subif-r1-a-10, attaches_to: {lag: lag-r1-a}, vlan_id: 10}\n"
         )))
         assert "subinterfaces" in self._node(out, "r1")
-        assert "subinterfaces" in self._node(out, "r2")
+        assert "subinterfaces" not in self._node(out, "r2")
         assert "subinterfaces" not in self._node(out, "r3")
 
     def test_yaml_round_trip(self):

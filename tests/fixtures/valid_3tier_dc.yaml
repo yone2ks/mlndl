@@ -215,26 +215,22 @@ layer1:
   lag:
     # ── Core1 の LACP LAG ──────────────────────────────────────────────
     - id: lag-core1-agg1
-      type: lacp
       node: core1
       members: [core1-te1-1, core1-te1-2]
       lacp: {mode: active, min_links: 1}
 
     - id: lag-core1-agg2
-      type: lacp
       node: core1
       members: [core1-te1-3, core1-te1-4]
       lacp: {mode: active, min_links: 1}
 
     # ── Core2 の LACP LAG ──────────────────────────────────────────────
     - id: lag-core2-agg1
-      type: lacp
       node: core2
       members: [core2-te1-1, core2-te1-2]
       lacp: {mode: active, min_links: 1}
 
     - id: lag-core2-agg2
-      type: lacp
       node: core2
       members: [core2-te1-3, core2-te1-4]
       lacp: {mode: active, min_links: 1}

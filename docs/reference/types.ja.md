@@ -23,7 +23,8 @@ id: Leaf1_swp51         # error: 大文字と _ は書けない
 | エンティティ | プレフィックス | 例 |
 |---|---|---|
 | `layer1.links` | `link-` | `link-spine1-leaf1` |
-| `layer1.lag` | `lag-` | `lag-mlag-server1` |
+| `layer1.lag` | `lag-` | `lag-leaf1-server1` |
+| `layer1.ethernet_segments` | `es-` | `es-server1` |
 | `layer2.vlans` | `vlan-` | `vlan-100` |
 | `layer2.bridges` | `bridge-` | `bridge-wideether` |
 | `layer2.vteps` | `vtep-` | `vtep-leaf1-leaf2` |
@@ -53,7 +54,7 @@ mlndl は値域を検査しません。`role` と `labels` の推奨値は [role
 | キー | 値 |
 |---|---|
 | `layer1.nodes[].implementation` | `vm` / `physical` / `container` |
-| `layer1.lag[].type` | `lacp` / `mlag` |
+| `layer1.ethernet_segments[].redundancy_mode` | `all_active` / `single_active` |
 | `layer1.lag[].lacp.mode` | `active` / `passive` / `on` |
 | `layer2.vxlan[].type` | `l2vni` / `l3vni` |
 | `layer2.vxlan[].irb_mode` | `symmetric` / `asymmetric` |
@@ -117,7 +118,8 @@ warning は助言で、error ではありません。mlndl は書かれた表記
 
 ## MAC アドレス
 
-`anycast_mac`、MLAG の `system_mac`。`44:38:39:be:ef:aa`、`44-38-39-be-ef-aa`、`4438.39be.efaa` の形を書けます (`anycast_mac` は形式を検査し、`system_mac` は検査しません)。
+MAC アドレスは書きません。構成図の粒度ではないためです ([ADR-0022](../decisions/0022-diagram-granularity.md))。
+以前の `anycast_mac` と MLAG の `system_mac` は、書くと error になります。LACP の system-id、ESI の値、MLAG のドメインの番号、vPC 番号 / clag-id も書きません。
 
 ## マッピング
 

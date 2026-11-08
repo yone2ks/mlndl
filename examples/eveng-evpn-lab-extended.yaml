@@ -185,29 +185,26 @@ layer1:
     - {id: link-leaf6-fw1-2,   endpoints: [leaf6-e1-5, fw1-port2],   link_role: trunk}
 
   lag:
-    # vPC peer-link。MLNDL の LACP LAG は 1 ノードごとなので、両側に 1 つずつ書く
-    - {id: lag-leaf3-po1, type: lacp, node: leaf3, members: [leaf3-e1-5, leaf3-e1-6], lacp: {mode: active, min_links: 1}}
-    - {id: lag-leaf4-po1, type: lacp, node: leaf4, members: [leaf4-e1-5, leaf4-e1-6], lacp: {mode: active, min_links: 1}}
+    # vPC peer-link。LAG は機器ごとなので、両側に 1 つずつ書く (ADR-0023 D1・D6)
+    - {id: lag-leaf3-po1, node: leaf3, name: port-channel1, members: [leaf3-e1-5, leaf3-e1-6], lacp: {mode: active, min_links: 1}}
+    - {id: lag-leaf4-po1, node: leaf4, name: port-channel1, members: [leaf4-e1-5, leaf4-e1-6], lacp: {mode: active, min_links: 1}}
 
-    # server3 向け vPC（leaf3 + leaf4 の port-channel3）
-    - id: lag-vpc-server3
-      type: mlag
-      nodes: [leaf3, leaf4]
-      members: [leaf3-e1-3, leaf4-e1-3]
-      lacp: {mode: active, min_links: 1}
-      peer_link: lag-leaf3-po1
-      peer_link_interface: port-channel1
-      domain_id: 34
-      client_lag: lag-server3-bond0
-    - {id: lag-server3-bond0, type: lacp, node: server3, members: [server3-eth0, server3-eth1], lacp: {mode: active}}
+    # server3 向け vPC。leaf3 / leaf4 にそれぞれ port-channel3 があり、es-server3 で束ねる (vpc 番号は書かない)
+    - {id: lag-leaf3-po3, node: leaf3, name: port-channel3, members: [leaf3-e1-3], lacp: {mode: active, min_links: 1}}
+    - {id: lag-leaf4-po3, node: leaf4, name: port-channel3, members: [leaf4-e1-3], lacp: {mode: active, min_links: 1}}
+    - {id: lag-server3-bond0, node: server3, members: [server3-eth0, server3-eth1], lacp: {mode: active}}
 
     # server5 向け（leaf5 単独の port-channel5）
-    - {id: lag-leaf5-po5,     type: lacp, node: leaf5,   members: [leaf5-e1-3, leaf5-e1-4],     lacp: {mode: active}}
-    - {id: lag-server5-bond0, type: lacp, node: server5, members: [server5-eth0, server5-eth1], lacp: {mode: active}}
+    - {id: lag-leaf5-po5,     node: leaf5,   members: [leaf5-e1-3, leaf5-e1-4],     lacp: {mode: active}}
+    - {id: lag-server5-bond0, node: server5, members: [server5-eth0, server5-eth1], lacp: {mode: active}}
 
     # fw1 向け（leaf6 の port-channel10。上にテナントごとのサブ IF を載せる）
-    - {id: lag-leaf6-po10, type: lacp, node: leaf6, members: [leaf6-e1-4, leaf6-e1-5], lacp: {mode: active}}
-    - {id: lag-fw1-agg1,   type: lacp, node: fw1,   members: [fw1-port1, fw1-port2],   lacp: {mode: active}}
+    - {id: lag-leaf6-po10, node: leaf6, members: [leaf6-e1-4, leaf6-e1-5], lacp: {mode: active}}
+    - {id: lag-fw1-agg1,   node: fw1,   members: [fw1-port1, fw1-port2],   lacp: {mode: active}}
+
+  ethernet_segments:
+    # leaf3 / leaf4 の port-channel3 を server3 から 1 本に見せる (vPC。ADR-0023 D2)
+    - {id: es-server3, members: [{lag: lag-leaf3-po3}, {lag: lag-leaf4-po3}]}
 
 layer2:
   vlans:
@@ -217,7 +214,7 @@ layer2:
       access_ports:
         - {interface: leaf1-e1-3}      # host1
       trunk_ports:
-        - {lag: lag-vpc-server3}       # server3（vPC は 1 行で leaf3 / leaf4 の両方）
+        - {ethernet_segment: es-server3}   # server3（vPC は 1 行で leaf3 / leaf4 の両方）
         - {lag: lag-leaf3-po1}         # peer-link
         - {lag: lag-leaf4-po1}
 
@@ -233,7 +230,7 @@ layer2:
       access_ports:
         - {interface: leaf5-e1-5}      # host5
       trunk_ports:
-        - {lag: lag-vpc-server3}
+        - {ethernet_segment: es-server3}
         - {lag: lag-leaf3-po1}
         - {lag: lag-leaf4-po1}
 
@@ -241,7 +238,7 @@ layer2:
       vlan_id: 40
       description: Used only by server3 (VNI confined to leaf3 / leaf4)
       trunk_ports:
-        - {lag: lag-vpc-server3}
+        - {ethernet_segment: es-server3}
         - {lag: lag-leaf3-po1}
         - {lag: lag-leaf4-po1}
 
@@ -258,7 +255,7 @@ layer2:
     - id: vlan-120
       vlan_id: 120
       trunk_ports:
-        - {lag: lag-vpc-server3}
+        - {ethernet_segment: es-server3}
         - {lag: lag-leaf5-po5}
         - {lag: lag-leaf3-po1}
         - {lag: lag-leaf4-po1}
@@ -396,30 +393,30 @@ layer3:
 
     # ── SVI（Anycast GW: fabric forwarding anycast-gateway-mac 0000.2222.3333）──
     # tenant-a
-    - {id: leaf1-vlan-10, node: leaf1, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf2-vlan-10, node: leaf2, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf3-vlan-10, node: leaf3, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf4-vlan-10, node: leaf4, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf1-vlan-10, node: leaf1, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan-10, node: leaf2, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf3-vlan-10, node: leaf3, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf4-vlan-10, node: leaf4, name: Vlan10, attaches_to: {vlan: vlan-10}, ip: 172.16.10.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
 
-    - {id: leaf1-vlan-20, node: leaf1, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf2-vlan-20, node: leaf2, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf5-vlan-20, node: leaf5, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf1-vlan-20, node: leaf1, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan-20, node: leaf2, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf5-vlan-20, node: leaf5, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 172.16.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
 
-    - {id: leaf3-vlan-30, node: leaf3, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf4-vlan-30, node: leaf4, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf5-vlan-30, node: leaf5, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf3-vlan-30, node: leaf3, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf4-vlan-30, node: leaf4, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf5-vlan-30, node: leaf5, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 172.16.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
 
-    - {id: leaf3-vlan-40, node: leaf3, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 172.16.40.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf4-vlan-40, node: leaf4, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 172.16.40.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf3-vlan-40, node: leaf3, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 172.16.40.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf4-vlan-40, node: leaf4, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 172.16.40.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
 
     # tenant-b（IPv4 / IPv6 の両方）
-    - {id: leaf3-vlan-110, node: leaf3, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf4-vlan-110, node: leaf4, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf5-vlan-110, node: leaf5, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf3-vlan-110, node: leaf3, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf4-vlan-110, node: leaf4, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf5-vlan-110, node: leaf5, name: Vlan110, attaches_to: {vlan: vlan-110}, ip: 172.17.110.1/24, ipv6: "2001:db8:110::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway}]}
 
-    - {id: leaf3-vlan-120, node: leaf3, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf4-vlan-120, node: leaf4, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
-    - {id: leaf5-vlan-120, node: leaf5, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway, anycast_mac: "00:00:22:22:33:33"}]}
+    - {id: leaf3-vlan-120, node: leaf3, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf4-vlan-120, node: leaf4, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf5-vlan-120, node: leaf5, name: Vlan120, attaches_to: {vlan: vlan-120}, ip: 172.17.120.1/24, ipv6: "2001:db8:120::1/64", vrf: vrf-tenant-b, gateway_redundancy: [{mode: anycast_gateway}]}
 
     # L3VNI の transit SVI（ip forward、アドレスなし）
     - { id: leaf1-vlan-3001, node: leaf1, name: Vlan3001, attaches_to: {vlan: vlan-3001}, vrf: vrf-tenant-a }

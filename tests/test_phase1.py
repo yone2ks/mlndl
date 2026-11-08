@@ -9,7 +9,7 @@ import pytest
 import mlndl
 from mlndl import parse, parse_file, validate
 from mlndl.exporter import cytoscape, yaml as yaml_exporter
-from mlndl.schema.layer1 import LacpLag, MlagLag
+from mlndl.schema.layer1 import EthernetSegment, Lag
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -46,24 +46,24 @@ class TestParser:
     def test_parse_valid_with_lag(self):
         t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")
         l1 = t.layer1
-        assert len(l1.lag) == 2
+        assert len(l1.lag) == 4
+        assert len(l1.ethernet_segments) == 1
 
-    def test_parse_lag_types(self):
+    def test_parse_lag_and_ethernet_segment(self):
+        """LAG は機器 1 台 (ADR-0023 D1)。複数の機器の LAG は ethernet_segments で束ねる (D2)"""
         t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")
         lags = {lag.id: lag for lag in t.layer1.lag}
 
-        peer_link = lags["lag-peer-link"]
-        assert isinstance(peer_link, LacpLag)
-        assert peer_link.type == "lacp"
+        peer_link = lags["lag-leaf1-peer"]
+        assert isinstance(peer_link, Lag)
         assert peer_link.node == "leaf1"
+        assert peer_link.name == "peerlink"
         assert peer_link.members == ["leaf1-swp49", "leaf1-swp50"]
 
-        mlag = lags["lag-mlag-server1"]
-        assert isinstance(mlag, MlagLag)
-        assert mlag.type == "mlag"
-        assert mlag.nodes == ["leaf1", "leaf2"]
-        assert mlag.peer_link == "lag-peer-link"
-        assert mlag.domain_id == 10
+        es = t.layer1.ethernet_segments[0]
+        assert isinstance(es, EthernetSegment)
+        assert [(m.kind, m.target) for m in es.members] == [("lag", "lag-leaf1-server1"), ("lag", "lag-leaf2-server1")]
+        assert es.redundancy_mode is None       # 既定値で埋めない (ADR-0023 D4)
 
     def test_parse_empty_yaml(self):
         t = parse(b"")
@@ -129,7 +129,8 @@ layer1:
         with pytest.raises(Exception, match="ADR-0004"):
             parse(yaml_str)
 
-    def test_mlag_single_node_error(self):
+    def test_old_mlag_lag_is_error(self):
+        """旧 type: mlag は、機器ごとの LAG と ethernet_segments への移動先を示す error (ADR-0023 D9)"""
         yaml_str = b"""
 ndl_version: "1.0"
 layer1:
@@ -144,7 +145,20 @@ layer1:
       peer_link: lag-pl
       peer_link_interface: peerlink.4094
 """
-        with pytest.raises(Exception, match="2 ノード"):
+        with pytest.raises(Exception, match="ethernet_segments"):
+            parse(yaml_str)
+
+    def test_old_lacp_type_is_error(self):
+        """旧 type: lacp は、type を消すよう示す error (ADR-0023 D1)"""
+        yaml_str = b"""
+ndl_version: "1.0"
+layer1:
+  nodes: [{id: leaf1}]
+  interfaces: [{id: leaf1-swp1, node: leaf1}]
+  lag:
+    - {id: lag-leaf1-po1, type: lacp, node: leaf1, members: [leaf1-swp1]}
+"""
+        with pytest.raises(Exception, match="type を消して"):
             parse(yaml_str)
 
     def test_attaches_to_two_keys_error(self):
