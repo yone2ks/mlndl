@@ -247,6 +247,27 @@ def test_cytoscape_links_carry_segment():
     assert not any("lag_type" in e["data"] for e in out["edges"])
 
 
+def test_cytoscape_node_lags():
+    """LAG は機器に埋め込む。メンバーは L1 IF の name、lacp は書かれた値だけ、ES の脚なら ES を添える"""
+    out = cytoscape.export(_topo(ES_SRV1))
+    leaf1 = {g["id"]: g for g in _data(out, "nodes", "leaf1")["lags"]}
+    assert leaf1["lag-leaf1-srv1"]["name"] == "bond1"
+    assert leaf1["lag-leaf1-srv1"]["ethernet_segment"] == "es-srv1"
+    assert "ethernet_segment" not in leaf1["lag-leaf1-peer"]
+    assert "name" not in leaf1["lag-leaf1-b"]                      # 書かれていなければ出さない
+    srv1 = _data(out, "nodes", "srv1")["lags"]
+    assert [g["id"] for g in srv1] == ["lag-srv1-bond0"]
+    assert srv1[0]["members"] == ["eth0", "eth1"]
+
+
+def test_cytoscape_lag_lacp_as_written():
+    """lacp は書かれたキーだけを出し、既定値 (min_links: 1) で埋めない"""
+    t = parse(_text().replace("members: [leaf1-swp2]}", "members: [leaf1-swp2], lacp: {mode: passive}}"))
+    lags = {g["id"]: g for g in _data(cytoscape.export(t), "nodes", "leaf1")["lags"]}
+    assert lags["lag-leaf1-b"]["lacp"] == {"mode": "passive"}
+    assert "lacp" not in lags["lag-leaf1-peer"]
+
+
 def test_cytoscape_bridge_port_segment():
     out = cytoscape.export(_topo(ES_SRV1, rest=BRIDGE))
     ports = _data(out, "nodes", "bridge-svc")["ports"]

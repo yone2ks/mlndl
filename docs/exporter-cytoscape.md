@@ -21,6 +21,7 @@
 | `vrfs` | このノードの L3 IF が属する VRF の id |
 | `vlans` | このノードにポートがある VLAN の id (Ethernet Segment は脚のすべてのノード。ADR-0013 D5・ADR-0023 D8) |
 | `vteps` | このノードが終端する VTEP: `{id, source, address?, address_v6?, shared_with?}`。`source` は L3 IF の name、`shared_with` は共有相手のノード (ADR-0014) |
+| `lags` | このノードの LAG: `{id, name?, members, lacp?, ethernet_segment?, description?}`。`members` はメンバーの L1 IF の name (リンクの `source_if` / `target_if` と同じ)。`lacp` は書かれた値だけ。`ethernet_segment` はこの LAG が脚の ES (ADR-0023) |
 | `subinterfaces` | このノードのサブ IF: `{id, parent, vlan_id, name?}` (ADR-0012) |
 | `tunnels` | このノードのトンネル IF (ADR-0011 D6) |
 | `local_as` | BGP の AS 番号 (default VRF のインスタンスのもの。なければ最初に出てくるインスタンス) |
@@ -73,7 +74,7 @@ MLAG か EVPN multihoming かは出さない (構文に方式名がない。ビ�
 ## `description`
 
 YAML に `description` があれば、人が読む補足としてそのまま出す (ADR-0011 D7)。出すのは、対応する要素があるもの:
-機器ノード、`vlan`、`bridge`、`ethernet_segment`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
+機器ノード、`vlan`、`bridge`、`ethernet_segment`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `lags[]` / `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
 要素を持たないもの (L1 IF、LAG、VRF、VTEP、インスタンス) の `description` は出さない。
 受け取るツールは表示するだけで、パースせず、一部を取り出しもしない。回線 ID などを書く場所でもある ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
 `role: provider-network` (事業者網の箱) も、ほかの role と同じくそのまま出す。
