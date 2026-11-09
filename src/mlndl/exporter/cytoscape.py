@@ -129,6 +129,20 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     node_tunnels: dict[str, list[dict]] = defaultdict(list)
     node_subifs: dict[str, list[dict]] = defaultdict(list)
     node_vteps: dict[str, list[dict]] = defaultdict(list)
+    node_lags: dict[str, list[dict]] = defaultdict(list)
+
+    # LAG は機器 1 台なので、その機器に埋め込む (ADR-0023)。メンバーは L1 IF の name (リンクの source_if と同じ)。
+    # lacp は書かれた値だけ出す (既定値で埋めない)。Ethernet Segment の脚なら、その ES の id を添える
+    if_name = {i.id: i.name or i.id for i in topology.layer1.interfaces}
+    lag_segment = {m: es_id for es_id, info in ethernet_segments(topology).items() for m in info.members}
+    for lag in topology.layer1.lag:
+        entry = {"id": lag.id}
+        if lag.name: entry["name"] = lag.name
+        entry["members"] = [if_name.get(m, m) for m in lag.members]
+        if lag.lacp is not None: entry["lacp"] = lag.lacp.model_dump(mode="json", exclude_unset=True)
+        if lag.id in lag_segment: entry["ethernet_segment"] = lag_segment[lag.id]
+        if lag.description: entry["description"] = lag.description
+        node_lags[lag.node].append(entry)
 
     # サブ IF は親 (L1 IF / LAG) のノードに埋め込む (ADR-0012)
     parent_nodes = _interface_nodes(topology)
@@ -215,6 +229,7 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
         if node.description:    data["description"] = node.description
 
         # L3 データを埋め込む（overlay 有効時に参照）
+        if node_lags[node.id]:        data["lags"]           = node_lags[node.id]
         if node_tunnels[node.id]:     data["tunnels"]        = node_tunnels[node.id]
         if node_subifs[node.id]:      data["subinterfaces"]  = node_subifs[node.id]
         if node_vteps[node.id]:       data["vteps"]          = node_vteps[node.id]
