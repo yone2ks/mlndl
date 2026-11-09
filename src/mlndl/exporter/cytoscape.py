@@ -272,6 +272,9 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
         lag_info = lag_membership.get(ep0) or lag_membership.get(ep1)
         if lag_info:
             data["lag_id"] = lag_info["lag_id"]
+        # 端ごとの LAG。LAG は機器 1 台なので、両端が別々の LAG のメンバーになりうる (ADR-0023)
+        if ep0 in lag_membership: data["source_lag"] = lag_membership[ep0]["lag_id"]
+        if ep1 in lag_membership: data["target_lag"] = lag_membership[ep1]["lag_id"]
         segment = segment_of.get(ep0) or segment_of.get(ep1)
         if segment:
             data["ethernet_segment"] = segment
