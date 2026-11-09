@@ -82,7 +82,7 @@ YAML に `description` があれば、人が読む補足としてそのまま出
 
 | `type` | 内容 |
 |---|---|
-| `link` | L1 リンク。`source` / `target` は L1 ノード、`source_if` / `target_if` は L1 IF の name。`link_speed` / `link_role` / `lag_id` (端の L1 IF がメンバーの LAG) / `ethernet_segment` (端の L1 IF が脚の Ethernet Segment)。`lag_type` は ADR-0023 でなくした |
+| `link` | L1 リンク。`source` / `target` は L1 ノード、`source_if` / `target_if` は L1 IF の name。`link_speed` / `link_role` / `source_lag` / `target_lag` (その端の L1 IF がメンバーの LAG。LAG は機器 1 台なので、両端が別々の LAG のメンバーになりうる) / `lag_id` (どちらかの端の LAG。両端にあれば source 側) / `ethernet_segment` (端の L1 IF が脚の Ethernet Segment)。`lag_type` は ADR-0023 でなくした |
 | `lag_bundle` | LAG のメンバーリンクを束ねたもの。`lag_id`、脚なら `ethernet_segment` |
 | `attaches_to` | L1 ノードの `attaches_to` (ノードがどこで動くか。ADR-0001) |
 | `vlan_member` | VLAN → ポートのあるノード。`tagged_on` / `untagged_on` はポートの name か LAG の id (Ethernet Segment のポートは、そのノードの脚の LAG の id か L1 IF の name に開く)。`endpoints` は下の「VLAN の端点」 |

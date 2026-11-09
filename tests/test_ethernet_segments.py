@@ -239,8 +239,11 @@ def test_cytoscape_links_carry_segment():
     out = cytoscape.export(_topo(ES_SRV1, ES_FW1))
     link = _data(out, "edges", "link-leaf1-srv1")
     assert link["ethernet_segment"] == "es-srv1" and link["lag_id"] == "lag-leaf1-srv1"
+    assert (link["source_lag"], link["target_lag"]) == ("lag-leaf1-srv1", "lag-srv1-bond0")   # 相手側の LAG も落とさない
     assert _data(out, "edges", "link-leaf3-fw1")["ethernet_segment"] == "es-fw1"
-    assert "ethernet_segment" not in _data(out, "edges", "link-leaf1-leaf2-peer")
+    peer = _data(out, "edges", "link-leaf1-leaf2-peer")
+    assert "ethernet_segment" not in peer
+    assert (peer["source_lag"], peer["target_lag"]) == ("lag-leaf1-peer", "lag-leaf2-peer")   # 両端の LAG を端ごとに
     assert not any("lag_type" in e["data"] for e in out["edges"])
 
 
