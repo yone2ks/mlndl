@@ -13,7 +13,8 @@ import json
 from collections import defaultdict
 
 from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, ethernet_segments, igp_adjacency_views,
-                      l3_and_tunnels, l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
+                      l2vni_node_vlans, l3_and_tunnels, l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints,
+                      vlan_svi_networks)
 from ..schema.control_plane import BgpSession
 from ..schema.layer2 import L2VxLAN, L3VxLAN
 from ..schema.topology import MLNDLTopology
@@ -454,13 +455,18 @@ def _export_l2_overlay(topology, if_to_name, elements):
 
     # VxLAN ノード。vteps は L2VNI なら書かれたもの、L3VNI なら VRF から導いたもの
     vteps = _vtep_info(topology)
+    node_vlans = l2vni_node_vlans(topology)
     for vx in topology.layer2.vxlan:
         data: dict = {"layer": "layer2", "vni": vx.vni}
         if isinstance(vx, L2VxLAN):
             data.update({"id": vx.id, "label": f"L2VNI {vx.vni}", "type": "l2vni",
-                         "vlan": vx.vlan})
+                         "vlans": list(vx.vlans)})   # ADR-0026 D7
             if vx.vteps:
                 data["vteps"] = list(vx.vteps)       # ADR-0014
+            pairs = node_vlans.get(vx.id, [])
+            if pairs:
+                # 参加機器とその機器の VLAN (ADR-0026 D4)。導いた値で、YAML には書けない
+                data["node_vlans"] = [{"node": n, "vlan": v} for n, v in pairs]
         elif isinstance(vx, L3VxLAN):
             data.update({"id": vx.id, "label": f"L3VNI {vx.vni}", "type": "l3vni",
                          "vrf": vx.vrf})

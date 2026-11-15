@@ -43,6 +43,10 @@ MLNDL の源流は MLNDL 原案 (NAIST, 2011) です。
 - `layer3`: VRF・L3 IF・トンネル IF。IP の到達性の起点
 - `control_plane`: BGP・OSPF・IS-IS のセッション。どの `layerN` にも属さない ([ADR-0010](decisions/0010-control-plane-separation.md))
 
+VLAN のエントリは、ある 802.1Q の番号と、その番号でつながるポートの組です。L2VNI に入らない VLAN では、VLAN のエントリ 1 つが 1 つのブロードキャストドメインです。
+L2VNI に入る VLAN では、ブロードキャストドメインを表すのは L2VNI で、その `vlans` に並んだ VLAN のエントリが合わさって 1 つのドメインになります。
+機器によって番号が違う VLAN は、番号ごとに別のエントリにして、同じ L2VNI の `vlans` に並べます ([ADR-0026](decisions/0026-l2vni-vlans.md))。
+
 ## 4 つの関係
 
 MLNDL のエンティティどうしの関係は、次の 4 つに分かれます。それぞれ別のキーで書き、混ぜません ([ADR-0009](decisions/0009-membership-orthogonality.md))。
@@ -75,6 +79,7 @@ MLNDL には、ほかの記述から導けることは書きません。mlndl �
 | セッションの通り道 (どのリンク・LAG・bridge・トンネルを通るか) | 両端の `update_source` の基盤から |
 | underlay か overlay か | セッションが運ぶアドレスファミリーと VRF から |
 | VLAN の端点 (サーバーの IP など) | VLAN のポート → リンクの対向 → 対向の L3 IF |
+| L2VNI の機器ごとの VLAN | VTEP から参加機器を、VLAN のポートと SVI からその機器の VLAN を |
 
 導けるものを書けるようにすると、書いた値と導いた値が食い違ったときにどちらが正しいかが決まらなくなります。書くのは 1 か所だけにします。
 

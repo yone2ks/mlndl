@@ -1132,7 +1132,7 @@
     },
     "L2VxLAN": {
       "additionalProperties": false,
-      "description": "L2VNI — VLAN を VxLAN セグメントにマッピング\n\nvteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014\n旧形式の vtep_source / members は移動先を示すエラーにする (ADR-0025 D1)",
+      "description": "L2VNI — 1 つのブロードキャストドメインを VxLAN セグメントにする\n\nvlans: この VNI に載る VLAN (layer2.vlans[].id)。機器によって番号が違うときは、番号ごとの VLAN のエントリを並べる (ADR-0026 D1)\nvteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014\n旧形式の vlan (単数) / vtep_source / members は移動先を示すエラーにする (ADR-0026 D2・ADR-0025 D1)",
       "properties": {
         "id": {
           "title": "Id",
@@ -1147,9 +1147,13 @@
           "title": "Vni",
           "type": "integer"
         },
-        "vlan": {
-          "title": "Vlan",
-          "type": "string"
+        "vlans": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Vlans",
+          "type": "array"
         },
         "vteps": {
           "default": [],
@@ -1176,7 +1180,7 @@
         "id",
         "type",
         "vni",
-        "vlan"
+        "vlans"
       ],
       "title": "L2VxLAN",
       "type": "object"

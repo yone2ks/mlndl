@@ -518,7 +518,7 @@ class TestPassCChecks:
         ).replace(
             "layer3:",
             "  vteps:\n    - {id: vtep-leaf1, sources: [leaf1-lo]}\n    - {id: vtep-leaf2, sources: [leaf2-lo]}\n"
-            "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100,"
+            "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100],"
             f" vteps: [{vteps}]}}\nlayer3:",
         )
 

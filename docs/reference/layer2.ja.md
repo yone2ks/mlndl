@@ -108,10 +108,29 @@ VNI。`type` で L2VNI と L3VNI を分けます。L2VNI と L3VNI を通して 
 | `id` | id | ○ | | `vni-<番号>` が慣例 |
 | `type` | `l2vni` | ○ | | |
 | `vni` | 整数 | ○ | | |
-| `vlan` | id | ○ | `layer2.vlans` | この VNI に対応する VLAN |
+| `vlans` | [id] (1 つ以上) | ○ | `layer2.vlans` | この VNI に載る VLAN。機器によって番号が違うときは、番号ごとの VLAN のエントリを並べる。同じ id を 2 回書くと error |
 | `vteps` | [id] | | `layer2.vteps` | この VNI に参加する VTEP。参加する機器は VTEP から導く |
 | `description` | 文字列 | | | |
 
+L2VNI に入る VLAN では、ブロードキャストドメインを表すのは L2VNI です。VLAN のエントリは「ある番号と、その番号でつながるポート」で、
+`vlans` に並んだエントリが合わさって 1 つのドメインになります ([ADR-0026](../decisions/0026-l2vni-vlans.md))。
+
+```yaml
+vlans:
+  - {id: vlan-20, vlan_id: 20, trunk_ports: [{ethernet_segment: es-server1}, {interface: leaf4-swp3}]}   # leaf1 / leaf2 / leaf4
+  - {id: vlan-30, vlan_id: 30, access_ports: [{interface: leaf3-swp1}]}                                  # leaf3 だけ番号が違う
+vxlan:
+  - {id: vni-10020, type: l2vni, vni: 10020, vlans: [vlan-20, vlan-30], vteps: [vtep-leaf1-leaf2, vtep-leaf3, vtep-leaf4]}
+```
+
+- 全機器で番号が同じなら `vlans: [vlan-100]` と 1 つだけ書きます
+- 同じ番号は、何台の機器にまたがっても 1 つのエントリに書きます。エントリを分けるのは番号が違うときだけです
+- 参加機器 (VTEP から導く) ごとに、その機器の VLAN は VLAN のポートか、その VLAN を指す SVI (`attaches_to: {vlan:}`) の機器から導きます。
+  SVI だけを持つ機器 (border leaf など) の VLAN も決まります
+- 1 台の機器に同じ VNI の VLAN が 2 つあるのは error です。Ethernet Segment の脚の機器で番号が違うのも error です
+- `vlans` は VLAN-aware bundle (1 つの MAC-VRF に入る、VNI の違う VLAN の集まり) ではありません
+
+旧形式の `vlan` (単数) は、書くと `vlans` への移動先を示す error です ([ADR-0026](../decisions/0026-l2vni-vlans.md))。
 旧形式の `vtep_source` / `members` は、書くと `vteps` への移動先を示す error です ([ADR-0025](../decisions/0025-end-grace-for-old-forms.md))。
 
 ### type: l3vni

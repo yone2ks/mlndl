@@ -285,12 +285,12 @@ layer2:
     - {id: vtep-leaf6, sources: [leaf6-lo1]}
 
   vxlan:
-    - {id: vni-10010, type: l2vni, vni: 10010, vlan: vlan-10,  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3-leaf4]}
-    - {id: vni-10020, type: l2vni, vni: 10020, vlan: vlan-20,  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf5]}
-    - {id: vni-10030, type: l2vni, vni: 10030, vlan: vlan-30,  vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
-    - {id: vni-10040, type: l2vni, vni: 10040, vlan: vlan-40,  vteps: [vtep-leaf3-leaf4]}
-    - {id: vni-10110, type: l2vni, vni: 10110, vlan: vlan-110, vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
-    - {id: vni-10120, type: l2vni, vni: 10120, vlan: vlan-120, vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
+    - {id: vni-10010, type: l2vni, vni: 10010, vlans: [vlan-10],  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3-leaf4]}
+    - {id: vni-10020, type: l2vni, vni: 10020, vlans: [vlan-20],  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf5]}
+    - {id: vni-10030, type: l2vni, vni: 10030, vlans: [vlan-30],  vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
+    - {id: vni-10040, type: l2vni, vni: 10040, vlans: [vlan-40],  vteps: [vtep-leaf3-leaf4]}
+    - {id: vni-10110, type: l2vni, vni: 10110, vlans: [vlan-110], vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
+    - {id: vni-10120, type: l2vni, vni: 10120, vlans: [vlan-120], vteps: [vtep-leaf3-leaf4, vtep-leaf5]}
 
     - {id: vni-50001, type: l3vni, vni: 50001, vrf: vrf-tenant-a, irb_mode: symmetric}
     - {id: vni-50002, type: l3vni, vni: 50002, vrf: vrf-tenant-b, irb_mode: symmetric}

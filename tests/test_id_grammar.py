@@ -91,7 +91,7 @@ layer2:
   bridges: [{id: Bridge-r2, ports: [{interface: r2-eth0}]}]
   vteps: [{id: Vtep-r1, sources: [R1-lo]}]
   vxlan:
-    - {id: Vni-10010, type: l2vni, vni: 10010, vlan: Vlan-10, vteps: [Vtep-r1]}
+    - {id: Vni-10010, type: l2vni, vni: 10010, vlans: [Vlan-10], vteps: [Vtep-r1]}
   subinterfaces:
     - {id: Subif-r2-eth0-20, attaches_to: {interface: r2-eth0}, vlan_id: 20}
 layer3:

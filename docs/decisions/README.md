@@ -203,7 +203,7 @@ VLAN のポートの `node`、L2VNI の `vtep_source` / `members`) を、移動�
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [0026](0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる (`vlans`) (実装はまだ) | **Accepted** | C |
+| [0026](0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる (`vlans`) (2026-11-15 実装) | **Accepted** | C |
 | [drafts/0026](drafts/0026-l2vni-vlans.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0026 | A |
 | [evaluations/adr0026](evaluations/adr0026/evaluation.md) | 横断評価メモ (Pass B) と Pass C の結果。試し書き `passb/` B1〜B5、`passc/` P1〜P4 | — | — |
 

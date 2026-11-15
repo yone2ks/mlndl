@@ -11,7 +11,7 @@
      - L1: Ethernet Segment の脚 (機器の重複、2 つの ES に入る脚、LAG とメンバーの併記、脚どうしのリンク。ADR-0023 D7)
      - L2: LAG とメンバー・ES と脚の併記、
        ES の脚の一部だけ (warning)、同じ端点の重複、同一ノード上の vlan_id 重複 (ES は脚の全機器で数える)、サブ IF のタグ重複、
-       VNI 番号の重複、VNI に参加するノードの VLAN、VTEP の検査 (ADR-0014 D5)、
+       VNI 番号の重複、L2VNI の機器ごとの VLAN (ADR-0026 D5)、VTEP の検査 (ADR-0014 D5)、
        VLAN の端点の IP が SVI のサブネット外 (info。ADR-0013 D7)、
        bridge のポート (同じポートを 2 つの bridge に、LAG とメンバー、ポートが 1 つ、ルーターのポートらしいもの、
        VLAN と bridge の両方にあるポート。ADR-0018 D1)
@@ -45,6 +45,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .derive import (bgp_session_views, end_path_labels, ethernet_segments, igp_adjacency_views,
+                     l2vni_participants, vlan_l2vnis, vlan_port_nodes, vlan_svi_nodes,
                      l3_and_tunnels, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
 from .schema.control_plane import BgpInsideEndpoint, BgpSession, OspfAdjacency
 from .schema.layer3 import L3_ATTACH_KEYS, TunnelInterface
@@ -194,12 +195,16 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
     if topology.layer1:
         _validate_l1(topology.layer1, iface_node, member_lag, spaces, errors)
 
+    # ── L2VNI と機器ごとの VLAN の文脈 (ADR-0026) ──────────────────────────
+    segment_of = _segment_of_leg(topology.layer1)
+    vni_ctx = _L2vniContext.build(topology, segments, segment_of)
+
     # ── Layer 2 ──────────────────────────────────────────────────────────
     if topology.layer2:
         _validate_l2(
             topology.layer2,
-            node_ids, iface_node, lag_nodes, member_lag, spaces, segments, _segment_of_leg(topology.layer1),
-            vtep_nodes,
+            node_ids, iface_node, lag_nodes, member_lag, spaces, segments, segment_of,
+            vtep_nodes, vni_ctx,
             errors,
         )
 
@@ -215,6 +220,11 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
             l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids,
             errors,
         )
+
+    # ── L2VNI の VLAN と anycast gateway (ADR-0026 D5・D6) ─────────────────
+    _validate_l2vnis(topology, vni_ctx, node_ids, errors)
+    if topology.layer3:
+        _check_anycast_consistency(topology.layer3, vlan_ids, vni_ctx, errors)
 
     # ── VTEP (ADR-0014) ──────────────────────────────────────────────────
     if topology.layer2 and topology.layer2.vteps:
@@ -360,7 +370,7 @@ def _segment_of_leg(l1) -> dict[str, str]:
     return out
 
 
-def _check_segment_ports(ports, listed, segment_of, segments, what, adr, errors) -> set[int]:
+def _check_segment_ports(ports, listed, segment_of, segments, what, adr, errors, partial_ok=False) -> set[int]:
     """ポートの並び (VLAN / bridge) で、Ethernet Segment とその脚の併記 (error) と、脚の一部だけ (warning) を検査する
 
     ports: (パス, ポート) の並び。戻り値は ES との併記で error にしたポートの位置 (ほかの検査を重ねないため)
@@ -383,6 +393,8 @@ def _check_segment_ports(ports, listed, segment_of, segments, what, adr, errors)
         elif es in segments and pr.target in segments[es].members:
             partial.setdefault(es, []).append((path, pr.target))
     for es, got in partial.items():
+        if partial_ok:
+            break                       # 脚が番号の違う VLAN に分かれた error を出す VLAN には重ねない (ADR-0026 D5)
         written = {t for _, t in got}
         missing = [m for m in segments[es].members if m not in written]
         if missing:
@@ -398,17 +410,17 @@ def _check_segment_ports(ports, listed, segment_of, segments, what, adr, errors)
 
 
 def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segments, segment_of,
-                 vtep_nodes, errors):
+                 vtep_nodes, vni_ctx, errors):
     # VLAN trunk_ports / access_ports (ADR-0013)
     # interface (L1 IF)・lag (LAG)・ethernet_segment (ES) で指す。node は書かず、参照先から導出する
     vlans_on_node: dict[tuple[str, int], list[str]] = {}
-    vlan_nodes: dict[str, set[str]] = {}
     for i, vlan in enumerate(l2.vlans):
         ports = [(f"trunk_ports[{j}]", pr) for j, pr in enumerate(vlan.trunk_ports)]
         ports += [(f"access_ports[{j}]", pr) for j, pr in enumerate(vlan.access_ports)]
         listed = {pr.target for _, pr in ports}
         skipped = _check_segment_ports([(f"layer2.vlans[{i}].{w}", pr) for w, pr in ports], listed,
-                                       segment_of, segments, " VLAN ", "ADR-0013 D3", errors)
+                                       segment_of, segments, " VLAN ", "ADR-0013 D3", errors,
+                                       partial_ok=vlan.id in vni_ctx.es_split_vlans)
         seen: dict[str, str] = {}
         for k, (where, pr) in enumerate(ports):
             path = f"layer2.vlans[{i}].{where}"
@@ -421,7 +433,6 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segmen
                 seen[pr.target] = where
             kind = _resolve_ref(pr.kind, pr.target, spaces, f"{path}.{pr.kind}", errors, accepts=PORT_KEYS)
             nodes = _port_nodes(kind, pr.target, iface_node, lag_nodes, segments)
-            vlan_nodes.setdefault(vlan.id, set()).update(nodes)
             for node in nodes:
                 owners = vlans_on_node.setdefault((node, vlan.vlan_id), [])
                 if vlan.id not in owners:
@@ -446,12 +457,23 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segmen
                 ))
 
     # VLAN ID — 同一ノード上で別の VLAN エントリが同じ vlan_id を使っていないか
-    # (別ノードで同じ番号を使うのはサイトローカルな再利用として許容する)
+    # (別ノードで同じ番号を使うのはサイトローカルな再利用として許容する)。
+    # SVI もその機器の番号を使うので数える (ADR-0026 D4)
+    via_svi: set[tuple[str, int, str]] = set()
+    for vlan in l2.vlans:
+        for node in sorted(vni_ctx.svi_nodes.get(vlan.id, ())):
+            owners = vlans_on_node.setdefault((node, vlan.vlan_id), [])
+            if vlan.id not in owners:
+                owners.append(vlan.id)
+                via_svi.add((node, vlan.vlan_id, vlan.id))
     for (node, vid), owners in vlans_on_node.items():
         if len(owners) > 1:
+            svi = [o for o in owners if (node, vid, o) in via_svi]
+            note = (f"。'{node}' の SVI が {' / '.join(svi)} を指しています (SVI もその機器の番号を使います。ADR-0026 D4)"
+                    if svi else "")
             errors.append(ValidationError(
                 f"layer2.vlans[{', '.join(owners)}]",
-                f"ノード '{node}' 上で VLAN ID {vid} が重複しています ({' / '.join(owners)})",
+                f"ノード '{node}' 上で VLAN ID {vid} が重複しています ({' / '.join(owners)}){note}",
             ))
 
     # Subinterfaces (ADR-0012)
@@ -482,19 +504,153 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segmen
             seen_vnis[vx.vni] = vx.id
 
         if isinstance(vx, L2VxLAN):
-            participants = _check_vni_vteps(vx, i, vtep_nodes, errors)
-            # VNI に参加するノードなのに、その VLAN のポートが 1 つもない (round4 E10)。
-            # VLAN にポートが書かれていない場合は判断できないので見ない
-            carried = vlan_nodes.get(vx.vlan)
-            if carried:
-                for m in sorted(participants):
-                    if m in node_ids and m not in carried:
-                        errors.append(ValidationError(
-                            f"layer2.vxlan[{i}]",
-                            f"VNI に参加するノード '{m}' には VLAN '{vx.vlan}' のポートがありません。"
-                            f"VLAN を載せ忘れていないか確認してください (ADR-0011 D9)",
-                            "warning",
-                        ))
+            _check_vni_vteps(vx, i, vtep_nodes, errors)
+            # 参加機器の VLAN は _validate_l2vnis で見る (ADR-0026 D5)
+
+
+@dataclass
+class _L2vniContext:
+    """L2VNI と機器ごとの VLAN を見る検査が共有する値 (ADR-0026 D4・D5)
+
+    - port_nodes / svi_nodes: VLAN の id → ポート / SVI を持つ機器
+    - vlan_l2vnis: VLAN の id → その VLAN を vlans に書いた L2VNI の id
+    - bad_vlans: 2 つ以上の L2VNI に入った VLAN (D5 の 4)。ほかの L2VNI の検査と D6 から外す
+    - bad_nodes: L2VNI の id → その L2VNI の VLAN が 2 つ以上ある機器 (D5 の 5)。D5 の 7 と D6 から外す
+    - es_splits: (L2VNI の位置, ES の id, VLAN の id 群)。ES の脚が番号の違う VLAN に分かれたもの (D5 の 6)
+    - es_split_vlans: es_splits の VLAN。ADR-0023 D7 の「脚の一部だけ」の warning を重ねない
+    """
+
+    port_nodes: dict[str, set[str]] = field(default_factory=dict)
+    svi_nodes: dict[str, set[str]] = field(default_factory=dict)
+    vlan_l2vnis: dict[str, list[str]] = field(default_factory=dict)
+    bad_vlans: set[str] = field(default_factory=set)
+    bad_nodes: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    es_splits: list[tuple[int, str, list[str]]] = field(default_factory=list)
+    es_split_vlans: set[str] = field(default_factory=set)
+
+    @classmethod
+    def build(cls, topology: MLNDLTopology, segments, segment_of) -> "_L2vniContext":
+        ctx = cls(port_nodes=vlan_port_nodes(topology, segments), svi_nodes=vlan_svi_nodes(topology),
+                  vlan_l2vnis=vlan_l2vnis(topology))
+        if not topology.layer2:
+            return ctx
+        ctx.bad_vlans = {v for v, vnis in ctx.vlan_l2vnis.items() if len(vnis) > 1}
+        vlans = {v.id: v for v in topology.layer2.vlans}
+        for i, vx in enumerate(topology.layer2.vxlan):
+            if not isinstance(vx, L2VxLAN):
+                continue
+            mine = [v for v in vx.vlans if v in vlans and v not in ctx.bad_vlans]
+            # D5 の 5: 1 台の機器に、この L2VNI の VLAN が 2 つ以上
+            per_node: dict[str, list[str]] = {}
+            for v in mine:
+                for node in ctx.port_nodes.get(v, set()) | ctx.svi_nodes.get(v, set()):
+                    per_node.setdefault(node, []).append(v)
+            ctx.bad_nodes[vx.id] = {n: vs for n, vs in per_node.items() if len(vs) > 1}
+            # D5 の 6: 同じ ES の脚が、この L2VNI の番号の違う VLAN に分かれている
+            per_es: dict[str, list[str]] = {}
+            for v in mine:
+                for pr in [*vlans[v].trunk_ports, *vlans[v].access_ports]:
+                    es = pr.ethernet_segment if pr.ethernet_segment is not None else segment_of.get(pr.target)
+                    if es is not None and v not in per_es.setdefault(es, []):
+                        per_es[es].append(v)
+            for es, vs in per_es.items():
+                if len({vlans[v].vlan_id for v in vs}) > 1:
+                    ctx.es_splits.append((i, es, vs))
+                    ctx.es_split_vlans.update(vs)
+        return ctx
+
+
+def _validate_l2vnis(topology: MLNDLTopology, ctx: _L2vniContext, node_ids, errors) -> None:
+    """L2VNI の vlans の検査 (ADR-0026 D5)。機器は ポート ∪ SVI で数える (D4)"""
+    if not topology.layer2:
+        return
+    vlans = {v.id: v for v in topology.layer2.vlans}
+    l2vnis = [(i, vx) for i, vx in enumerate(topology.layer2.vxlan) if isinstance(vx, L2VxLAN)]
+    index_of = {vx.id: i for i, vx in l2vnis}
+    participants = l2vni_participants(topology)
+    svis_of: dict[str, list] = {}
+    if topology.layer3:
+        for iface in topology.layer3.interfaces:
+            if iface.attaches_to is not None and iface.attaches_to.kind == "vlan":
+                svis_of.setdefault(iface.attaches_to.target, []).append(iface)
+
+    # 4: 1 つの VLAN が 2 つ以上の L2VNI に
+    for v in sorted(ctx.bad_vlans):
+        first, *rest = ctx.vlan_l2vnis[v]
+        for other in rest:
+            i = index_of[other]
+            j = topology.layer2.vxlan[i].vlans.index(v)
+            errors.append(ValidationError(
+                f"layer2.vxlan[{i}].vlans[{j}]",
+                f"VLAN '{v}' は L2VNI '{first}' と '{other}' の両方の vlans にあります。"
+                f"1 つの VLAN は 1 つの L2VNI に載せます (ADR-0026 D5)",
+            ))
+
+    for i, vx in l2vnis:
+        path = f"layer2.vxlan[{i}]"
+        mine = [v for v in vx.vlans if v in vlans and v not in ctx.bad_vlans]
+        bad_nodes = ctx.bad_nodes.get(vx.id, {})
+
+        # 5: 1 台の機器に 2 つ以上
+        for node in sorted(bad_nodes):
+            errors.append(ValidationError(
+                f"{path}.vlans",
+                f"機器 '{node}' に、L2VNI '{vx.id}' の VLAN が {len(bad_nodes[node])} つあります"
+                f" ({' / '.join(bad_nodes[node])})。1 つのブロードキャストドメインを 1 台の機器の中で "
+                f"2 つの番号にすることになります。1 台の機器で 1 つの VNI に載せる VLAN は 1 つです (ADR-0026 D5)",
+            ))
+
+        # 6: ES の脚が番号の違う VLAN に
+        for k, es, vs in ctx.es_splits:
+            if k != i:
+                continue
+            listed = " / ".join(f"{v} ({vlans[v].vlan_id})" for v in vs)
+            errors.append(ValidationError(
+                f"{path}.vlans",
+                f"Ethernet Segment '{es}' の脚が、L2VNI '{vx.id}' の番号の違う VLAN に分かれています ({listed})。"
+                f"相手からは 1 本の LAG に見えるので、脚の機器の番号は 1 つです。"
+                f"{{ethernet_segment: {es}}} を 1 つの VLAN に書いてください (ADR-0026 D5)",
+            ))
+
+        # 7: SVI の vrf の食い違い (5 の機器は外す)
+        svis = [s for v in mine for s in svis_of.get(v, []) if s.node not in bad_nodes]
+        if svis:
+            first = svis[0]
+            other = next((s for s in svis[1:] if s.vrf != first.vrf), None)
+            if other is not None:
+                errors.append(ValidationError(
+                    f"{path}.vlans",
+                    f"L2VNI '{vx.id}' の SVI の vrf が食い違っています: '{first.id}' は {first.vrf or '(vrf なし)'}、"
+                    f"'{other.id}' は {other.vrf or '(vrf なし)'}。同じブロードキャストドメインのゲートウェイは"
+                    f"同じ VRF に置きます (ADR-0026 D5)",
+                ))
+
+        # 9: 同じ番号の VLAN が 2 つ
+        by_vid: dict[int, list[str]] = {}
+        for v in [v for v in vx.vlans if v in vlans]:
+            by_vid.setdefault(vlans[v].vlan_id, []).append(v)
+        for vid, vs in by_vid.items():
+            if len(vs) > 1:
+                errors.append(ValidationError(
+                    f"{path}.vlans",
+                    f"L2VNI '{vx.id}' の vlans に、番号 {vid} の VLAN が {len(vs)} つあります ({' / '.join(vs)})。"
+                    f"同じブロードキャストドメインの同じ番号は、1 つの VLAN のエントリにまとめてください (ADR-0026 D3)",
+                    "warning",
+                ))
+
+        # 10: 参加機器に vlans のどの VLAN もない。どの VLAN にもポートと SVI がなければ判断できないので見ない
+        carried = set().union(*(ctx.port_nodes.get(v, set()) | ctx.svi_nodes.get(v, set())
+                                for v in vx.vlans if v in vlans))
+        if carried:
+            for m in sorted(participants.get(vx.id, set()) - carried):
+                if m in node_ids:
+                    errors.append(ValidationError(
+                        path,
+                        f"機器 '{m}' は VTEP で L2VNI '{vx.id}' に参加していますが、vlans のどの VLAN のポートも"
+                        f" SVI もありません。VNI を中継するだけの機器なら、このままでかまいません。"
+                        f"そうでなければ VLAN の載せ忘れか、vlans への書き忘れです (ADR-0026 D5)",
+                        "warning",
+                    ))
 
 
 def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, segments, errors) -> None:
@@ -805,8 +961,6 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
                     f"ip を書いてください (ADR-0011 D9)",
                     "warning",
                 ))
-
-    _check_anycast_consistency(l3, vlan_ids, errors)
 
     # Tunnel Interfaces (ADR-0011 D6)
     l3iface = {iface.id: iface for iface in l3.interfaces}
@@ -1223,33 +1377,63 @@ def _af_names(afs: set[int]) -> str:
     return " / ".join(f"IPv{af}" for af in sorted(afs))
 
 
-def _check_anycast_consistency(l3, vlan_ids, errors: list[ValidationError]) -> None:
-    """同じ VLAN に載る anycast gateway の SVI 群で、ip / ipv6 が揃っているか (ADR-0011 D4)
+def _check_anycast_consistency(l3, vlan_ids, ctx: _L2vniContext, errors: list[ValidationError]) -> None:
+    """同じブロードキャストドメインの anycast gateway の SVI 群で、ip / ipv6 が揃っているか (ADR-0011 D4・ADR-0026 D6)
 
+    SVI の VLAN が L2VNI の vlans にあれば、その L2VNI の SVI 全体で比べる。どの L2VNI にもなければ VLAN ごとに比べる。
     anycast gateway は全ノードが同じアドレスで応答する。1 台でも違えば、
     そのノードに着いたホストのゲートウェイが変わってしまう。未指定の値は比べない。
-    MAC アドレスは書かないので比べない (ADR-0022 D2)
+    MAC アドレスは書かないので比べない (ADR-0022 D2)。
+    2 つの L2VNI に入った VLAN、1 台に同じ L2VNI の VLAN が 2 つある機器は比べない (ADR-0026 D5 の重ねない規則)
     """
-    groups: dict[str, list[tuple[int, object]]] = {}
+    anycast: dict[tuple[str, str], list[tuple[int, object]]] = {}
+    vrrp: dict[tuple[str, str], list[tuple[int, object]]] = {}
     for i, iface in enumerate(l3.interfaces):
         ref = iface.attachment_ref()
-        if ref in vlan_ids and any(gw.mode == "anycast_gateway" for gw in iface.gateway_redundancy):
-            groups.setdefault(ref, []).append((i, iface))
-    for vlan, members in groups.items():
-        if len(members) < 2:
+        if ref not in vlan_ids or not iface.gateway_redundancy or ref in ctx.bad_vlans:
             continue
+        vnis = ctx.vlan_l2vnis.get(ref, [])
+        if vnis:
+            if iface.node in ctx.bad_nodes.get(vnis[0], {}):
+                continue
+            key = ("l2vni", vnis[0])
+        else:
+            key = ("vlan", ref)
+        is_anycast = any(gw.mode == "anycast_gateway" for gw in iface.gateway_redundancy)
+        (anycast if is_anycast else vrrp).setdefault(key, []).append((i, iface))
+
+    def unit(key, iface) -> str:
+        return f"L2VNI '{key[1]}'" if key[0] == "l2vni" else f"VLAN '{key[1]}'"
+
+    def where(key, iface) -> str:
+        return (f"'{iface.id}' (VLAN '{iface.attachment_ref()}')" if key[0] == "l2vni" else f"'{iface.id}'")
+
+    for key, members in anycast.items():
         first_i, first = members[0]
         for i, iface in members[1:]:
             path = f"layer3.interfaces[{i}]"
             for fld in ("ip", "ipv6"):
                 a, b = getattr(first, fld), getattr(iface, fld)
                 if a is not None and b is not None and a != b:
-                    errors.append(ValidationError(
-                        f"{path}.{fld}",
-                        f"VLAN '{vlan}' の anycast gateway で {fld} が {b} ですが、"
-                        f"layer3.interfaces[{first_i}] ('{first.id}') は {a} です。"
-                        f"anycast gateway は全ノードで同じアドレスにします (ADR-0011 D4)",
-                    ))
+                    if key[0] == "l2vni":
+                        message = (f"{unit(key, iface)} の anycast gateway で {fld} が食い違っています: "
+                                   f"{where(key, iface)} は {b}、{where(key, first)} は {a}。"
+                                   f"anycast gateway は VNI のすべての機器で同じアドレスにします (ADR-0026 D6)")
+                    else:
+                        message = (f"VLAN '{key[1]}' の anycast gateway で {fld} が {b} ですが、"
+                                   f"layer3.interfaces[{first_i}] ('{first.id}') は {a} です。"
+                                   f"anycast gateway は全ノードで同じアドレスにします (ADR-0011 D4)")
+                    errors.append(ValidationError(f"{path}.{fld}", message))
+        # anycast gateway と、それ以外のゲートウェイの冗長 (vrrp) が混ざっている
+        if key in vrrp:
+            i, other = vrrp[key][0]
+            errors.append(ValidationError(
+                f"layer3.interfaces[{i}].gateway_redundancy",
+                f"{unit(key, other)} のゲートウェイで、{where(key, first)} は anycast gateway、"
+                f"{where(key, other)} は {other.gateway_redundancy[0].mode} です。着いた機器によってホストのゲートウェイが"
+                f"変わります。方式をそろえてください (ADR-0026 D6)",
+                "warning",
+            ))
 
 
 # ---------------------------------------------------------------------------

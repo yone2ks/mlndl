@@ -1,6 +1,6 @@
 # ADR-0026: L2VNI に、機器によって番号の違う VLAN を載せる (`vlans`)
 
-- **Status**: Accepted (2026-11-15 に Pass C で確定。実装はまだ)
+- **Status**: Accepted (2026-11-15 に Pass C で確定し、同日に実装。スキーマ・derive・validator・エクスポーター・fixture・examples・docs。ndl-viz の対応はまだ)
 - **Date**: 2026-11-15
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、ユーザー (案 A で確定、「VLAN translation」の語を使わない、範囲外の 2 点)
 - **Pass**: C ([評価メモ](evaluations/adr0026/evaluation.md) を入力に再設計)
@@ -155,8 +155,9 @@ ADR-0011 D4 の「同じ VLAN の anycast gateway 群で `ip` / `ipv6` が一致
 - 拾う SVI は、今までどおり `gateway_redundancy` に `mode: anycast_gateway` を持つものだけ。MAC は比べない (ADR-0022)
 - error のメッセージは L2VNI の id を主語にし、食い違う 2 つの SVI の id・VLAN・値を添える。例:
   `L2VNI 'vni-10020' の anycast gateway で ip が食い違っています: 'leaf3-vlan-30' (VLAN 'vlan-30') は 10.20.0.2/24、'leaf1-vlan-20' (VLAN 'vlan-20') は 10.20.0.1/24。anycast gateway は VNI のすべての機器で同じアドレスにします (ADR-0026 D6)`
-- 同じ単位 (L2VNI か VLAN) の中に `anycast_gateway` の SVI と、`anycast_gateway` を持たない SVI (`vrrp` だけ、または冗長なし) が混ざっていたら **warning**。
-  機器によってホストのゲートウェイが変わる。移行の途中などで一時的に混ざることがあるので error にはしない
+- 同じ単位 (L2VNI か VLAN) の中に `anycast_gateway` の SVI と、ほかの方式 (`vrrp`) の SVI が混ざっていたら **warning**。
+  機器によってホストのゲートウェイが変わる。移行の途中などで一時的に混ざることがあるので error にはしない。
+  `gateway_redundancy` を持たない SVI (管理用のアドレスなど) は混在に数えない (実装時に変更。冗長なしまで数えると、ゲートウェイでない SVI で warning が出る)
 
 leaf1 の `vlan20` と leaf3 の `vlan30` は同じブロードキャストドメインのゲートウェイなので、同じアドレスでなければ、着いた機器によってホストのゲートウェイが変わる。
 VLAN 単位のままだとこの食い違いを見逃す (試し書き B5)。Symmetric IRB と Asymmetric IRB のどちらでも同じ要件になる。
@@ -216,7 +217,7 @@ VLAN 単位のままだとこの食い違いを見逃す (試し書き B5)。Sym
   ADR-0014 D3 と ADR-0011 D4 に改訂の注記 (下の文案)
 - 下流: ndl-viz (L2VNI から VLAN へ複数の線、`node_vlans`)
 
-**改訂の注記の文案** (実装のときに各 ADR に足す):
+**改訂の注記** (2026-11-15 の実装で各 ADR に足した):
 
 - ADR-0014 D3 の末尾: 「**改訂 ([ADR-0026](0026-l2vni-vlans.md), 2026-11-15)**: L2VNI の `vlan` (単数) は `vlans` (リスト) にした。機器によって番号の違う VLAN を 1 つの L2VNI に載せられる。旧 `vlan` は移動先を示す error。参加ノードを `vteps` から導くことは変えない。」
 - ADR-0011 D4 の anycast gateway の説明の末尾: 「**改訂 ([ADR-0026](0026-l2vni-vlans.md) D6, 2026-11-15)**: SVI の VLAN が L2VNI の `vlans` に入っていれば、`ip` / `ipv6` の一致はその L2VNI の SVI 全体で検査する。L2VNI に入らない VLAN は今までどおり VLAN ごと。」

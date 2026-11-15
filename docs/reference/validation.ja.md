@@ -55,13 +55,14 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 |---|---|
 | **VLAN のポート**: `{interface:}`・`{lag:}`・`{ethernet_segment:}` のどれか 1 つ。同じ VLAN に LAG とそのメンバー、ES とその脚を併記していない。同じ VLAN に同じポートを 2 回書いていない | error |
 | **VLAN のポート**: LAG のメンバーだけを書いている (`{lag:}` を促す)。ES の脚の一部だけを書いている (`{ethernet_segment:}` を促す) | warning |
-| **VLAN ID**: `vlan_id` が 1〜4094。同じ機器の上で、別の VLAN のエントリが同じ `vlan_id` を使っていない (別の機器での番号の再利用はよい。ES に載せた VLAN は脚のすべての機器で数える) | error |
+| **VLAN ID**: `vlan_id` が 1〜4094。同じ機器の上で、別の VLAN のエントリが同じ `vlan_id` を使っていない (別の機器での番号の再利用はよい。ES に載せた VLAN は脚のすべての機器で数える。VLAN を指す SVI の機器も数える。[ADR-0026](../decisions/0026-l2vni-vlans.md) D4) | error |
 | **bridge**: 同じポートを 2 つの bridge に、同じ bridge に 2 回、LAG とそのメンバー・ES とその脚を併記して書いていない | error |
 | **bridge**: ポートが 1 つ。ポートの対向も同じ bridge のポート (ルーターのポートを書いた疑い)。ポートが VLAN のポートにもある。LAG のメンバーだけ・ES の脚の一部だけを書いている | warning |
 | **VTEP**: 同じ L3 IF を 2 つの VTEP に・1 つの VTEP に 2 回書いていない。1 つの VTEP に同じ機器の L3 IF を 2 つ書いていない。`sources` が複数なら `address` がある。アドレスが決まり、VTEP の間で重複しない | error |
 | **VTEP**: `sources` が 1 つで、`address` がその L3 IF の `ip` と食い違う。ES の脚の機器の一部だけが VTEP を終端している (どの VTEP も終端していない機器がある) | warning |
 | **VNI**: L2VNI と L3VNI を通して `vni` が重複しない | error |
-| **VNI**: L2VNI に参加する機器 (VTEP から導く) に、その VLAN のポートがある | warning |
+| **L2VNI の VLAN**: 1 つの VLAN が 2 つ以上の L2VNI の `vlans` に入っていない。1 台の機器に同じ L2VNI の VLAN が 2 つ以上ない (機器はポートと SVI から導く)。Ethernet Segment の脚の機器で、同じ L2VNI の VLAN の番号が同じ。同じ L2VNI の VLAN を指す SVI の `vrf` が一致する ([ADR-0026](../decisions/0026-l2vni-vlans.md) D5) | error |
+| **L2VNI の VLAN**: 同じ L2VNI の `vlans` に同じ `vlan_id` の VLAN が 2 つある (1 つのエントリにまとめる)。L2VNI に参加する機器 (VTEP から導く) に、`vlans` のどの VLAN のポートも SVI もない (VNI を中継するだけの機器ならそのままでよい) ([ADR-0026](../decisions/0026-l2vni-vlans.md) D5) | warning |
 | **VRF と L3VNI**: VRF の `l3vni` が定義されている。VRF の `l3vni` と L3VNI の `vrf` が互いに一致する | error |
 | **サブ IF**: `vlan_id` が 1〜4094。同じ基盤の上でタグが重複しない。`attaches_to` が `{interface:}` か `{lag:}`。タグと `layer2.vlans` の照合は**しない** | error |
 
@@ -73,7 +74,8 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | **所属**: L3 IF の `node` が、`attaches_to` の参照先 (L1 IF・LAG・サブ IF) の機器 (群) に含まれる | error |
 | **重複**: 同じ `(node, name)` の L3 IF が 2 つない | error |
 | **SVI の紐づけ忘れ**: `name` が VLAN らしい名前 (`Vlan100` など) なのに `attaches_to` がない | warning |
-| **ゲートウェイ冗長**: IPv4 の VIP が IF のサブネットに入る (IF に `ip` がなければ warning)。同じ IF・同じ mode・同じアドレスファミリーで `group_id` が重複しない。IPv6 の VIP はリンクローカル。同じ VLAN の anycast gateway の群で `ip` / `ipv6` が一致する | error |
+| **ゲートウェイ冗長**: IPv4 の VIP が IF のサブネットに入る (IF に `ip` がなければ warning)。同じ IF・同じ mode・同じアドレスファミリーで `group_id` が重複しない。IPv6 の VIP はリンクローカル。anycast gateway の群で `ip` / `ipv6` が一致する。VLAN が L2VNI に入っていれば、その L2VNI の SVI 全体で比べ、入っていなければ VLAN ごとに比べる ([ADR-0026](../decisions/0026-l2vni-vlans.md) D6) | error |
+| **ゲートウェイ冗長**: 同じ L2VNI (L2VNI に入らない VLAN なら同じ VLAN) の SVI に、anycast gateway と、vrrp などほかの方式が混ざっている ([ADR-0026](../decisions/0026-l2vni-vlans.md) D6) | warning |
 | **トンネル**: `source` が同じ機器の L3 IF。`destination_interface` が別の機器の L3 IF。`destination_ip` と `destination_interface` のちょうど一方がある。外側のアドレスファミリーが `source` と宛先で一致する | error |
 | **トンネル**: 対向がトポロジー内なのに、逆向きのトンネルがない | info |
 | **Route Target / RD**: [書き方](types.ja.md#route-target-と-route-distinguisher) に従う | error |
@@ -125,3 +127,4 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | `attaches_to: {interface: <LAG / VLAN / サブ IF の id>}` | `{lag:}` / `{vlan:}` / `{subinterface:}` ([ADR-0001](../decisions/0001-attaches-to.md) D8) |
 | VLAN のポートの `node` | 書かない。参照先から導く ([ADR-0013](../decisions/0013-vlan-ports-on-lag.md)) |
 | L2VNI の `vtep_source` / `members` | `layer2.vteps` と L2VNI の `vteps` ([ADR-0014](../decisions/0014-vteps.md)) |
+| L2VNI の `vlan` (単数) | `vlans: [<VLAN の id>]` ([ADR-0026](../decisions/0026-l2vni-vlans.md)) |

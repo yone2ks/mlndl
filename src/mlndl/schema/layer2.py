@@ -141,10 +141,11 @@ class Vtep(BaseModel):
 
 
 class L2VxLAN(BaseModel):
-    """L2VNI — VLAN を VxLAN セグメントにマッピング
+    """L2VNI — 1 つのブロードキャストドメインを VxLAN セグメントにする
 
+    vlans: この VNI に載る VLAN (layer2.vlans[].id)。機器によって番号が違うときは、番号ごとの VLAN のエントリを並べる (ADR-0026 D1)
     vteps: この VNI が載る VTEP (layer2.vteps[].id)。ADR-0014
-    旧形式の vtep_source / members は移動先を示すエラーにする (ADR-0025 D1)
+    旧形式の vlan (単数) / vtep_source / members は移動先を示すエラーにする (ADR-0026 D2・ADR-0025 D1)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -152,7 +153,7 @@ class L2VxLAN(BaseModel):
     id: str
     type: Literal["l2vni"]
     vni: int
-    vlan: Annotated[str, Ref("layer2.vlans")]
+    vlans: Annotated[list[str], Ref("layer2.vlans")] = Field(min_length=1)
     vteps: Annotated[list[str], Ref("layer2.vteps")] = []
     description: str | None = None
 
@@ -160,6 +161,12 @@ class L2VxLAN(BaseModel):
     @classmethod
     def reject_old_forms(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            if "vlan" in data:
+                example = data["vlan"] if isinstance(data["vlan"], str) else "vlan-100"
+                raise ValueError(
+                    f"L2VNI の vlan はなくしました。vlans: [{example}] のようにリストで書いてください。"
+                    f"機器によって VLAN の番号が違うときは、番号ごとの VLAN のエントリを並べます (ADR-0026)"
+                )
             old = [k for k in ("vtep_source", "members") if k in data]
             if old:
                 raise ValueError(
@@ -168,6 +175,14 @@ class L2VxLAN(BaseModel):
                     f" (ADR-0014 D4・ADR-0025)"
                 )
         return data
+
+    @field_validator("vlans")
+    @classmethod
+    def vlans_unique(cls, v: list[str]) -> list[str]:
+        dup = sorted({x for x in v if v.count(x) > 1})
+        if dup:
+            raise ValueError(f"vlans に {', '.join(dup)} を 2 回書いています。1 回だけ書いてください (ADR-0026 D1)")
+        return v
 
     @model_validator(mode="after")
     def needs_vteps(self) -> "L2VxLAN":

@@ -103,6 +103,9 @@ layer3:
 > **改訂 ([ADR-0022](0022-diagram-granularity.md) D2, 2026-11-08)**: `anycast_mac` はなくした。MAC アドレスは構成図の粒度ではないためである。
 > 書くと error になり、anycast gateway の一致の検査は `ip` / `ipv6` だけになった。
 
+> **改訂 ([ADR-0026](0026-l2vni-vlans.md) D6, 2026-11-15)**: SVI の VLAN が L2VNI の `vlans` に入っていれば、`ip` / `ipv6` の一致はその L2VNI の SVI 全体で検査する。
+> L2VNI に入らない VLAN は今までどおり VLAN ごと。同じ単位に anycast gateway と vrrp などほかの方式が混ざっていれば warning。
+
 旧名 `fhrp` と `protocol` は廃止し、移動先を示す error にする。
 
 ### D5. `ip` と `ipv6`

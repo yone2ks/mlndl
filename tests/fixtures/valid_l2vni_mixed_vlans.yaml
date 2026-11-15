@@ -1,0 +1,178 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 D1 — 機器によって番号の違う VLAN を 1 つの L2VNI に載せる
+#
+#   leaf1/leaf2 (ES で server1、VLAN 20) + leaf4 (VLAN 20 単独) + leaf3 (VLAN 30)
+#   が同じ L2VNI 10020 に載る。L3VNI 10900 (vrf-tenant-a) を Symmetric IRB で添える。
+#   SVI は 4 機器すべてに anycast gateway で同じ IP 192.168.20.1/24 を持たせる。
+#   anycast gateway の一致は L2VNI 10020 の SVI 全体で比べる (D6)。
+#   元は Pass B の試し書き (docs/decisions/evaluations/adr0026/passb/B1_mixed_vlans_canonical.yaml)
+# ============================================================================
+
+meta:
+  name: adr0026-b1-mixed-vlans-canonical
+  description: ADR-0026 D1 の例 — leaf1/leaf2 (ES) VLAN 20・leaf3 VLAN 30・leaf4 VLAN 20 を L2VNI 10020 に載せる
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1,  implementation: vm,       role: spine,  device_type: cumulus_linux}
+    - {id: leaf1,   implementation: vm,       role: leaf,   device_type: cumulus_linux}
+    - {id: leaf2,   implementation: vm,       role: leaf,   device_type: cumulus_linux}
+    - {id: leaf3,   implementation: vm,       role: leaf,   device_type: cumulus_linux}
+    - {id: leaf4,   implementation: vm,       role: leaf,   device_type: cumulus_linux}
+    - {id: server1, implementation: physical, role: server}
+    - {id: server3, implementation: physical, role: server}
+    - {id: server4, implementation: physical, role: server}
+
+  interfaces:
+    - {id: spine1-swp1,   node: spine1,  name: swp1}   # → leaf1
+    - {id: spine1-swp2,   node: spine1,  name: swp2}   # → leaf2
+    - {id: spine1-swp3,   node: spine1,  name: swp3}   # → leaf3
+    - {id: spine1-swp4,   node: spine1,  name: swp4}   # → leaf4
+    - {id: leaf1-swp51,   node: leaf1,   name: swp51}
+    - {id: leaf2-swp51,   node: leaf2,   name: swp51}
+    - {id: leaf3-swp51,   node: leaf3,   name: swp51}
+    - {id: leaf4-swp51,   node: leaf4,   name: swp51}
+    - {id: leaf1-swp49,   node: leaf1,   name: swp49}  # peer-link
+    - {id: leaf2-swp49,   node: leaf2,   name: swp49}  # peer-link
+    - {id: leaf1-swp1,    node: leaf1,   name: swp1}   # ES → server1
+    - {id: leaf2-swp1,    node: leaf2,   name: swp1}   # ES → server1
+    - {id: leaf3-swp1,    node: leaf3,   name: swp1}   # access → server3
+    - {id: leaf4-swp1,    node: leaf4,   name: swp1}   # access → server4
+    - {id: server1-eth0,  node: server1, name: eth0}
+    - {id: server1-eth1,  node: server1, name: eth1}
+    - {id: server3-eth0,  node: server3, name: eth0}
+    - {id: server4-eth0,  node: server4, name: eth0}
+
+  links:
+    - {id: link-spine1-leaf1,  endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf2,  endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf3,  endpoints: [spine1-swp3, leaf3-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf4,  endpoints: [spine1-swp4, leaf4-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-mlag-peer,     endpoints: [leaf1-swp49, leaf2-swp49], link_speed: 10G, link_role: peer-link}
+    - {id: link-leaf1-server1, endpoints: [leaf1-swp1,  server1-eth0], link_speed: 10G, link_role: access}
+    - {id: link-leaf2-server1, endpoints: [leaf2-swp1,  server1-eth1], link_speed: 10G, link_role: access}
+    - {id: link-leaf3-server3, endpoints: [leaf3-swp1,  server3-eth0], link_speed: 10G, link_role: access}
+    - {id: link-leaf4-server4, endpoints: [leaf4-swp1,  server4-eth0], link_speed: 10G, link_role: access}
+
+  lag:
+    # ピアリンクは機器ごとの普通の LAG (ADR-0023 D6)
+    - {id: lag-leaf1-peer,    node: leaf1, name: peerlink, members: [leaf1-swp49]}
+    - {id: lag-leaf2-peer,    node: leaf2, name: peerlink, members: [leaf2-swp49]}
+    # ES の脚 (機器 1 台ずつ)
+    - {id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1], lacp: {mode: active}}
+    - {id: lag-leaf2-server1, node: leaf2, name: bond1, members: [leaf2-swp1], lacp: {mode: active}}
+
+  ethernet_segments:
+    - {id: es-server1, members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]}
+
+layer2:
+  vlans:
+    # VLAN 20 と VLAN 30 は番号が違うので別エントリ (D3)。両方が同じ L2VNI 10020 に載る (D1)
+    - id: vlan-20
+      vlan_id: 20
+      name: tenant-a-20
+      trunk_ports:
+        - {ethernet_segment: es-server1}    # 1 行で leaf1 / leaf2
+        - {interface: leaf4-swp1}
+    - id: vlan-30
+      vlan_id: 30
+      name: tenant-a-30
+      access_ports:
+        - {interface: leaf3-swp1}
+
+  vteps:
+    - {id: vtep-leaf1-leaf2, sources: [leaf1-lo, leaf2-lo], address: 10.0.100.12/32}
+    - {id: vtep-leaf3,       sources: [leaf3-lo]}
+    - {id: vtep-leaf4,       sources: [leaf4-lo]}
+
+  vxlan:
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20, vlan-30]              # ★ ADR-0026 D1。機器によって番号が違う VLAN を載せる
+      vteps: [vtep-leaf1-leaf2, vtep-leaf3, vtep-leaf4]
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    # Loopbacks (VTEP の sources にもなる)
+    - {id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.1/32}
+    - {id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.12/32}
+    - {id: leaf3-lo,  node: leaf3,  name: lo, ip: 10.0.0.13/32}
+    - {id: leaf4-lo,  node: leaf4,  name: lo, ip: 10.0.0.14/32}
+
+    # Spine ↔ Leaf P2P /31 (unnumbered でもよいが、ここでは番号付きで書く)
+    - {id: spine1-swp1-l3, node: spine1, name: swp1, ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-swp1}}
+    - {id: spine1-swp2-l3, node: spine1, name: swp2, ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-swp2}}
+    - {id: spine1-swp3-l3, node: spine1, name: swp3, ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: spine1-swp3}}
+    - {id: spine1-swp4-l3, node: spine1, name: swp4, ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: {interface: spine1-swp4}}
+    - {id: leaf1-swp51-l3, node: leaf1,  name: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51}}
+    - {id: leaf2-swp51-l3, node: leaf2,  name: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp51}}
+    - {id: leaf3-swp51-l3, node: leaf3,  name: swp51, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf3-swp51}}
+    - {id: leaf4-swp51-l3, node: leaf4,  name: swp51, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf4-swp51}}
+
+    # anycast gateway の SVI — 4 機器とも同じ IP。D6 で L2VNI 単位にまとめて比べる
+    - id: leaf1-vlan20
+      node: leaf1
+      name: Vlan20
+      attaches_to: {vlan: vlan-20}
+      ip: 192.168.20.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy: [{mode: anycast_gateway}]
+    - id: leaf2-vlan20
+      node: leaf2
+      name: Vlan20
+      attaches_to: {vlan: vlan-20}
+      ip: 192.168.20.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy: [{mode: anycast_gateway}]
+    - id: leaf3-vlan30
+      node: leaf3
+      name: Vlan30
+      attaches_to: {vlan: vlan-30}
+      ip: 192.168.20.1/24                     # ★ 番号は 30 だが、同じブロードキャストドメインなのでアドレスはそろえる (D6)
+      vrf: vrf-tenant-a
+      gateway_redundancy: [{mode: anycast_gateway}]
+    - id: leaf4-vlan20
+      node: leaf4
+      name: Vlan20
+      attaches_to: {vlan: vlan-20}
+      ip: 192.168.20.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy: [{mode: anycast_gateway}]
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: spine1, local_as: 65000}
+        - {node: leaf1,  local_as: 65001}
+        - {node: leaf2,  local_as: 65002}
+        - {node: leaf3,  local_as: 65003}
+        - {node: leaf4,  local_as: 65004}
+
+  routing_neighbors:
+    - {id: bgp-peer-spine1-leaf1, type: bgp, from: {node: spine1, update_source: spine1-swp1-l3}, to: {node: leaf1, update_source: leaf1-swp51-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf2, type: bgp, from: {node: spine1, update_source: spine1-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp51-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf3, type: bgp, from: {node: spine1, update_source: spine1-swp3-l3}, to: {node: leaf3, update_source: leaf3-swp51-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf4, type: bgp, from: {node: spine1, update_source: spine1-swp4-l3}, to: {node: leaf4, update_source: leaf4-swp51-l3}, address_families: [ipv4_unicast]}
+    # Overlay (loopback どうしの eBGP multihop)
+    - {id: bgp-peer-spine1-leaf1-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf2-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2, update_source: leaf2-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf3-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf3, update_source: leaf3-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf4-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf4, update_source: leaf4-lo}, address_families: [l2vpn_evpn]}
