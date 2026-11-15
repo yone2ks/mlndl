@@ -1,0 +1,59 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass B3e — warning: 参加ノードに L2VNI の vlans のどの VLAN もない
+#
+#   leaf3 は VTEP vtep-leaf3 を終端し、L2VNI 10020 の vteps に入っているので
+#   L2VNI の参加機器として数えられる。けれど leaf3 には VLAN 20 のポートも、
+#   VLAN 20 の SVI も、VLAN 30 のポートも SVI もない (D4 の 1・2 のどちらでも
+#   数えられない)。これは「VNI に参加する機器のうち、どの VLAN かが決まらない」
+#   状態で、ndl-viz は図から落とす (ADR-0026 D4)。
+#
+#   設定の抜け (VNI に入れたがどの VLAN に載せるかを書き忘れた) として検出する。
+#
+# 期待する検査結果 (ドラフトどおり案 A を実装したら)
+#   - warning (ADR-0026 D5): 「VNI に参加するノード 'leaf3' に、vlans のどの
+#     VLAN もない (D4 の 1・2 で数える)」
+#
+# 今のコードで動く写し (`vlans:` → `vlan: vlan-20`)
+#   - 今も「VNI 参加ノード leaf3 に VLAN 'vlan-20' のポートがない」の warning が
+#     出る。ADR-0026 の warning はこの warning を広げたもの (D4 の 2 を足した)。
+#     文言と path が同じでよいか、少し変えるかはドラフトに書かれていない (feedback)。
+# ============================================================================
+
+meta:
+  name: adr0026-b3e-warning-participant-no-vlan
+
+layer1:
+  nodes:
+    - {id: leaf1}
+    - {id: leaf2}
+    - {id: leaf3}
+  interfaces:
+    - {id: leaf1-swp1, node: leaf1, name: swp1}
+    - {id: leaf2-swp1, node: leaf2, name: swp1}
+    # leaf3 の L1 IF はない — どこにも VLAN を載せていない
+
+layer2:
+  vlans:
+    - id: vlan-20
+      vlan_id: 20
+      trunk_ports:
+        - {interface: leaf1-swp1}
+        - {interface: leaf2-swp1}
+  vteps:
+    - {id: vtep-leaf1, sources: [leaf1-lo]}
+    - {id: vtep-leaf2, sources: [leaf2-lo]}
+    - {id: vtep-leaf3, sources: [leaf3-lo]}
+  vxlan:
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20]
+      vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3]   # ★ leaf3 も参加するが VLAN が決まらない
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32}
+    - {id: leaf3-lo, node: leaf3, name: lo, ip: 10.0.0.13/32}
