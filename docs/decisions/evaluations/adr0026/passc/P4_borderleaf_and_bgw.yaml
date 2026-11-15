@@ -1,0 +1,176 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass C P4 — border leaf (SVI だけ) + Multi-Site BGW (何もなし)
+#
+# 構成:
+#   - leaf1, leaf2: VLAN 20 のアクセスポートを持つ普通の leaf
+#   - leaf3       : VLAN 30 のアクセスポート (番号が違う)
+#   - border1     : WAN 向けの L3 アップリンクしかない。VLAN のポートは持たない。
+#                   ただし SVI (Vlan40、attaches_to: {vlan: vlan-40}) を持つ
+#                   centralized gateway (集中ゲートウェイ) の構成
+#   - bgw1        : EVPN Multi-Site の Border Gateway。
+#                   他ファブリックと overlay を張り直すだけで、local に VLAN の
+#                   ポートも SVI も持たない。VTEP のアドレスだけが配られる
+#
+# 選んだ案: 案 A (ADR-0026 draft 改訂 1 と同じ向き)
+#
+# 期待する検査結果 (D4 の 2 — SVI の node で数える、+ D5 の warning):
+#   - valid
+#   - border1 は VLAN のポートはないが、SVI `border1-vlan40` が
+#     `attaches_to: {vlan: vlan-40}` で `vlan-40` を指しており、
+#     `vlan-40` は L2VNI 10020 の `vlans` に入っているので参加機器として数えられる
+#     → D5 の warning (参加機器に VLAN がない) は出ない
+#   - bgw1 は VTEP `vtep-bgw1` が L2VNI の `vteps` にあるので参加機器だが、
+#     ポートも SVI も持たない → D5 の warning:
+#       "L2VNI 'vni-10020' の参加機器 'bgw1' には、どの VLAN のポートも SVI もありません"
+#     これが Pass B 評価の「残る論点 3」(正しい構成で warning が出ることを受け入れるか)
+#
+# 試し書きをしながら考えた導出の仕方 (feedback で書く):
+#   - 「L2VNI の参加機器」は以下 3 つの集合の和? 積? どう決める?
+#       (i)  L2VNI.vteps → VTEP.sources → L3 IF.node (overlay の端点)
+#       (ii) L2VNI.vlans に入る VLAN の trunk/access_ports の node
+#       (iii) L2VNI.vlans に入る VLAN を SVI で指すノード
+#   - 改訂 1 は (i) を「参加機器」の定義とし、(ii) と (iii) を VLAN の番号の
+#     導出に使う。P4 の bgw1 が warning になるのは (i) に入るが (ii) にも (iii) にも
+#     入らないため。この分け方は、D4 の 2 を L2VNI の導出だけに限る線と一貫する。
+#   - ただしアダプターや読者には分かりにくい。ADR の本文に「参加機器 = (i)、
+#     VLAN の番号は (ii) と (iii) で引く」と明記したい。
+#
+# BGW の warning を抑える案 (Pass C で決める):
+#   (a) 受け入れる (改訂 1。構成図として「参加しているがローカル VLAN は持たない」ことは
+#       事実そのもの)
+#   (b) `labels: {gateway: multisite-bgw}` のような注釈で抑制 (ユーザー側の負担)
+#   (c) ノードの role で判定 (role: border-gateway を normative token に? ADR-0003 に
+#       反する方向なので採らない)
+#   → example-author としては (a) を推す (Pass B での network-tech と一致)。
+# ============================================================================
+
+meta:
+  name: adr0026-p4-borderleaf-and-bgw
+  description: SVI だけの border leaf + ポートも SVI もない Multi-Site BGW。参加機器の導き方 (論点 3) を確認
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1,  implementation: vm, role: spine,         device_type: cumulus_linux}
+    - {id: leaf1,   implementation: vm, role: leaf,          device_type: cumulus_linux}
+    - {id: leaf2,   implementation: vm, role: leaf,          device_type: cumulus_linux}
+    - {id: leaf3,   implementation: vm, role: leaf,          device_type: cumulus_linux}
+    - {id: border1, implementation: vm, role: border,        device_type: cumulus_linux}
+    - {id: bgw1,    implementation: vm, role: border,        device_type: nxos}        # Multi-Site BGW
+
+  interfaces:
+    - {id: spine1-swp1,  node: spine1,  name: swp1}
+    - {id: spine1-swp2,  node: spine1,  name: swp2}
+    - {id: spine1-swp3,  node: spine1,  name: swp3}
+    - {id: spine1-swp4,  node: spine1,  name: swp4}
+    - {id: spine1-swp5,  node: spine1,  name: swp5}
+    - {id: leaf1-swp51,  node: leaf1,   name: swp51}
+    - {id: leaf2-swp51,  node: leaf2,   name: swp51}
+    - {id: leaf3-swp51,  node: leaf3,   name: swp51}
+    - {id: border1-swp51, node: border1, name: swp51}
+    - {id: bgw1-eth1-1,  node: bgw1,    name: Ethernet1/1}
+    - {id: leaf1-swp1,   node: leaf1,   name: swp1}
+    - {id: leaf2-swp1,   node: leaf2,   name: swp1}
+    - {id: leaf3-swp1,   node: leaf3,   name: swp1}
+
+  links:
+    - {id: link-spine1-leaf1,   endpoints: [spine1-swp1, leaf1-swp51],   link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf2,   endpoints: [spine1-swp2, leaf2-swp51],   link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf3,   endpoints: [spine1-swp3, leaf3-swp51],   link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-border1, endpoints: [spine1-swp4, border1-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-bgw1,    endpoints: [spine1-swp5, bgw1-eth1-1],   link_speed: 10G, link_role: underlay}
+
+layer2:
+  vlans:
+    - id: vlan-20
+      vlan_id: 20
+      access_ports:
+        - {interface: leaf1-swp1}
+        - {interface: leaf2-swp1}
+    - id: vlan-30
+      vlan_id: 30
+      access_ports:
+        - {interface: leaf3-swp1}
+    - id: vlan-40
+      vlan_id: 40
+      name: border-svi-only
+      # trunk_ports / access_ports は空 — border1 は SVI でしか VLAN に触れない
+
+  vteps:
+    - {id: vtep-leaf1,   sources: [leaf1-lo]}
+    - {id: vtep-leaf2,   sources: [leaf2-lo]}
+    - {id: vtep-leaf3,   sources: [leaf3-lo]}
+    - {id: vtep-border1, sources: [border1-lo]}
+    - {id: vtep-bgw1,    sources: [bgw1-lo]}        # BGW のアドレスも L2VNI に載せる
+
+  vxlan:
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20, vlan-30, vlan-40]
+      # ★ vtep-bgw1 を vteps に入れることで bgw1 が「参加機器」になる。
+      #    ただし bgw1 はローカル VLAN のポートも SVI も持たないので D5 warning の対象
+      vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3, vtep-border1, vtep-bgw1]
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    - {id: spine1-lo,  node: spine1,  name: lo, ip: 10.0.0.1/32}
+    - {id: leaf1-lo,   node: leaf1,   name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo,   node: leaf2,   name: lo, ip: 10.0.0.12/32}
+    - {id: leaf3-lo,   node: leaf3,   name: lo, ip: 10.0.0.13/32}
+    - {id: border1-lo, node: border1, name: lo, ip: 10.0.0.21/32}
+    - {id: bgw1-lo,    node: bgw1,    name: loopback0, ip: 10.0.0.31/32}
+
+    - {id: spine1-swp1-l3,   node: spine1,  name: swp1,  ip: 10.1.0.0/31,  vrf: vrf-default, attaches_to: {interface: spine1-swp1}}
+    - {id: spine1-swp2-l3,   node: spine1,  name: swp2,  ip: 10.1.0.2/31,  vrf: vrf-default, attaches_to: {interface: spine1-swp2}}
+    - {id: spine1-swp3-l3,   node: spine1,  name: swp3,  ip: 10.1.0.4/31,  vrf: vrf-default, attaches_to: {interface: spine1-swp3}}
+    - {id: spine1-swp4-l3,   node: spine1,  name: swp4,  ip: 10.1.0.6/31,  vrf: vrf-default, attaches_to: {interface: spine1-swp4}}
+    - {id: spine1-swp5-l3,   node: spine1,  name: swp5,  ip: 10.1.0.8/31,  vrf: vrf-default, attaches_to: {interface: spine1-swp5}}
+    - {id: leaf1-swp51-l3,   node: leaf1,   name: swp51, ip: 10.1.0.1/31,  vrf: vrf-default, attaches_to: {interface: leaf1-swp51}}
+    - {id: leaf2-swp51-l3,   node: leaf2,   name: swp51, ip: 10.1.0.3/31,  vrf: vrf-default, attaches_to: {interface: leaf2-swp51}}
+    - {id: leaf3-swp51-l3,   node: leaf3,   name: swp51, ip: 10.1.0.5/31,  vrf: vrf-default, attaches_to: {interface: leaf3-swp51}}
+    - {id: border1-swp51-l3, node: border1, name: swp51, ip: 10.1.0.7/31,  vrf: vrf-default, attaches_to: {interface: border1-swp51}}
+    - {id: bgw1-eth1-1-l3,   node: bgw1,    name: Ethernet1/1, ip: 10.1.0.9/31, vrf: vrf-default, attaches_to: {interface: bgw1-eth1-1}}
+
+    # anycast SVI。border1 は centralized gateway として参加。bgw1 には SVI がない
+    - {id: leaf1-vlan20,   node: leaf1,   name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan20,   node: leaf2,   name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf3-vlan30,   node: leaf3,   name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: border1-vlan40, node: border1, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: spine1,  local_as: 65000}
+        - {node: leaf1,   local_as: 65001}
+        - {node: leaf2,   local_as: 65002}
+        - {node: leaf3,   local_as: 65003}
+        - {node: border1, local_as: 65021}
+        - {node: bgw1,    local_as: 65031}
+
+  routing_neighbors:
+    - {id: bgp-peer-spine1-leaf1,   type: bgp, from: {node: spine1, update_source: spine1-swp1-l3}, to: {node: leaf1,   update_source: leaf1-swp51-l3},   address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf2,   type: bgp, from: {node: spine1, update_source: spine1-swp2-l3}, to: {node: leaf2,   update_source: leaf2-swp51-l3},   address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf3,   type: bgp, from: {node: spine1, update_source: spine1-swp3-l3}, to: {node: leaf3,   update_source: leaf3-swp51-l3},   address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-border1, type: bgp, from: {node: spine1, update_source: spine1-swp4-l3}, to: {node: border1, update_source: border1-swp51-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-bgw1,    type: bgp, from: {node: spine1, update_source: spine1-swp5-l3}, to: {node: bgw1,    update_source: bgw1-eth1-1-l3},   address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf1-overlay,   type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1,   update_source: leaf1-lo},   address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf2-overlay,   type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2,   update_source: leaf2-lo},   address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf3-overlay,   type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf3,   update_source: leaf3-lo},   address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-border1-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: border1, update_source: border1-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-bgw1-overlay,    type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: bgw1,    update_source: bgw1-lo},    address_families: [l2vpn_evpn]}

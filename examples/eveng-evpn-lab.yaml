@@ -149,14 +149,14 @@ layer2:
     - id: vni-10010
       type: l2vni
       vni: 10010
-      vlan: vlan-10
+      vlans: [vlan-10]
       vteps: [vtep-leaf1, vtep-leaf2]
       description: ingress-replication protocol bgp / suppress-arp. RT 65000:10010 (manual)
 
     - id: vni-10020
       type: l2vni
       vni: 10020
-      vlan: vlan-20
+      vlans: [vlan-20]
       vteps: [vtep-leaf1, vtep-leaf2]
       description: ingress-replication protocol bgp / suppress-arp. RT 65000:10020 (manual)
 

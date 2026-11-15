@@ -345,7 +345,7 @@ layer2:
     - id: vni-10100             # ADR-0002: vni-<N> 形式
       type: l2vni                # l2vni / l3vni を明示
       vni: 10100
-      vlan: vlan-100
+      vlans: [vlan-100]          # この VNI に載る VLAN。機器によって番号が違えば番号ごとの VLAN を並べる（ADR-0026）
       vteps: [vtep-leaf1-leaf2, vtep-border1]   # 参加ノードは VTEP から導出（旧 vtep_source / members は移動先を示す error。ADR-0025）
     - id: vni-10900
       type: l3vni                # Symmetric IRB 用 L3VNI（必須）
@@ -481,7 +481,7 @@ mlndl/
 │       │   ├── refs.py         # Ref（参照先の宣言。ADR-0015）
 │       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
 │       ├── index.py            # IdIndex（id → エンティティの索引）
-│       ├── derive.py           # 参照をたどって求める関係（Ethernet Segment の脚 ADR-0023、VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
+│       ├── derive.py           # 参照をたどって求める関係（L2VNI の機器ごとの VLAN ADR-0026、Ethernet Segment の脚 ADR-0023、VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限
 │       ├── validator.py        # 整合性チェック
 │       └── exporter/
@@ -528,15 +528,15 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | サブ IF | `vlan_id` が 1..4094 か。同じ基盤の上でタグが重複していないか。`attaches_to` が `{interface:}` か `{lag:}` か。タグと `layer2.vlans` の照合は**しない**（ADR-0012 D3） | error |
 | L3 IF 重複 | 同一 `(node, name)` の L3Interface が重複していないか | error |
 | IP アドレス | `ip` は IPv4、`ipv6` は IPv6 の CIDR（型で検証。`ip` に IPv6 を書くと移動先を示すエラー） | error |
-| ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か（IF に `ip` がなければ warning）。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798）。同じ VLAN の anycast gateway 群で `ip` / `ipv6` が一致するか | error |
+| ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か（IF に `ip` がなければ warning）。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798）。anycast gateway 群で `ip` / `ipv6` が一致するか（VLAN が L2VNI に入っていればその L2VNI の SVI 全体、入っていなければ VLAN ごと。ADR-0026 D6）。同じ単位に anycast gateway と vrrp などが混在（warning） | error / warning |
 | トンネル | `source` が同じ node の L3 IF か。`destination_interface` が別 node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。外側のアドレスファミリーが source と destination で一致するか。VRF 参照。対向がトポロジー内なのに逆向きのトンネルがなければ info | error / info |
 | 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
-| 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members` に移動先を示すエラー（スキーマ）。`{interface: <LAG / VLAN / サブ IF>}` など、その場所に書ける別のキーの id を指したら正しいキーを示すエラー（validator）。読み替えはしない（ADR-0025 D1） | error |
-| VNI の参加ノード | L2VNI に参加するノード（VTEP から導出）に、その VLAN のポートがあるか | warning |
+| 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members`・`vlan`（単数。→ `vlans`、ADR-0026）に移動先を示すエラー（スキーマ）。`{interface: <LAG / VLAN / サブ IF>}` など、その場所に書ける別のキーの id を指したら正しいキーを示すエラー（validator）。読み替えはしない（ADR-0025 D1） | error |
+| L2VNI の VLAN | `vlans` は 1 つ以上・同じ id を 2 回書かない（型）。1 つの VLAN が 2 つの L2VNI に、1 台の機器に同じ L2VNI の VLAN が 2 つ（機器はポート ∪ SVI）、ES の脚の機器で同じ L2VNI の VLAN の番号が違う、同じ L2VNI の SVI の `vrf` が食い違う（error）。同じ L2VNI に同じ `vlan_id` の VLAN が 2 つ、参加ノード（VTEP から導出）に `vlans` のどの VLAN のポートも SVI もない（warning）。重ねて出さない規則あり（ADR-0026 D5） | error / warning |
 | VLAN の端点 | ポート → L1 リンクの対向 → 対向の L3 IF を id でたどって求めた端点（1 ホップ。`derive.vlan_endpoints`）の IP が、その VLAN の SVI のサブネットに入っているか。SVI がなければ検査しない（ADR-0013 D7） | info |
 | Ethernet Segment | `members` が 2 つ以上・`{lag:}` か `{interface:}`（型）。同じ機器の脚が 2 つ、1 つの脚（と脚の LAG のメンバー）が 2 つの ES に、LAG とそのメンバーの併記、脚どうしが L1 リンクでつながる（ピアリンクの疑い。`link_role` は見ない）（error）。脚に LAG のメンバーの IF（warning）（ADR-0023 D7） | error / warning |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
-| VLAN ID | `vlan_id` が 1..4094 か（スキーマ）。同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。ES に載せた VLAN は脚の全機器で数える） | error |
+| VLAN ID | `vlan_id` が 1..4094 か（スキーマ）。同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。ES に載せた VLAN は脚の全機器で数える。VLAN を指す SVI の機器も数える。ADR-0026 D4） | error |
 | 推奨プレフィックス | `link-` / `lag-` / `es-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
 | SVI の紐づけ忘れ | `name` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
@@ -584,6 +584,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0023](docs/decisions/0023-per-device-lag-and-ethernet-segments.md) | 機器ごとの LAG と `ethernet_segments` | **C**（2026-11-08 実装） | `layer1.lag` は機器 1 台（`type` なし、`name` を追加）。MLAG / vPC / MC-LAG / ESI-LAG は `layer1.ethernet_segments`（`members` は `{lag:}` / `{interface:}`、`redundancy_mode` は任意で既定値なし）。ピアリンクは普通の LAG で構文に書かない。`{ethernet_segment:}` は VLAN / bridge のポートだけが受け、L3 IF・サブ IF は機器ごとの `{lag:}`。旧 `type: mlag` 等は移動先を示す error。エクスポーターは `lag_type` をなくし `ethernet_segment` を出す |
 | [ADR-0024](docs/decisions/0024-remove-node-overrides.md) | 機器の `overrides` をなくす | **C**（2026-11-09 実装） | `layer1.nodes[].overrides`（`dict[str, Any]`）をなくし、書いたら理由と移動先を示す error。下流のツールの値（CPU / RAM / イメージ等）は下流のツールの設定で機器の id を引いて持つ。ツール向けの汎用の欄は 1.x では足さない（補足は `description`、分類は `labels`、それ以外は ADR で専用のフィールド）。要るなら名前空間付きの `map[str, str]` を検討し `dict[str, Any]` には戻さない |
 | [ADR-0025](docs/decisions/0025-end-grace-for-old-forms.md) | 1.0 の前に旧形式の猶予 (warning) をやめる | **C**（2026-11-09 実装） | 「1.x の間は読み替えて warning」とした旧形式（L3 IF の `interface`、短縮形 `interface: vlan-N`、`{interface: <LAG 等>}`、VLAN のポートの `node`、`vtep_source` / `members`）を移動先を示す error に。OSPF / IS-IS の通り道の食い違いを error に繰り上げ。エクスポーターの旧キー（L3 IF の `interface` / `kind` / `vlan` / `subinterface` + `vlan_id` / `lag`、推定の `lo_ip` / `lo_ipv6`）を外す。ADR-0014・0015 を Accepted に。1.0 の後も「読み替えて warning」は既定にしない |
+| [ADR-0026](docs/decisions/0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる | **C**（2026-11-15 実装） | L2VNI の `vlan`（単数）を `vlans`（リスト）に。旧 `vlan` は移動先を示す error。L2VNI に入る VLAN ではブロードキャストドメインは L2VNI、VLAN のエントリは「番号とポート」。参照は L2VNI → VLAN の片方向（案 C の VLAN → L2VNI は却下）。参加機器は VTEP から、その機器の VLAN はポート ∪ SVI から導く（`derive.vlan_port_nodes` / `vlan_svi_nodes` / `l2vni_node_vlans`）。端点・`vlan_member` エッジはポートだけ。1 台で 2 VLAN・1 VLAN が 2 VNI・ES の脚で番号違い・SVI の VRF 違いは error。anycast の一致は VNI 単位。エクスポーターは L2VNI に `vlans` と `node_vlans: [{node, vlan}]` |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag`。ADR-0023 で機器 1 台の LAG と `ethernet_segments` に分け直した |
 
 ---

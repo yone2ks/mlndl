@@ -68,8 +68,13 @@ MLAG か EVPN multihoming かは出さない (構文に方式名がない。ビ�
 
 ### `type: l2vni` / `type: l3vni`
 
-`id` / `label` / `vni`。L2VNI は `vlan` と `vteps` (書かれたもの)、L3VNI は `vrf` と `vteps`
+`id` / `label` / `vni`。L2VNI は `vlans` と `vteps` (書かれたもの) と `node_vlans` (導いたもの)、L3VNI は `vrf` と `vteps`
 (VRF に L3 IF を持つノードが終端する VTEP から導いたもの。ADR-0014 D3)。
+
+- `vlans`: この VNI に載る VLAN の id (YAML の `vlans` のまま。ADR-0026)。機器ノードの `vlans` (その機器にポートがある VLAN) とは意味が違う
+- `node_vlans`: `[{node, vlan}]`。参加機器 (VTEP から導く) と、その機器の VLAN (VLAN のポートか、VLAN を指す SVI の機器から導く。ADR-0026 D4)。
+  VLAN が決まらない参加機器 (VNI を中継するだけの機器など) は出さない。導いた値なので YAML には書けない。
+  ビューワは機器ごとの VLAN の番号をこれで示し、自分では導かない
 
 ## `description`
 

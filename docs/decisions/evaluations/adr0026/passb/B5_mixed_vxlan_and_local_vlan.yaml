@@ -1,0 +1,121 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass B5 — VXLAN を使わない VLAN と L2VNI の VLAN が混在する構成
+#
+#   同じトポロジーの中に 2 種類の VLAN を置き、D6 の anycast gateway の検査が
+#   それぞれどう動くかを見る。
+#
+#     1) L2VNI 10020 に載る VLAN 群 (vlan-20 + vlan-30、機器ごとに番号が違う)
+#        - leaf1-vlan20、leaf2-vlan20、leaf3-vlan30 の SVI がすべて anycast
+#        - ip は leaf1 と leaf2 が 192.168.20.1/24、leaf3 が 192.168.20.2/24
+#          ★ 同じ L2VNI の中で食い違っている ★
+#        - D6 では L2VNI 単位で比べるので、error として検出されるべき
+#        - 今のコード (per-VLAN) では leaf3-vlan30 は 1 本しかないので検出されない
+#          (vlan-20 の中では leaf1 と leaf2 が同じで OK)。→ D6 で新たに拾う食い違い
+#
+#     2) VXLAN に載らない VLAN (vlan-50、純粋にローカル)
+#        - leaf1-vlan50、leaf2-vlan50 が anycast で、両方 192.168.50.1/24
+#        - 今もドラフトも VLAN 単位で比べる (D6 の 2 つ目) → OK
+#
+# 期待する検査結果 (ドラフトどおり案 A を実装したら)
+#   - error 1 本: 「L2VNI 'vni-10020' の anycast gateway で ip が 192.168.20.2/24
+#     ですが、... は 192.168.20.1/24 です」(D6)
+#   - vlan-50 側は valid
+#
+# 今のコードで動く写し (`vlans:` → `vlan: vlan-20`)
+#   - 現行の _check_anycast_consistency は per-VLAN。
+#     vlan-20 の中では leaf1 (192.168.20.1) と leaf2 (192.168.20.1) で一致 → OK
+#     vlan-30 の中では leaf3 (192.168.20.2) しかいない → OK
+#     結果: 食い違いは今は検出されない。ADR-0026 D6 が解決したい状況そのもの。
+#
+# 確かめたい迷いどころ (feedback)
+#   - D6 のエラー文言に、どの VLAN のどの SVI が食い違っているかをどこまで出すか。
+#     ドラフトは「VNI 単位で比べる」だけで、エラーの出し方は書かれていない。
+#   - ipv6 の例 (リンクローカルとグローバル) の検査がどうなるか。ドラフトに例がない。
+# ============================================================================
+
+meta:
+  name: adr0026-b5-mixed-vxlan-and-local
+  description: L2VNI の VLAN (番号違いあり) と VXLAN を使わない VLAN が混在する構成で、anycast gateway 検査の単位 (D6) を見る
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, implementation: vm, role: spine, device_type: cumulus_linux}
+    - {id: leaf1,  implementation: vm, role: leaf,  device_type: cumulus_linux}
+    - {id: leaf2,  implementation: vm, role: leaf,  device_type: cumulus_linux}
+    - {id: leaf3,  implementation: vm, role: leaf,  device_type: cumulus_linux}
+
+  interfaces:
+    - {id: spine1-swp1, node: spine1, name: swp1}
+    - {id: spine1-swp2, node: spine1, name: swp2}
+    - {id: spine1-swp3, node: spine1, name: swp3}
+    - {id: leaf1-swp51, node: leaf1,  name: swp51}
+    - {id: leaf2-swp51, node: leaf2,  name: swp51}
+    - {id: leaf3-swp51, node: leaf3,  name: swp51}
+    - {id: leaf1-swp1,  node: leaf1,  name: swp1}
+    - {id: leaf2-swp1,  node: leaf2,  name: swp1}
+    - {id: leaf3-swp1,  node: leaf3,  name: swp1}
+    - {id: leaf1-swp2,  node: leaf1,  name: swp2}
+    - {id: leaf2-swp2,  node: leaf2,  name: swp2}
+
+  links:
+    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf3, endpoints: [spine1-swp3, leaf3-swp51], link_speed: 10G, link_role: underlay}
+
+layer2:
+  vlans:
+    - id: vlan-20                                  # ★ L2VNI 10020 に載る
+      vlan_id: 20
+      trunk_ports:
+        - {interface: leaf1-swp1}
+        - {interface: leaf2-swp1}
+    - id: vlan-30                                  # ★ 番号は 30 だが同じ L2VNI
+      vlan_id: 30
+      access_ports:
+        - {interface: leaf3-swp1}
+    - id: vlan-50                                  # ★ L2VNI に載らない純粋なローカル VLAN
+      vlan_id: 50
+      trunk_ports:
+        - {interface: leaf1-swp2}
+        - {interface: leaf2-swp2}
+
+  vteps:
+    - {id: vtep-leaf1, sources: [leaf1-lo]}
+    - {id: vtep-leaf2, sources: [leaf2-lo]}
+    - {id: vtep-leaf3, sources: [leaf3-lo]}
+
+  vxlan:
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20, vlan-30]                    # ★ vlan-50 は入れない
+      vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3]
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+  interfaces:
+    - {id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.1/32}
+    - {id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.12/32}
+    - {id: leaf3-lo,  node: leaf3,  name: lo, ip: 10.0.0.13/32}
+
+    - {id: spine1-swp1-l3, node: spine1, name: swp1,  ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-swp1}}
+    - {id: spine1-swp2-l3, node: spine1, name: swp2,  ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-swp2}}
+    - {id: spine1-swp3-l3, node: spine1, name: swp3,  ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: spine1-swp3}}
+    - {id: leaf1-swp51-l3, node: leaf1,  name: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51}}
+    - {id: leaf2-swp51-l3, node: leaf2,  name: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp51}}
+    - {id: leaf3-swp51-l3, node: leaf3,  name: swp51, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf3-swp51}}
+
+    # L2VNI に載る VLAN の SVI (anycast)。leaf3-vlan30 だけアドレスが違う → D6 で error 期待
+    - {id: leaf1-vlan20, node: leaf1, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-default, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan20, node: leaf2, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-default, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf3-vlan30, node: leaf3, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 192.168.20.2/24, vrf: vrf-default, gateway_redundancy: [{mode: anycast_gateway}]}   # ★ 食い違い
+
+    # L2VNI に載らない VLAN の SVI (anycast)。VLAN 単位で比べる (D6 の 2 つ目) → OK
+    - {id: leaf1-vlan50, node: leaf1, name: Vlan50, attaches_to: {vlan: vlan-50}, ip: 192.168.50.1/24, vrf: vrf-default, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan50, node: leaf2, name: Vlan50, attaches_to: {vlan: vlan-50}, ip: 192.168.50.1/24, vrf: vrf-default, gateway_redundancy: [{mode: anycast_gateway}]}

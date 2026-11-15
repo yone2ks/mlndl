@@ -1,0 +1,62 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass B3a — invalid: 1 台の機器で 1 つの L2VNI に 2 つの VLAN が載る
+#
+#   leaf1 が VLAN 20 と VLAN 21 の両方にポートを持ち、その 2 つが同じ L2VNI
+#   10020 の vlans に入っている。NX-OS などが受け付けない設定 (1 つのブリッジ
+#   ドメインを機器の中で 2 つの番号で定義することになる)。
+#
+# 期待する検査結果 (ドラフトどおり案 A を実装したら)
+#   - error: D5「1 台の機器で、1 つの L2VNI の vlans のうち 2 つ以上がその機器の
+#     VLAN になる」
+#   - leaf2 は VLAN 20 だけ、leaf3 は VLAN 21 だけなのでそれ自体は OK
+#
+# 今のコードで動く写し (`vlans:` → `vlan: vlan-20`)
+#   - leaf3 に VLAN 21 のポートがあるが L2VNI は vlan-20 を指すので、
+#     「VNI 参加ノード leaf3 に VLAN 'vlan-20' のポートがない」の warning が出るだけ。
+#     無関係な誤りは出ないはず。
+# ============================================================================
+
+meta:
+  name: adr0026-b3a-invalid-one-device-two-vlans
+
+layer1:
+  nodes:
+    - {id: leaf1}
+    - {id: leaf2}
+    - {id: leaf3}
+  interfaces:
+    - {id: leaf1-swp1, node: leaf1, name: swp1}
+    - {id: leaf1-swp2, node: leaf1, name: swp2}    # ★ 2 つ目: VLAN 21 でも leaf1 に載る
+    - {id: leaf2-swp1, node: leaf2, name: swp1}
+    - {id: leaf3-swp1, node: leaf3, name: swp1}
+
+layer2:
+  vlans:
+    - id: vlan-20
+      vlan_id: 20
+      trunk_ports:
+        - {interface: leaf1-swp1}
+        - {interface: leaf2-swp1}
+    - id: vlan-21
+      vlan_id: 21
+      trunk_ports:
+        - {interface: leaf1-swp2}                 # ★ leaf1 が 2 つ目の VLAN を持つ
+        - {interface: leaf3-swp1}
+  vteps:
+    - {id: vtep-leaf1, sources: [leaf1-lo]}
+    - {id: vtep-leaf2, sources: [leaf2-lo]}
+    - {id: vtep-leaf3, sources: [leaf3-lo]}
+  vxlan:
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20, vlan-21]                   # ★ 両方とも同じ L2VNI
+      vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3]
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32}
+    - {id: leaf3-lo, node: leaf3, name: lo, ip: 10.0.0.13/32}

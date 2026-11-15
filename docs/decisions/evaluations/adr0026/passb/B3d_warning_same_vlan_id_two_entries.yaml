@@ -1,0 +1,61 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass B3d — warning: 同じ vlan_id の VLAN が 1 つの L2VNI の vlans に 2 つ
+#
+#   同じ番号 20 の VLAN エントリを 2 つ (vlan-20-a / vlan-20-b) 作って、両方を
+#   同じ L2VNI 10020 の vlans に入れている。ADR-0026 D3 で「番号が同じなら
+#   1 エントリに書く」と決めたので、「1 エントリにまとめる」と促す warning。
+#
+#   id 命名の迷い (feedback 候補): 同じ番号で 2 エントリを分ける必要があるのは
+#   「別のブロードキャストドメインに同じ番号を使う」ときだけ。D3 はその id 規約は
+#   決めないとしているので、ここでは用途のサフィックスで区別する (`-a` / `-b`)
+#   しかない。vlans の中に 2 つ入れるのはそもそも同じドメインなのでこの warning。
+#
+# 期待する検査結果 (ドラフトどおり案 A を実装したら)
+#   - warning (ADR-0026 D5): 「1 つの L2VNI の vlans に同じ vlan_id の VLAN が
+#     2 つある (1 エントリにまとめる)」
+#   - validate --strict でないかぎり error にはならない
+#
+# 今のコードで動く写し (`vlans:` → `vlan: vlan-20-a`)
+#   - このファイルでは 2 エントリが別の機器 (leaf1 / leaf2) に載っているので、
+#     「同一ノード上で vlan_id 重複」の error は出ない (別のノードでの再利用は許容)。
+#     VNI 参加ノードの警告のみが出るはず。
+#   - もし同じ機器に両方の VLAN のポートを書いたら、現行の vlan_id 重複 error と
+#     ADR-0026 D5 の「1 台で 2 VLAN」error と、さらに今回の warning が重なる可能性がある。
+#     ドラフトは重なり方を書いていない (feedback)。
+# ============================================================================
+
+meta:
+  name: adr0026-b3d-warning-same-vlan-id-two-entries
+
+layer1:
+  nodes:
+    - {id: leaf1}
+    - {id: leaf2}
+  interfaces:
+    - {id: leaf1-swp1, node: leaf1, name: swp1}
+    - {id: leaf2-swp1, node: leaf2, name: swp1}
+
+layer2:
+  vlans:
+    - id: vlan-20-a                               # ★ 番号 20 の 1 つ目
+      vlan_id: 20
+      trunk_ports: [{interface: leaf1-swp1}]
+    - id: vlan-20-b                               # ★ 番号 20 の 2 つ目 (同じドメインの疑い)
+      vlan_id: 20
+      trunk_ports: [{interface: leaf2-swp1}]
+  vteps:
+    - {id: vtep-leaf1, sources: [leaf1-lo]}
+    - {id: vtep-leaf2, sources: [leaf2-lo]}
+  vxlan:
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20-a, vlan-20-b]               # ★ 同じ L2VNI に 2 エントリ
+      vteps: [vtep-leaf1, vtep-leaf2]
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32}

@@ -221,7 +221,7 @@ layer2:
     - id: vni-10100
       type: l2vni
       vni: 10100
-      vlan: vlan-100
+      vlans: [vlan-100]
       vteps: [vtep-leaf1-leaf2]
 
     - id: vni-10900

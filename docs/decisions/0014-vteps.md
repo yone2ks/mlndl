@@ -75,6 +75,9 @@ L2VNI に参加するノードは、`vteps` の各 VTEP の `sources` から導�
 L3VNI には今回 `vteps` を持たせない。L3VNI が載るノードは、その VRF に属する L3 IF を持つノードから導けるため
 (ユーザーは「どちらでもよい」とした。必要になれば加算で足せる)。
 
+> **改訂 ([ADR-0026](0026-l2vni-vlans.md), 2026-11-15)**: L2VNI の `vlan` (単数) は `vlans` (リスト) にした。機器によって番号の違う VLAN を 1 つの L2VNI に載せられる。
+> 旧 `vlan` は移動先を示す error。参加ノードを `vteps` から導くことは変えない。
+
 ### D4. 移行
 
 `vtep_source` と `members` は ndl_version 1.x の間だけ受け付け、warning を出す (`--strict` では error)。2.0 で廃止する。

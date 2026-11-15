@@ -3,6 +3,11 @@
   ethernet_segments(topology) Ethernet Segment の脚・機器・脚の L1 IF (ADR-0023)
   vlan_endpoints(topology)    VLAN の端点 (ADR-0013 D7)
   vlan_svi_networks(topology) VLAN の SVI のサブネット
+  vlan_port_nodes(topology)   VLAN のポートを持つ機器 (ADR-0026 D4)
+  vlan_svi_nodes(topology)    VLAN の SVI を持つ機器 (ADR-0026 D4)
+  l2vni_participants(topology) L2VNI の参加機器 (VTEP から。ADR-0014 D3)
+  l2vni_node_vlans(topology)  L2VNI ごとの参加機器とその機器の VLAN (ADR-0026 D4)
+  vlan_l2vnis(topology)       VLAN を載せた L2VNI (逆引き。ADR-0026)
   l3_attachments(topology)    L3 IF が何の上に載るか (ADR-0011 D11)
   l3_roles(topology)          L3 IF がほかから参照されている役割 (ADR-0011 D11)
   bgp_session_views(topology) BGP セッションの両端・AS・eBGP / iBGP・通り道 (ADR-0010 D7・D11)
@@ -182,6 +187,93 @@ def vlan_svi_networks(topology: MLNDLTopology) -> dict[str, list[IPv4Network | I
                 if addr is not None and addr.network not in nets[iface.attaches_to.target]:
                     nets[iface.attaches_to.target].append(addr.network)
     return nets
+
+
+def vlan_port_nodes(topology: MLNDLTopology,
+                    segments: dict[str, SegmentInfo] | None = None) -> dict[str, set[str]]:
+    """VLAN の id → ポートを持つ機器 (ADR-0013 D2・ADR-0026 D4)
+
+    ポートは interface / lag / ethernet_segment (ES は脚の全機器)。VLAN の端点・エクスポーターの
+    vlan_member エッジは、これだけを使う (SVI は数えない)
+    """
+    out: dict[str, set[str]] = defaultdict(set)
+    if not topology.layer2:
+        return out
+    l1 = topology.layer1
+    iface_node = {i.id: i.node for i in l1.interfaces} if l1 else {}
+    lag_node = {g.id: g.node for g in l1.lag} if l1 else {}
+    segs = segments if segments is not None else ethernet_segments(topology)
+    for vlan in topology.layer2.vlans:
+        out[vlan.id]                                         # ポートのない VLAN も空集合で載せる
+        for pr in [*vlan.trunk_ports, *vlan.access_ports]:
+            if pr.interface is not None and pr.interface in iface_node:
+                out[vlan.id].add(iface_node[pr.interface])
+            elif pr.lag is not None and pr.lag in lag_node:
+                out[vlan.id].add(lag_node[pr.lag])
+            elif pr.ethernet_segment is not None and pr.ethernet_segment in segs:
+                out[vlan.id].update(segs[pr.ethernet_segment].nodes)
+    return out
+
+
+def vlan_svi_nodes(topology: MLNDLTopology) -> dict[str, set[str]]:
+    """VLAN の id → その VLAN を attaches_to: {vlan:} で指す SVI の node (ADR-0026 D4)"""
+    out: dict[str, set[str]] = defaultdict(set)
+    if topology.layer3:
+        for iface in topology.layer3.interfaces:
+            if iface.attaches_to is not None and iface.attaches_to.kind == "vlan":
+                out[iface.attaches_to.target].add(iface.node)
+    return out
+
+
+def l2vni_participants(topology: MLNDLTopology) -> dict[str, set[str]]:
+    """L2VNI の id → 参加機器 (vteps の各 VTEP の sources の L3 IF の node。ADR-0014 D3)"""
+    out: dict[str, set[str]] = {}
+    if not topology.layer2:
+        return out
+    l3_node = {i.id: i.node for i in topology.layer3.interfaces} if topology.layer3 else {}
+    vtep_nodes = {v.id: {l3_node[s] for s in v.sources if s in l3_node} for v in topology.layer2.vteps}
+    for vx in topology.layer2.vxlan:
+        if vx.type == "l2vni":
+            out[vx.id] = set().union(*(vtep_nodes.get(t, set()) for t in vx.vteps))
+    return out
+
+
+def l2vni_node_vlans(topology: MLNDLTopology,
+                     segments: dict[str, SegmentInfo] | None = None) -> dict[str, list[tuple[str, str]]]:
+    """L2VNI の id → (参加機器, その機器の VLAN の id) の組 (ADR-0026 D4)
+
+    その L2VNI の vlans に書いた VLAN のうち、ポートか SVI が参加機器にあるもの。
+    VLAN が決まらない参加機器は含めない。1 台に 2 つの VLAN があれば両方を返す (validator が error にする)。
+    並びは vlans の順、その中は機器の id の順
+    """
+    out: dict[str, list[tuple[str, str]]] = {}
+    if not topology.layer2:
+        return out
+    ports = vlan_port_nodes(topology, segments)
+    svis = vlan_svi_nodes(topology)
+    participants = l2vni_participants(topology)
+    for vx in topology.layer2.vxlan:
+        if vx.type != "l2vni":
+            continue
+        members = participants.get(vx.id, set())
+        out[vx.id] = [
+            (node, vlan)
+            for vlan in vx.vlans
+            for node in sorted((ports.get(vlan, set()) | svis.get(vlan, set())) & members)
+        ]
+    return out
+
+
+def vlan_l2vnis(topology: MLNDLTopology) -> dict[str, list[str]]:
+    """VLAN の id → その VLAN を vlans に書いた L2VNI の id (書いた順。ADR-0026 D5 の逆引き)"""
+    out: dict[str, list[str]] = defaultdict(list)
+    if topology.layer2:
+        for vx in topology.layer2.vxlan:
+            if vx.type == "l2vni":
+                for vlan in vx.vlans:
+                    if vx.id not in out[vlan]:
+                        out[vlan].append(vx.id)
+    return out
 
 
 def outside_svi_subnet(endpoint: VlanEndpoint, svi_nets: dict[str, list[IPv4Network | IPv6Network]]) -> list[str]:

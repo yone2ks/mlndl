@@ -1,0 +1,56 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass B3b — invalid: 1 つの VLAN が 2 つの L2VNI の vlans に入る
+#
+#   vlan-20 が L2VNI 10020 と L2VNI 10021 の両方の vlans リストに現れる。
+#   VLAN 20 のブロードキャストドメインが VNI 10020 なのか 10021 なのかが
+#   決まらない。案 A では型で防げないので validator で error にする (D5)。
+#
+# 期待する検査結果 (ドラフトどおり案 A を実装したら)
+#   - error: D5「1 つの VLAN が 2 つの L2VNI の vlans に入っている」
+#
+# 今のコードで動く写し (`vlans: [vlan-20, ...]` → `vlan: vlan-20`)
+#   - 2 つの L2VNI がどちらも vlan: vlan-20 を指すのは今は許されている
+#     (vni が重複しなければ OK)。VNI 10020 と 10021 は別なので重複エラーは出ない。
+#     ただ、こちらの構成は意味的には同じだが、案 A の新しい error を見るには、
+#     ADR-0026 を実装したあとに走らせる必要がある。
+# ============================================================================
+
+meta:
+  name: adr0026-b3b-invalid-one-vlan-two-vnis
+
+layer1:
+  nodes:
+    - {id: leaf1}
+    - {id: leaf2}
+  interfaces:
+    - {id: leaf1-swp1, node: leaf1, name: swp1}
+    - {id: leaf2-swp1, node: leaf2, name: swp1}
+
+layer2:
+  vlans:
+    - id: vlan-20
+      vlan_id: 20
+      trunk_ports:
+        - {interface: leaf1-swp1}
+        - {interface: leaf2-swp1}
+  vteps:
+    - {id: vtep-leaf1, sources: [leaf1-lo]}
+    - {id: vtep-leaf2, sources: [leaf2-lo]}
+  vxlan:
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20]                           # ★ 1 つ目の L2VNI が vlan-20 を載せる
+      vteps: [vtep-leaf1, vtep-leaf2]
+    - id: vni-10021
+      type: l2vni
+      vni: 10021
+      vlans: [vlan-20]                           # ★ 2 つ目の L2VNI も同じ vlan-20 を載せている
+      vteps: [vtep-leaf1, vtep-leaf2]
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32}

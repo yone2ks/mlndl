@@ -134,7 +134,7 @@ layer1:
 layer2:
   vlans: [{id: vlan-100, vlan_id: 100}]
   vxlan:
-    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-r1]}
+    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-r1]}
   vteps: [{id: vtep-r1, sources: [r1-lo]}]
 layer3:
   vrfs: [{id: vrf-a}]
@@ -159,7 +159,7 @@ def test_undefined_reference_message():
 
 def test_hint_when_id_exists_in_another_collection():
     """別の種類のコレクションにある id を指したら、何であるかを添える"""
-    errs = _errors(BASE.replace("vlan: vlan-100, vteps", "vlan: vrf-a, vteps"))
+    errs = _errors(BASE.replace("vlans: [vlan-100], vteps", "vlans: [vrf-a], vteps"))
     assert [e.message for e in errs] == ["未定義の VLAN 'vrf-a' を参照しています。'vrf-a' は VRF です"]
 
 

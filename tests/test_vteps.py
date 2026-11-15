@@ -112,7 +112,7 @@ class TestValid:
     def test_vni_on_vteps(self):
         r = validate_all(_topo(
             MLAG_A, "    - {id: vtep-border1, sources: [border1-lo1]}\n",
-            vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-mlag-a, vtep-border1]}\n",
+            vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-mlag-a, vtep-border1]}\n",
         ))
         assert r.errors == [] and r.warnings == []
 
@@ -173,17 +173,17 @@ class TestChecks:
         assert [w.path for w in r.warnings] == ["layer2.vteps[0].id"]
 
     def test_undefined_vtep_in_vni(self):
-        errs = _errors(MLAG_A, vxlan="    - {id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100, vteps: [nope]}\n")
+        errs = _errors(MLAG_A, vxlan="    - {id: vni-1, type: l2vni, vni: 10001, vlans: [vlan-100], vteps: [nope]}\n")
         assert len(errs) == 1 and "未定義の VTEP 'nope'" in errs[0]
 
     def test_duplicate_vtep_in_vni(self):
         errs = _errors(MLAG_A, vxlan=(
-            "    - {id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100, vteps: [vtep-mlag-a, vtep-mlag-a]}\n"))
+            "    - {id: vni-1, type: l2vni, vni: 10001, vlans: [vlan-100], vteps: [vtep-mlag-a, vtep-mlag-a]}\n"))
         assert len(errs) == 1 and "重複" in errs[0]
 
     def test_vni_needs_vteps(self):
         with pytest.raises(pydantic.ValidationError, match="vteps"):
-            _topo(MLAG_A, vxlan="    - {id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100}\n")
+            _topo(MLAG_A, vxlan="    - {id: vni-1, type: l2vni, vni: 10001, vlans: [vlan-100]}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -200,11 +200,11 @@ class TestOldForms:
     ])
     def test_old_form_is_error(self, extra, keys):
         with pytest.raises(pydantic.ValidationError, match=rf"L2VNI の {keys} はなくしました.*vteps: \[<VTEP の id>\]"):
-            _topo(MLAG_A, vxlan=f"    - {{id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100, {extra}}}\n")
+            _topo(MLAG_A, vxlan=f"    - {{id: vni-1, type: l2vni, vni: 10001, vlans: [vlan-100], {extra}}}\n")
 
     def test_vteps_is_required(self):
         with pytest.raises(pydantic.ValidationError, match="vteps: \\[<layer2.vteps の id>\\]"):
-            _topo(MLAG_A, vxlan="    - {id: vni-1, type: l2vni, vni: 10001, vlan: vlan-100}\n")
+            _topo(MLAG_A, vxlan="    - {id: vni-1, type: l2vni, vni: 10001, vlans: [vlan-100]}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +213,7 @@ class TestOldForms:
 
 def test_cytoscape_vni_lists_vteps():
     out = cytoscape.export(_topo(
-        MLAG_A, vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-mlag-a]}\n"))
+        MLAG_A, vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-mlag-a]}\n"))
     vni = next(n["data"] for n in out["nodes"] if n["data"]["id"] == "vni-10100")
     assert vni["vteps"] == ["vtep-mlag-a"]
 
@@ -249,7 +249,7 @@ def test_cytoscape_l3vni_vteps_derived_from_vrf():
 
 def test_yaml_round_trip():
     t1 = _topo(MLAG_A, "    - {id: vtep-border1, sources: [border1-lo1]}\n",
-               vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlan: vlan-100, vteps: [vtep-mlag-a]}\n")
+               vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-mlag-a]}\n")
     out = yaml_exporter.export(t1)
     vni = yaml.safe_load(out)["layer2"]["vxlan"][0]
     assert "members" not in vni and "vtep_source" not in vni     # 旧形式のキーは書き出さない
