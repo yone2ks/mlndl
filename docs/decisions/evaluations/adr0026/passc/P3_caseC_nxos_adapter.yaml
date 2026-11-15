@@ -1,0 +1,72 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass C P3 (案 C) — NX-OS 設定からのアダプター出力を想定
+#
+# 入力 (P3 案 A と同じ):
+#
+#   # n9k-1: vlan 20 / vn-segment 10020
+#   # n9k-2: vlan 30 / vn-segment 10020
+#
+# アダプターの処理 (案 C):
+#   1. `vlan 20 / vn-segment 10020` を見ると、その場で VLAN エントリを
+#      `l2vni: vni-10020` 付きで emit できる (ワンパス)
+#   2. `vlan 30 / vn-segment 10020` も同様
+#   3. `interface nve1 / member vni 10020` から L2VNI エントリと VTEP を emit
+#   → 機器の config の 1 行と MLNDL の 1 行が 1 対 1 に近い。集計が要らない
+#
+# 期待する検査結果: valid
+#
+# アダプターの観点では案 C の方が 1 パスで済む。機器の設定も VLAN 側に
+# `vn-segment <VNI>` を書く向きなので、構造が設定と合う (参照の向きが同じ)。
+# ============================================================================
+
+meta:
+  name: adr0026-p3-nxos-adapter-case-c
+  description: NX-OS 2 台 (vlan 20 → vni 10020、vlan 30 → vni 10020) のアダプター出力 (案 C)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: n9k-1, implementation: physical, role: leaf, device_type: nxos}
+    - {id: n9k-2, implementation: physical, role: leaf, device_type: nxos}
+
+  interfaces:
+    - {id: n9k-1-eth1-1, node: n9k-1, name: Ethernet1/1}
+    - {id: n9k-2-eth1-1, node: n9k-2, name: Ethernet1/1}
+
+layer2:
+  vlans:
+    # ★ 案 C: VLAN エントリに `l2vni:` を直接足せる。設定の `vn-segment 10020` と
+    #         行対応が 1:1 に近い。アダプターはワンパスで emit できる
+    - id: vlan-20
+      vlan_id: 20
+      name: tenant-a-web
+      l2vni: vni-10020                          # ← n9k-1 の `vn-segment 10020` が直接写る
+      trunk_ports:
+        - {interface: n9k-1-eth1-1}
+    - id: vlan-30
+      vlan_id: 30
+      name: tenant-a-web
+      l2vni: vni-10020                          # ← n9k-2 の `vn-segment 10020` が直接写る
+      trunk_ports:
+        - {interface: n9k-2-eth1-1}
+
+  vteps:
+    - {id: vtep-n9k-1, sources: [n9k-1-lo0]}
+    - {id: vtep-n9k-2, sources: [n9k-2-lo0]}
+
+  vxlan:
+    # ★ 案 C: L2VNI 側は vteps だけ。載る VLAN は VLAN 側の l2vni から求める
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vteps: [vtep-n9k-1, vtep-n9k-2]
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+  interfaces:
+    - {id: n9k-1-lo0, node: n9k-1, name: loopback0, ip: 10.0.0.11/32}
+    - {id: n9k-2-lo0, node: n9k-2, name: loopback0, ip: 10.0.0.12/32}

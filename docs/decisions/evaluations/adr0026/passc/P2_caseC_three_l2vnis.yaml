@@ -1,0 +1,145 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass C P2 (案 C) — 3 つの L2VNI + 5 つの VLAN (1 つは VXLAN に載らない)
+#
+# 読む人の作業を仮定して読みやすさを比べる:
+#   課題: 「VNI 10030 に載っている VLAN は何か、どの VTEP に張り出しているか」
+#
+# 案 C では:
+#   1. layer2.vxlan で `vni-10030` を見つける
+#   2. そのエントリにあるのは `vteps: [...]` のみ (VTEP はここ)
+#   3. 「載っている VLAN」を知るには、layer2.vlans を全走査して
+#      `l2vni: vni-10030` を持つエントリを集める必要がある
+#   4. → 情報が 2 か所に分かれる (VLAN 側に逆向きインデックス)
+#
+# 構成は P2 案 A と同じ:
+#   - vni-10020 : vlan-20
+#   - vni-10030 : vlan-30 + vlan-35 + vlan-40 (機器ごとに番号が違う)
+#   - vni-10040 : vlan-50 (leaf1 だけ)
+#   - vlan-99   : L2VNI に載らない純粋ローカル VLAN (l2vni キーなし)
+#
+# 期待する検査結果 (案 C 実装後):
+#   - valid
+#   - vlan-99 は `l2vni` を持たないので L2VNI には参加しない。VLAN 単位で anycast を比べる
+#   - VLAN 側の `l2vni` が存在しない id を指していれば参照整合性 error (Ref の汎用検査)
+#
+# 直感 (feedback で書く):
+#   + VLAN エントリを読むとき、各 VLAN がどの L2VNI に属するかが行内にある
+#   + 機器の設定 (NX-OS `vn-segment`、JUNOS `vxlan vni`) の書き方と向きが一致
+#   + 単数 str のため「1 VLAN が 2 L2VNI」を型で拒否できる (不正の型レベル防止)
+#   - L2VNI 側は `vteps` だけで中身が薄く、載っている VLAN を知るのに逆引きが要る
+#   - エクスポーターは走査コストが増える (全 VLAN を走査して L2VNI ごとに集計)
+# ============================================================================
+
+meta:
+  name: adr0026-p2-three-l2vnis-case-c
+  description: 3 L2VNI + 5 VLAN (1 つはローカル) で読みやすさを比べる (案 C)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: spine1, implementation: vm, role: spine, device_type: cumulus_linux}
+    - {id: leaf1,  implementation: vm, role: leaf,  device_type: cumulus_linux}
+    - {id: leaf2,  implementation: vm, role: leaf,  device_type: cumulus_linux}
+    - {id: leaf3,  implementation: vm, role: leaf,  device_type: cumulus_linux}
+    - {id: leaf4,  implementation: vm, role: leaf,  device_type: cumulus_linux}
+
+  interfaces:
+    - {id: spine1-swp1, node: spine1, name: swp1}
+    - {id: spine1-swp2, node: spine1, name: swp2}
+    - {id: spine1-swp3, node: spine1, name: swp3}
+    - {id: spine1-swp4, node: spine1, name: swp4}
+    - {id: leaf1-swp51, node: leaf1,  name: swp51}
+    - {id: leaf2-swp51, node: leaf2,  name: swp51}
+    - {id: leaf3-swp51, node: leaf3,  name: swp51}
+    - {id: leaf4-swp51, node: leaf4,  name: swp51}
+    - {id: leaf1-swp1,  node: leaf1,  name: swp1}
+    - {id: leaf2-swp1,  node: leaf2,  name: swp1}
+    - {id: leaf1-swp2,  node: leaf1,  name: swp2}
+    - {id: leaf2-swp2,  node: leaf2,  name: swp2}
+    - {id: leaf3-swp1,  node: leaf3,  name: swp1}
+    - {id: leaf4-swp1,  node: leaf4,  name: swp1}
+    - {id: leaf1-swp3,  node: leaf1,  name: swp3}
+    - {id: leaf1-swp4,  node: leaf1,  name: swp4}
+    - {id: leaf2-swp4,  node: leaf2,  name: swp4}
+
+  links:
+    - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf3, endpoints: [spine1-swp3, leaf3-swp51], link_speed: 10G, link_role: underlay}
+    - {id: link-spine1-leaf4, endpoints: [spine1-swp4, leaf4-swp51], link_speed: 10G, link_role: underlay}
+
+layer2:
+  vlans:
+    # ★ 案 C: 各 VLAN エントリに l2vni を 1 行足す。vlan-99 は L2VNI に載らないので l2vni なし
+    - {id: vlan-20, vlan_id: 20, name: tenant-a-web-20, l2vni: vni-10020, trunk_ports: [{interface: leaf1-swp1}, {interface: leaf2-swp1}]}
+    - {id: vlan-30, vlan_id: 30, name: tenant-a-app-30, l2vni: vni-10030, trunk_ports: [{interface: leaf1-swp2}, {interface: leaf2-swp2}]}
+    - {id: vlan-35, vlan_id: 35, name: tenant-a-app-35, l2vni: vni-10030, access_ports: [{interface: leaf3-swp1}]}
+    - {id: vlan-40, vlan_id: 40, name: tenant-a-app-40, l2vni: vni-10030, access_ports: [{interface: leaf4-swp1}]}
+    - {id: vlan-50, vlan_id: 50, name: tenant-b-db-50,  l2vni: vni-10040, access_ports: [{interface: leaf1-swp3}]}
+    - {id: vlan-99, vlan_id: 99, name: local-mgmt,      trunk_ports: [{interface: leaf1-swp4}, {interface: leaf2-swp4}]}
+    # ★ vlan-99 は l2vni キーなし — L2VNI に属さない (null でも省略でもよいが省略にする)
+
+  vteps:
+    - {id: vtep-leaf1, sources: [leaf1-lo]}
+    - {id: vtep-leaf2, sources: [leaf2-lo]}
+    - {id: vtep-leaf3, sources: [leaf3-lo]}
+    - {id: vtep-leaf4, sources: [leaf4-lo]}
+
+  vxlan:
+    # ★ 案 C: L2VNI エントリは vteps だけ。「どの VLAN が載るか」はここには書かれない
+    - {id: vni-10020, type: l2vni, vni: 10020, vteps: [vtep-leaf1, vtep-leaf2]}
+    - {id: vni-10030, type: l2vni, vni: 10030, vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3, vtep-leaf4]}
+    - {id: vni-10040, type: l2vni, vni: 10040, vteps: [vtep-leaf1]}
+    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-tenant-a, irb_mode: symmetric}
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets: {import: ["65001:100"], export: ["65001:100"]}
+
+  interfaces:
+    - {id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.1/32}
+    - {id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32}
+    - {id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.12/32}
+    - {id: leaf3-lo,  node: leaf3,  name: lo, ip: 10.0.0.13/32}
+    - {id: leaf4-lo,  node: leaf4,  name: lo, ip: 10.0.0.14/32}
+
+    - {id: spine1-swp1-l3, node: spine1, name: swp1,  ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-swp1}}
+    - {id: spine1-swp2-l3, node: spine1, name: swp2,  ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-swp2}}
+    - {id: spine1-swp3-l3, node: spine1, name: swp3,  ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: spine1-swp3}}
+    - {id: spine1-swp4-l3, node: spine1, name: swp4,  ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: {interface: spine1-swp4}}
+    - {id: leaf1-swp51-l3, node: leaf1,  name: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: {interface: leaf1-swp51}}
+    - {id: leaf2-swp51-l3, node: leaf2,  name: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: {interface: leaf2-swp51}}
+    - {id: leaf3-swp51-l3, node: leaf3,  name: swp51, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: leaf3-swp51}}
+    - {id: leaf4-swp51-l3, node: leaf4,  name: swp51, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf4-swp51}}
+
+    - {id: leaf1-vlan20, node: leaf1, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan20, node: leaf2, name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf1-vlan30, node: leaf1, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 192.168.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan30, node: leaf2, name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 192.168.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf3-vlan35, node: leaf3, name: Vlan35, attaches_to: {vlan: vlan-35}, ip: 192.168.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf4-vlan40, node: leaf4, name: Vlan40, attaches_to: {vlan: vlan-40}, ip: 192.168.30.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf1-vlan50, node: leaf1, name: Vlan50, attaches_to: {vlan: vlan-50}, ip: 10.50.0.1/24, vrf: vrf-tenant-a}
+    - {id: leaf1-vlan99, node: leaf1, name: Vlan99, attaches_to: {vlan: vlan-99}, ip: 10.99.0.1/24, vrf: vrf-default, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan99, node: leaf2, name: Vlan99, attaches_to: {vlan: vlan-99}, ip: 10.99.0.1/24, vrf: vrf-default, gateway_redundancy: [{mode: anycast_gateway}]}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - {node: spine1, local_as: 65000}
+        - {node: leaf1,  local_as: 65001}
+        - {node: leaf2,  local_as: 65002}
+        - {node: leaf3,  local_as: 65003}
+        - {node: leaf4,  local_as: 65004}
+
+  routing_neighbors:
+    - {id: bgp-peer-spine1-leaf1, type: bgp, from: {node: spine1, update_source: spine1-swp1-l3}, to: {node: leaf1, update_source: leaf1-swp51-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf2, type: bgp, from: {node: spine1, update_source: spine1-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp51-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf3, type: bgp, from: {node: spine1, update_source: spine1-swp3-l3}, to: {node: leaf3, update_source: leaf3-swp51-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-spine1-leaf4, type: bgp, from: {node: spine1, update_source: spine1-swp4-l3}, to: {node: leaf4, update_source: leaf4-swp51-l3}, address_families: [ipv4_unicast]}

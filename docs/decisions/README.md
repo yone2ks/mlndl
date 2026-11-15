@@ -203,9 +203,11 @@ VLAN のポートの `node`、L2VNI の `vtep_source` / `members`) を、移動�
 
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
-| [drafts/0026](drafts/0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる (`vlans`) (改訂 1) | Draft | A |
-| [evaluations/adr0026](evaluations/adr0026/evaluation.md) | 横断評価メモ (Pass B)。試し書き `passb/` B1〜B5 | — | — |
+| [0026](0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる (`vlans`) (実装はまだ) | **Accepted** | C |
+| [drafts/0026](drafts/0026-l2vni-vlans.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0026 | A |
+| [evaluations/adr0026](evaluations/adr0026/evaluation.md) | 横断評価メモ (Pass B) と Pass C の結果。試し書き `passb/` B1〜B5、`passc/` P1〜P4 | — | — |
 
 EVPN-VXLAN では VLAN の番号は機器の中だけの番号で、機器ごとに別の番号を同じ L2VNI に載せられる。L2VNI の `vlan` が 1 つの VLAN しか指せず、これを書けなかった。
 L2VNI の `vlan` を `vlans` (リスト) にし、旧 `vlan` は移動先を示す error、1 台の機器で 1 つの VNI に VLAN は 1 つまで、anycast gateway の一致は VNI 単位、とする案。
 Pass B (2026-11-15) で、D3 の定義を L2VNI に入る / 入らない VLAN の 2 段にし、SVI から機器を導くのを L2VNI の中に限り、SVI の VRF の食い違いを error に足した (改訂 1)。
+Pass C (2026-11-15) でも参照の向きは 4/5 が案 A で、ユーザーが案 A で確定した。同じ機器での `vlan_id` の重複の検査に SVI も数え、`anycast_gateway` と `vrrp` の混在を warning に足した。

@@ -1,0 +1,97 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0026 Pass C P3 (案 A) — NX-OS 設定からのアダプター出力を想定
+#
+# 入力 (想定している 2 台の NX-OS running-config の抜粋):
+#
+#   # n9k-1:
+#   feature nv overlay
+#   feature vn-segment-vlan-based
+#   vlan 20
+#     name tenant-a-web
+#     vn-segment 10020
+#   interface Ethernet1/1
+#     switchport mode trunk
+#     switchport trunk allowed vlan 20
+#   interface nve1
+#     source-interface loopback0
+#     member vni 10020
+#       ingress-replication protocol bgp
+#
+#   # n9k-2:
+#   feature nv overlay
+#   feature vn-segment-vlan-based
+#   vlan 30                                   # ← 番号が違う!
+#     name tenant-a-web
+#     vn-segment 10020
+#   interface Ethernet1/1
+#     switchport mode trunk
+#     switchport trunk allowed vlan 30
+#   interface nve1
+#     source-interface loopback0
+#     member vni 10020
+#       ingress-replication protocol bgp
+#
+# アダプターの処理 (案 A):
+#   1. `vlan 20 / vn-segment 10020` を見ると、VLAN エントリ `vlan-20` を作る
+#      (この時点では L2VNI はまだわからないのでバッファに貯める: vni 10020 ← vlan-20)
+#   2. `vlan 30 / vn-segment 10020` を見ると、VLAN エントリ `vlan-30` を作る
+#      (バッファに追加: vni 10020 ← vlan-30)
+#   3. `interface nve1 / member vni 10020` を見ると、VTEP と L2VNI の骨組みを作る
+#   4. 両機器の解析が終わったら、バッファを集計して L2VNI エントリの
+#      `vlans: [vlan-20, vlan-30]` を組み立てる (2 パス目)
+#   → L2VNI の `vlans:` を組み立てるには、全機器の config を見終えてから
+#     集計する必要がある (ワンパスでは完結しない)
+#
+# 期待する検査結果: valid
+# ============================================================================
+
+meta:
+  name: adr0026-p3-nxos-adapter-case-a
+  description: NX-OS 2 台 (vlan 20 → vni 10020、vlan 30 → vni 10020) のアダプター出力 (案 A)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - {id: n9k-1, implementation: physical, role: leaf, device_type: nxos}
+    - {id: n9k-2, implementation: physical, role: leaf, device_type: nxos}
+
+  interfaces:
+    - {id: n9k-1-eth1-1, node: n9k-1, name: Ethernet1/1}
+    - {id: n9k-2-eth1-1, node: n9k-2, name: Ethernet1/1}
+
+layer2:
+  vlans:
+    # n9k-1 の `vlan 20 / vn-segment 10020` から
+    - id: vlan-20
+      vlan_id: 20
+      name: tenant-a-web
+      trunk_ports:
+        - {interface: n9k-1-eth1-1}
+    # n9k-2 の `vlan 30 / vn-segment 10020` から (番号は違うが同じ VNI に載る)
+    - id: vlan-30
+      vlan_id: 30
+      name: tenant-a-web
+      trunk_ports:
+        - {interface: n9k-2-eth1-1}
+
+  vteps:
+    - {id: vtep-n9k-1, sources: [n9k-1-lo0]}
+    - {id: vtep-n9k-2, sources: [n9k-2-lo0]}
+
+  vxlan:
+    # ★ 案 A: 両機器の集計後に `vlans: [vlan-20, vlan-30]` を組み立てる (2 パス目)
+    - id: vni-10020
+      type: l2vni
+      vni: 10020
+      vlans: [vlan-20, vlan-30]
+      vteps: [vtep-n9k-1, vtep-n9k-2]
+
+layer3:
+  vrfs:
+    - id: vrf-default
+
+  interfaces:
+    - {id: n9k-1-lo0, node: n9k-1, name: loopback0, ip: 10.0.0.11/32}
+    - {id: n9k-2-lo0, node: n9k-2, name: loopback0, ip: 10.0.0.12/32}

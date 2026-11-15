@@ -117,3 +117,54 @@ network-tech-reviewer は「Ethernet Tag = 0 は RFC 8365 §5.1.3 ではなく R
 5. **anycast gateway の一致の単位**: VNI 単位と VLAN 単位の切り替え
 6. **エクスポーター**: L2VNI のノードに出すものと、ndl-viz の描き方
 7. **影響範囲**: 本評価メモの「改訂 1 で反映した指摘」の最後の 3 行
+
+## Pass C の結果 (2026-11-15)
+
+5 エージェントが drafts/0026 を読まずに本メモから再設計した。参照の向きは 4/5 が案 A (spec-architect・linguist・dsl-designer・network-tech-reviewer)、example-author が案 C で、
+Pass A と同じ割れ方になった。dsl-designer は Pass B の前の自分の推奨を疑ってゼロから比べ直しても案 A だった。**ユーザーが案 A で確定した**。
+ほかの論点は改訂 1 と同じ骨子で、細部で割れた点は統合担当が決めた。確定版は [ADR-0026](../../0026-l2vni-vlans.md)。試し書きは [passc/](passc/README.md) (P1〜P4)。
+
+**試し書きの検証**: 案 A の `vlans: [a, ...]` を `vlan: a` に、案 C の VLAN の `l2vni` を外して L2VNI の `vlan` に置き換えた写しで `python -m mlndl validate` を流した (統合担当)。
+error はなく、warning は今の単数の `vlan` では番号の違う機器・SVI だけの機器・BGW を数えられないことによるものだけだった。
+
+| ファイル | 今の validator | この ADR を実装したら |
+|---|---|---|
+| P1 (B1 を案 C で) | warning × 1 (leaf3) | (案 C は採らない) |
+| P2 案 A / 案 C (L2VNI 3 つ、VLAN 6 つ、うち 1 つは VXLAN を使わない) | warning × 2 (leaf3・leaf4) | 案 A で valid |
+| P3 案 A / 案 C (NX-OS 2 台の設定を写したもの) | warning × 1 (n9k-2) | 案 A で valid |
+| P4 (SVI だけの border1、ポートも SVI もない BGW) | warning × 3 (bgw1・border1・leaf3) | warning × 1 (bgw1。D5 の 10。受け入れる) |
+
+**案 A と案 C の比較 (P1〜P3)**:
+
+| 観点 | 案 A | 案 C |
+|---|---|---|
+| 記述量 (P2) | 4 行 | 5 行 |
+| 「VNI に載る VLAN と VTEP」 | L2VNI 1 か所 | L2VNI と全 VLAN の 2 か所 |
+| 「この VLAN はどの VNI か」 | 全 L2VNI を探す | VLAN のエントリで見える |
+| 1 VLAN が 2 VNI | validator の error | 型で防げる |
+| 設定からの変換 (P3) | 全機器を読んでから VNI ごとに集める | 行がほぼ 1 対 1 |
+
+**割れた点と判断**:
+
+| 論点 | 意見 | 判断 |
+|---|---|---|
+| 参照の向き | 4/5 が案 A、example-author が案 C | **案 A** (ユーザー決定) |
+| 同じ機器での `vlan_id` の重複の検査に SVI を数えるか | spec-architect・network-tech: ポートだけ。dsl-designer: ポート ∪ SVI | **ポート ∪ SVI**。ポートで `vlan-100` (番号 100)、SVI で別エントリ `vlan-100b` (番号 100) を指す矛盾は、ほかの検査では拾えない (network-tech の「結果は同じ」はこの場合に成り立たない) |
+| 「VLAN の機器」の関数 | Pass B の dsl-designer: 1 つにまとめる。Pass C の dsl-designer: ポート / SVI の 2 つ、使う側で合わせる | **2 つ**。端点・`vlan_member` エッジはポートだけのまま |
+| `anycast_gateway` と `vrrp` の混在 | network-tech: error | **warning**。移行の途中で一時的に混ざることがある |
+| エクスポーターの `vlan_member` エッジに SVI だけの機器を入れるか | network-tech: 入れる。spec-architect・dsl-designer: 入れない | **入れない**。「その機器にポートがある」の意味を保つ |
+
+**改訂 1 に足したもの**:
+
+- D4: `vlan_port_nodes` / `vlan_svi_nodes` と、使う場所ごとの表。参加機器と参加機器の VLAN の区別 (example-author)
+- D5: 番号付きの表。「1 つの VLAN が 2 つの L2VNI に」の error がある VLAN を他の検査から外す (spec-architect)。D5 の 10 のメッセージの形 (example-author)
+- D6: `anycast_gateway` を持たない SVI との混在の warning (network-tech)
+- D7: `node_vlans` は YAML に書けない、機器ノードの `vlans` との書き分け (linguist)
+- 範囲外: Asymmetric IRB、VNI stitching、L2VNI の Route Target (network-tech)
+- 改訂の注記の文案 (spec-architect)
+
+**採らなかった指摘**:
+
+- linguist の concepts.ja.md の文案のうち「L2VNI に入らない VLAN は `vlan_id` の値がドメインを識別する (同じ番号を複数のエントリに分けない)」: 採らない — 別の機器で同じ番号を別のドメインに使うことを今も許している。
+  「L2VNI と VLAN は多対多」も誤り (1 対多)。D3 の文案は統合担当が直した
+- network-tech の「案 A なら 1 VLAN が 2 VNI を型で禁止できる」: 誤り (型で防げるのは案 C)。結論 (案 A) には影響しない

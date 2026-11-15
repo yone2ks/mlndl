@@ -1,6 +1,6 @@
 # ADR-0026: L2VNI に、機器によって番号の違う VLAN を載せる (`vlans`)
 
-- **Status**: Draft (改訂 1。2026-11-15 の横断評価 [evaluations/adr0026/evaluation.md](../evaluations/adr0026/evaluation.md) を反映)
+- **Status**: Superseded by [0026](../0026-l2vni-vlans.md) (2026-11-15 に Pass C で確定。この版は改訂 1)
 - **Date**: 2026-11-15
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author、ユーザー
 - **Pass**: A (5 エージェントの評価を 1 回取り、案 A をユーザーが選んだ。改訂 1 は Pass B の指摘の反映)
