@@ -198,3 +198,12 @@ ADR-0005 D4 補則に問い 5 (構成図の粒度) を足して `anycast_mac` �
 「ndl_version 1.x の間は読み替えて warning」とした旧形式 (L3 IF の `interface`、短縮形 `interface: vlan-N`、`{interface: <LAG 等>}`、
 VLAN のポートの `node`、L2VNI の `vtep_source` / `members`) を、移動先を示す error にした。OSPF / IS-IS の通り道の食い違いも BGP と同じ error に繰り上げた。
 エクスポーターの旧キー (L3 IF の `interface` / `kind` など、推定の代表アドレス `lo_ip` / `lo_ipv6`) を外し、実装済みの ADR-0014・ADR-0015 を Accepted にした。
+
+### L2VNI と機器ごとの VLAN (2026-11-15〜)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [drafts/0026](drafts/0026-l2vni-vlans.md) | L2VNI は機器ごとに番号の違う VLAN を束ねる (`vlans`) | Draft | A |
+
+EVPN-VXLAN では VLAN の番号は機器の中だけの番号で、機器ごとに別の番号を同じ L2VNI に載せられる。L2VNI の `vlan` が 1 つの VLAN しか指せず、これを書けなかった。
+L2VNI の `vlan` を `vlans` (リスト) にし、旧 `vlan` は移動先を示す error、1 台の機器で 1 つの VNI に VLAN は 1 つまで、anycast gateway の一致は VNI 単位、とする案。
