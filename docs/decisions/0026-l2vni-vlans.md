@@ -1,6 +1,7 @@
 # ADR-0026: L2VNI に、機器によって番号の違う VLAN を載せる (`vlans`)
 
-- **Status**: Accepted (2026-11-15 に Pass C で確定し、同日に実装。スキーマ・derive・validator・エクスポーター・fixture・examples・docs。ndl-viz の対応はまだ)
+- **Status**: Accepted (2026-11-15 に Pass C で確定し、同日に実装。スキーマ・derive・validator・エクスポーター・fixture・examples・docs。ndl-viz は 2026-11-16 に対応: L2VNI から `vlans` の VLAN へ線を引き、`node_vlans` で機器ごとの番号を示す (yone2ks/ndl-viz#10))。
+  先送りした項目は [deferred.md](deferred.md) の L2 の表にある
 - **Date**: 2026-11-15
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、ユーザー (案 A で確定、「VLAN translation」の語を使わない、範囲外の 2 点)
 - **Pass**: C ([評価メモ](evaluations/adr0026/evaluation.md) を入力に再設計)
