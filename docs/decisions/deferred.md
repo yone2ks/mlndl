@@ -47,6 +47,12 @@ ADR の本文に残る「Phase 2 で」「Phase 3+ で」は、この一覧の�
 | BUM の配送方式 (HER / PIM) | ADR-0005 D3-2 | 今は HER を暗黙に前提している。マルチキャストのアンダーレイを書くとき |
 | L2 トンネル (EoGRE / L2TPv3 / OTV) | ADR-0005 D3-2 | その構成を書く必要が出たとき |
 | Q-in-Q (`stag_vlan_id` / `ctag_vlan_id`) | ADR-0002 (名前だけ予約) | その構成を書く必要が出たとき |
+| ファブリックごとの VNI の番号の使い回し (RFC 8365 §5.1.1 の、その場所だけの VNI) と、Multi-Site の BGW での VNI の付け替え (VNI stitching)。今は VNI の番号はトポロジー全体で一意 | ADR-0026 範囲外 | 別々に管理するファブリックを 1 つのトポロジーに書き、同じ VNI の番号が別のドメインを指すとき |
+| VLAN-aware bundle (1 つの MAC-VRF に VNI の違う VLAN を入れる)。L2VNI の `vlans` は流用せず別のキー (例: `layer2.mac_vrfs`) にする | ADR-0026 D3・範囲外 | サービスの種類 (VLAN-based / VLAN-aware bundle) を書き分ける必要が出たとき |
+| Asymmetric IRB の検査 (全 leaf に全 L2VNI の SVI があるか) | ADR-0026 範囲外 | L3VNI の `irb_mode: asymmetric` の構成を検査したくなったとき |
+| L2VNI の Route Target (今は VNI から自動で導く前提で書かない) | ADR-0026 範囲外 | RT を手で決める構成 (DCI など) を書く必要が出たとき |
+| ポートも SVI もない参加機器 (Multi-Site の BGW など) に出る warning を抑える方法 | ADR-0026 D5 の 10・Consequences | BGW を含む構成で、この warning が邪魔になったとき。装置の役割を書くことになるので ADR-0022 の粒度と合わせて決める |
+| 同じ番号を別のブロードキャストドメインに使う VLAN のエントリの id の付け方 (`vlan-20-dc1` など) | ADR-0026 D3 | その構成の例を書き、id の付け方が揺れたとき |
 
 ## L3・制御プレーン
 
