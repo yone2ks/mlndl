@@ -1,0 +1,61 @@
+# 場面 B4: 1.0 で通っていた YAML が、1.1 で足した warning のせいで `--strict` だけ止まる
+#
+# 想定する 1.1 の加算:
+#   - 推奨外の `role` 値に warning を足す。ADR-0003 は「`role` は自由文字列、推奨 9 語以外も valid、
+#     mlndl は warning を出さない」とした。これが 1.1 で「推奨外なら warning (`--strict` で error に昇格)」
+#     に緩められた想定。ADR-0003 の後方互換の下では「加算」(D2 の「warning を足す」) に当たる。
+#   - この YAML は `role: tap-aggregator` を書いている (CLAUDE.md §5 の「推奨値以外も valid」の例として
+#     挙がっている語)。1.0 では error も warning もなし。
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか:
+#   - 1.1 の mlndl で `validate()` は **errors のみ**を返すので、この YAML は valid のまま (D1 の「`validate()` は
+#     後方互換で errors のみ」の方針)。
+#   - 1.1 の mlndl で `validate_all()` を呼ぶと warnings に次が入る:
+#
+#         layer1.nodes[tap-agg-1].role: "tap-aggregator" は推奨語彙にありません
+#         (推奨: spine / leaf / core / border / server / firewall / load-balancer /
+#          hypervisor / management — docs/role-vocabulary.md)
+#
+#   - 1.1 の mlndl で `python -m mlndl validate --strict` を回すと、warning が error に昇格し、
+#     **CI が落ちる**。これが D4 の「`--strict` が約束するのはその版の warning を error にすることだけ」
+#     の正直な帰結:
+#
+#       - 1.0 で `--strict` を回し続けていた CI は、mlndl を 1.1 に上げたとたんに失敗する
+#       - 対処: (1) mlndl のマイナーバージョンを固定する (D4 の推奨運用)。
+#              (2) 推奨値に書き換える (`role: tap-aggregator` を `role: core` などに)。
+#              (3) 1.x で足す予定の抑止の仕組み (D4 の `--ignore` など) で個別に抑える。
+#
+#   - 1.1 のリリースノートには、この warning を含むすべての新しい warning が並ぶ (D4)。
+#
+# この場面で確かめたいこと:
+#   - `--strict` の意味 (D4) が「変動しうる」ことの具体例。
+#   - D8 の利用者向け文「`--strict` は、その版の warning を error にします。1.x で warning が
+#     増えることがあるので、CI では mlndl の版を固定してください」が読み手に伝わるかの試金石。
+#
+# 書いていて気になった点 (ドラフトへの feedback の種):
+#   - D4 は「`--strict` を既定にしない」と書くが、`validate_all()` の `strict` 引数は既定が `False`。
+#     API と CLI で「既定が何か」の書き方を揃えるとよい (「既定は非 strict。CI でだけ `--strict`」
+#     を validation.ja.md と README に書く)。
+#   - リリースノートに warning を並べるとき、「この warning を無効にしたいときの書式」を
+#     記載するかを D4 に足すとよい (`--ignore=role-recommended` のような具体)。1.0 の前には作らないが、
+#     1.0 のリリースノートの様式を決めるとき、1.1 以降のリリースの様式も予約しておくと齟齬が減る。
+
+ndl_version: "1.0"
+
+meta:
+  name: b4-strict-warning-added-in-1-1
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    # 推奨外の role。1.0 では valid、1.1 では warning (`--strict` で error 相当)。
+    - id: tap-agg-1
+      name: TAP-Aggregator-1
+      implementation: physical
+      role: tap-aggregator        # ← 1.1 で warning になる想定
+      device_type: generic_switch
+  interfaces:
+    - { id: leaf1-swp1,  node: leaf1,     name: swp1 }
+    - { id: tap-agg-1-g1, node: tap-agg-1, name: ge-0/0/1 }
+  links:
+    - { id: link-leaf1-tap, endpoints: [leaf1-swp1, tap-agg-1-g1], link_speed: 10G }

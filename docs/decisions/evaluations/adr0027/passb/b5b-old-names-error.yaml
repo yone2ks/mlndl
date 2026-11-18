@@ -1,0 +1,113 @@
+# 場面 B5 (ペアの (b)): 旧名 (`lag` / `vxlan` / `level-2`) を書いたときの期待される error メッセージ
+#
+# 1.0 のリリース後、利用者が古い例を見て旧名 (`lag` / `vxlan` / `level-2`) を書いた YAML を作ってしまった想定。
+# これらは 1.0 の前に直したので、1.0 の mlndl は旧名を知らない。
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか:
+#   - D2: 改名は 2.0 で行う (D2 の表の「キー・値・コレクションを改名する」が 2.0 行)。1.0 の前にまだ
+#     行う改名は破壊的だが、「1.0 を出す**前**」なので互換の約束はまだ始まっていない。
+#   - 旧名を書くと、ADR-0025 と同じ流儀で**「移動先を示す error」**を出す。読み替えはしない:
+#
+#     期待 1: `layer1.lag` を書いた場合
+#         layer1.lag は廃止されました。layer1.lags に書き換えてください
+#         (複数形にそろえる改名。ADR-0027 Consequences)
+#
+#     期待 2: `layer2.vxlan` を書いた場合
+#         layer2.vxlan は廃止されました。layer2.vxlans に書き換えてください
+#         (複数形にそろえる改名。ADR-0027 Consequences)
+#
+#     期待 3: IS-IS セッションの `level: level-2` を書いた場合
+#         control_plane.routing_neighbors[isis-adj-leaf1-leaf2].level: "level-2" は廃止されました。
+#         "level_2" に書き換えてください (下線区切りにそろえる。ADR-0027 Consequences)
+#         (`level-1` → `level_1`、`level-all` → `level_all` も同様)
+#
+#   - これらの error は 1.0 のリリースの最初から入っている (1.x で足す新しい error ではない)。1.0
+#     以降、ずっと同じ error が出続ける。
+#
+# この場面で確かめたいこと:
+#   - 「移動先を示す error」のメッセージ様式が ADR-0025 の既存のメッセージとそろっているか。
+#   - 1.0 の前に行う改名は互換の約束の前の作業なので、1.0 の約束 (D2 / D3) には縛られないことの確認。
+#
+# 書いていて気になった点 (ドラフトへの feedback の種):
+#   - Consequences は「旧名は移動先を示す error」とだけ書く。1.x の間このメッセージを**変えない**
+#     (D2 の「メッセージの文面を変える」は許すが、ここでは利用者の対処が変わらないメッセージなので
+#     文面を変える理由がない) ことを 1 行添えると親切。
+#   - このメッセージは 2.0 ではもう不要にできる (改名から長く経ち、旧名を書く人がいなくなっているなら)。
+#     ADR-0025 と同じく「2.0 でそのときに決める」のでよいが、D2 の表に「移動先 error を消すのは 2.0」
+#     と明示するのを検討してもよい (D7 で「旧形式の移動先 error は 2.0 まで残す」と既に書かれているので、
+#     D5 に由来する今回の移動先 error もその枠に含まれると読める)。
+
+ndl_version: "1.0"
+
+meta:
+  name: b5b-old-names-error
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: leaf2-swp2, node: leaf2, name: swp2 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 10G }
+    - { id: link-leaf1-leaf2, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G }
+
+  # ↓ 旧名 `lag` — 期待: 「layer1.lag は廃止されました。layer1.lags に書き換えてください」
+  lag:
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+
+  ethernet_segments:
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  vlans:
+    - { id: vlan-100, vlan_id: 100, trunk_ports: [{ ethernet_segment: es-server1 }] }
+
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # ↓ 旧名 `vxlan` — 期待: 「layer2.vxlan は廃止されました。layer2.vxlans に書き換えてください」
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32 }
+
+control_plane:
+  isis:
+    - { id: isis-core, nodes: [{ node: leaf1 }, { node: leaf2 }] }
+  routing_neighbors:
+    - id: isis-adj-leaf1-leaf2
+      type: isis
+      instance: isis-core
+      from: { node: leaf1, interface: leaf1-swp2 }
+      to:   { node: leaf2, interface: leaf2-swp2 }
+      # ↓ 旧値 `level-2` — 期待: 「"level-2" は廃止。"level_2" に書き換えてください」
+      level: level-2

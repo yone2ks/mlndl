@@ -1,0 +1,85 @@
+# 場面 B6: 文書に error と書いてあるのに 1.0 の実装が見逃していた誤りを含む YAML
+#
+# 想定するバグ (現実的に起きうる例):
+#   CLAUDE.md の validation 表・ADR-0011 D9 は、L3 IF について次のように書く:
+#       「ノード所属: L3 IF の `node` が、`attaches_to` の参照先 (L1 IF / LAG / サブ IF) の
+#        ノード (群) に含まれるか — error」
+#
+#   1.0 の実装は、`attaches_to: {interface: ...}` (L1 IF) のときは `node` 一致を検査するが、
+#   `attaches_to: {lag: ...}` のときに**検査を忘れている**とする (架空のバグ)。
+#   結果: 下の YAML (`leaf2-po1-l3` が `node: leaf2`、`attaches_to: {lag: lag-leaf1-po1}`、
+#   LAG の `node: leaf1`) は、文書上は error なのに 1.0 では valid として通ってしまう。
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか (= このバグを 1.1 で直したら):
+#   - これが Pass A の Pass B の論点「文書に error と書いてあるのに実装が見逃していた誤り (バグ) を
+#     1.x で直すのは、D3 の『新しい error』に当たるか」(ADR-0027 本文の「Pass B で確かめること」) の実例。
+#
+#   - D3 を素直に読むと「新しい error を足してよいのは、1.x で足したキー・値に付くものだけ」。
+#     今回の `node` も `attaches_to: {lag: ...}` も 1.0 で既にあるキー。D3 を厳密に適用すると
+#     1.1 で error にはできず、**warning で止めて 2.0 まで待つ**ことになる。1.0 で書けた YAML (このファイル)
+#     を落とす新しい error は 2.0 まで (D2 の表「既存の YAML を落とす新しい error」= 2.0)。
+#
+#   - しかし、「文書に error と書いてある」=「言語の約束としては error だった」とも読める。
+#     1.0 の実装のバグを 1.1 で直すのは**約束の履行**であって、約束を変える (新しい error を足す) のとは
+#     違う。この立場だと 1.1 で error に直してよい。
+#
+#   - このドラフトのどちらで扱うかが**曖昧**。利用者から見ると、
+#     - D3 厳密適用: 1.0 で書いた YAML が 1.1 で落ちることはない (強い約束)。ただしバグは 2.0 まで残る
+#     - 「約束の履行」として error に直す: 文書と実装の食い違いがなくなる。ただし 1.0 で (バグで) 通って
+#       いた YAML が 1.1 の error で止まる (弱い約束)
+#
+# この場面で確かめたいこと:
+#   - ドラフトが「バグ修正の error 化」を扱っていないことが、実装するときに判断に迷う原因になる。
+#   - Pass B の結論として「バグ修正は 1.x で error に直してよい。ただしリリースノートにバグ修正として
+#     明記する」のような条件を D3 に補足する案を推す (文書どおりの約束を取り戻す行為であって、新しい
+#     検査ではないから)。それでも「1.0 で通っていた YAML が 1.1 で落ちる」ことはあるので、
+#     「バグ修正で error 化する場合は、1.x のマイナー更新のリリースノートの筆頭に書く」のような
+#     運用の縛りを添えるのが落としどころ。
+#
+# 書いていて気になった点 (ドラフトへの feedback の種):
+#   - D3 本文を「1.x で足したキー・値に付く error、または文書に明記された error で実装の不備だった
+#     ものを直す error」の 2 条件にする案。後者には「バグ修正」であることをコミット・リリースノートで
+#     明示する運用を添える。
+#   - 対置案: D3 を厳密に守り、バグ修正の error 化も「warning に落として 2.0 まで待つ」。
+#     D2 の「検査を緩める」の対称で分かりやすいが、2.0 までバグが残るのは Consequences の「悪い影響」
+#     を広げる (今は「新しい検査を思いついても warning」だけ)。
+#   - いずれの決着でも、D3 に「文書と実装の食い違いが見つかったとき」の節を 1 段落足すのがよい。
+
+ndl_version: "1.0"
+
+meta:
+  name: b6-bug-missed-in-1-0
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1-a, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G }
+    - { id: link-leaf1-server1-b, endpoints: [leaf1-swp2, server1-eth1], link_speed: 10G }
+
+  lags:
+    - id: lag-leaf1-po1
+      node: leaf1                            # ← LAG は leaf1 のもの
+      name: po1
+      members: [leaf1-swp1, leaf1-swp2]
+      lacp: { mode: active }
+
+layer3:
+  interfaces:
+    # ← このエントリがバグ: node が leaf2 なのに、attaches_to の LAG は leaf1 のもの。
+    # 文書上は ADR-0011 D9 で error。1.0 の実装 (架空のバグ) では見逃されて通る想定。
+    - id: leaf2-po1-l3
+      node: leaf2                            # ← LAG の node (leaf1) と**食い違う**
+      name: Port-channel1
+      attaches_to: { lag: lag-leaf1-po1 }
+      ip: 10.250.0.2/31

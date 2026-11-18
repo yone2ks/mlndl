@@ -1,0 +1,102 @@
+# 場面 B5 (ペアの (a)): 1.0 の前に行う名前の直しの後の YAML (新しい名前)
+#
+# 1.0 のリリース前に片付ける名前の直し (棚卸し §2 / ADR-0027 Consequences):
+#   - `layer1.lag`  → `layer1.lags`
+#   - `layer2.vxlan` → `layer2.vxlans`
+#   - IS-IS の `level: level-1 / level-2 / level-all` → `level_1 / level_2 / level_all`
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか:
+#   - これらは 1.0 の前に直すので、1.0 の mlndl はこの YAML (新しい名前) を**そのまま読める**。
+#   - error も warning も出ない。
+#   - 1.x の間は名前の直しはこれで終わり (D2: 改名は 2.0 まで行わない)。
+#
+# この場面で確かめたいこと:
+#   - リリース時点の最終の名前がそろっていること (単数形 / 複数形、ハイフン / 下線)。
+#   - 利用者が最初に見る見本 (リファレンス・examples) を書く下地。
+#
+# 書いていて気になった点:
+#   - `lags` は語として自然だが、`vxlans` は略語の複数形で若干ぎこちない。linguist の意見を仰ぐ余地がある
+#     (`vxlans` にそろえるか、`l2vnis` / `vni` のような別の名前にするかは、棚卸しでは `vxlans` に決まった)。
+#   - IS-IS の `level_1` / `level_2` は `l2vpn_evpn` などとそろう。CLI メッセージで `"level_2"` と出すのは
+#     見慣れない人には読みにくいかもしれないが、他の列挙値と形がそろう利点のほうが大きい。
+
+ndl_version: "1.0"
+
+meta:
+  name: b5a-after-renames
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: leaf2-swp2, node: leaf2, name: swp2 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 10G }
+    - { id: link-leaf1-leaf2, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G }   # IS-IS の通り道
+
+  # 複数形 `lags` (改名後 — 1.0 の最終形)
+  lags:
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+      lacp: { mode: active }
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+      lacp: { mode: active }
+
+  ethernet_segments:
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - { ethernet_segment: es-server1 }
+
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # 複数形 `vxlans` (改名後 — 1.0 の最終形)
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32 }
+
+control_plane:
+  isis:
+    - id: isis-core
+      nodes: [{ node: leaf1 }, { node: leaf2 }]
+  routing_neighbors:
+    - id: isis-adj-leaf1-leaf2
+      type: isis
+      instance: isis-core
+      from: { node: leaf1, interface: leaf1-swp2 }
+      to:   { node: leaf2, interface: leaf2-swp2 }
+      # 下線区切り (改名後 — 1.0 の最終形)
+      level: level_2

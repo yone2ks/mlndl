@@ -1,0 +1,73 @@
+# 場面 B1: 1.0 で書いた YAML を 1.1 の mlndl で読む (新しい mlndl は古い YAML を読める)
+#
+# 時系列:
+#   - 利用者は 1.0 の時代に、小さな Spine-Leaf を `ndl_version: "1.0"` で書いて運用している。
+#   - mlndl を 1.1 に上げた。1.1 では L3 IF に任意フィールド `mtu` が足された想定 (B2 以降の題材)。
+#   - 利用者は YAML を触っていない。この YAML をそのまま 1.1 の mlndl に食わせる。
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか:
+#   - D5: `ndl_version: "1.0"` の YAML を 1.1 の mlndl が読む。主番号 1 で合い、マイナー 0 は
+#     1.1 が読める範囲 (1.0 と 1.1) に入るので、版の error は出ない。
+#   - D2: 1.1 で足したのは「任意のキー `mtu` を加算する」こと。この YAML は `mtu` を書いていない
+#     ので、既存の検査にしか引っかからず、error も新たな warning も出ない。
+#   - D8: 利用者向けの文に出てくる「新しい mlndl は、古い版の YAML を読めます (1.x の間)」の約束が
+#     ここで働く。
+#
+# 期待される結果: error 0、warning 0。1.0 のときと同じ結果 ("valid")。
+#
+# この場面で確かめたいこと:
+#   - D5 と D2 の組み合わせで、1.0 の YAML が 1.1 の mlndl で**何も挙動が変わらない**ことを示す。
+#   - 利用者が「mlndl を上げたら突然 YAML を直す羽目になる」不安がないことの保証。
+#
+# メモ: パッケージのバージョン (`mlndl --version`) が `1.1.x` であっても、`LANGUAGE_VERSION` と
+#       `ndl_version` の比較で版ズレは判定するので、`ndl_version` を上げずに読めるのが約束 (D6)。
+
+ndl_version: "1.0"
+
+meta:
+  name: b1-small-spine-leaf
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+    - { id: leaf2,  name: Leaf-2,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: spine1-swp2, node: spine1, name: swp2 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+    - { id: leaf2-swp51, node: leaf2,  name: swp51 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, link_role: underlay }
+
+layer3:
+  interfaces:
+    - { id: spine1-swp1-l3, node: spine1, name: swp1, attaches_to: { interface: spine1-swp1 }, ip: 10.1.0.0/31 }
+    - { id: spine1-swp2-l3, node: spine1, name: swp2, attaches_to: { interface: spine1-swp2 }, ip: 10.1.0.2/31 }
+    - { id: leaf1-swp51-l3, node: leaf1,  name: swp51, attaches_to: { interface: leaf1-swp51 }, ip: 10.1.0.1/31 }
+    - { id: leaf2-swp51-l3, node: leaf2,  name: swp51, attaches_to: { interface: leaf2-swp51 }, ip: 10.1.0.3/31 }
+    - { id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.0/32 }
+    - { id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.1/32 }
+    - { id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.2/32 }
+
+control_plane:
+  bgp:
+    - id: bgp-underlay
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+        - { node: leaf2,  local_as: 65002 }
+  routing_neighbors:
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      instance: bgp-underlay
+      from: { node: spine1, update_source: spine1-swp1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-swp51-l3 }
+      address_families: [ipv4_unicast]
+    - id: bgp-peer-spine1-leaf2
+      type: bgp
+      instance: bgp-underlay
+      from: { node: spine1, update_source: spine1-swp2-l3 }
+      to:   { node: leaf2,  update_source: leaf2-swp51-l3 }
+      address_families: [ipv4_unicast]

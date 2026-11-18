@@ -1,0 +1,52 @@
+# 場面 B3 (ペアの (a)): 1.1 で `mtu` に新しい検査を足したとき、`mtu` を書いていない 1.0 の YAML には効かない
+#
+# 時系列 (B2 の続き):
+#   - 1.1 で `layer3.interfaces[].mtu` を加算 (任意、整数) した。
+#   - さらに 1.1 で、`mtu` を書いた L3 IF に対して「IPv6 を持つなら `mtu >= 1280`、下回ると error」の検査を足す。
+#     これは D3 の「1.x で足したキーに付く新しい error」として許される (そのキーを書いた YAML は 1.0 までは存在しなかった)。
+#   - この YAML は `ndl_version: "1.0"` で、`mtu` を書いていない。1.1 の mlndl が読む。
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか:
+#   - D5: `"1.0"` は 1.1 の mlndl が読める。版の error なし。
+#   - D3: 新しい検査 (「`mtu < 1280` with IPv6」の error) は「`mtu` を書いたエントリ」にだけ掛かる。
+#     この YAML の L3 IF はどれも `mtu` を書いていないので、検査の前提が満たされず、error も warning も出ない。
+#   - B1 と結果は同じ ("valid")。
+#
+# この場面で確かめたいこと:
+#   - D3 の「新しい error は、1.x で足したキー・値に付くものだけ」が実際にどういう形で守られるか。
+#     検査の実装は「`mtu` が設定されているときだけ発動」の条件を持つ必要がある。
+#   - 1.0 の YAML が 1.1 の mlndl で「error なしで読める」(D8) ことが、検査を足しても保たれる。
+#
+# 書いていて気になった点 (ドラフトへの feedback の種):
+#   - D3 は「1.x で足したキーに付く検査は足したときから error にしてよい」とだけ書く。「キーが
+#     設定されているときだけ発動する」という条件は暗黙で、検査を書く人が守ることになる。
+#     「新しい検査は、そのキーが存在するエントリの範囲でだけ発動する」のような実装上の条件を
+#     Consequences か validator.py の運用規則に書き足すとよい。
+#   - 「`mtu` の値がデフォルトのときも検査するかどうか」のような周辺の論点が出てくる。mlndl は
+#     任意の数値フィールドに「書かれていないこと」と「書かれた値」の区別があるので、検査は
+#     `None` のときは発動させない、と約束するのが自然。
+
+ndl_version: "1.0"
+
+meta:
+  name: b3a-ndl-1-0-no-mtu
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: host-a, name: Host-A, implementation: physical, role: server }
+  interfaces:
+    - { id: leaf1-swp1,  node: leaf1,  name: swp1 }
+    - { id: host-a-eth0, node: host-a, name: eth0 }
+  links:
+    - { id: link-leaf1-host-a, endpoints: [leaf1-swp1, host-a-eth0], link_speed: 10G }
+
+layer3:
+  interfaces:
+    # IPv6 を持つが `mtu` は書いていない。1.1 で足した mtu 下限の検査には引っかからない。
+    - id: leaf1-swp1-l3
+      node: leaf1
+      name: swp1
+      attaches_to: { interface: leaf1-swp1 }
+      ip: 10.100.0.1/24
+      ipv6: 2001:db8:100::1/64

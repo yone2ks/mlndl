@@ -1,0 +1,54 @@
+# 場面 B3 (ペアの (b)): 1.1 で足した `mtu` に、1.1 で足した新しい error が掛かる
+#
+# 時系列:
+#   - 1.1 で `mtu` を加算 (B3a 参照)。
+#   - 同じ 1.1 で「IPv6 を持つ L3 IF で `mtu < 1280` なら error」を足す (RFC 8200 の最小リンク MTU)。
+#   - 利用者は 1.1 対応の mlndl で、`mtu: 1000` の L3 IF (IPv6 あり) を書いた。
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか:
+#   - D5: `ndl_version: "1.1"` は 1.1 の mlndl と一致、版の error なし。
+#   - D3: この error は 1.1 で足したキー `mtu` に付くので、1.1 から error でよい (D3 の「1.x で足した
+#     キー・値に付く新しい error」)。
+#   - 期待される error (メッセージ案):
+#
+#         layer3.interfaces[leaf1-swp1-l3]: mtu 1000 は IPv6 の最小リンク MTU (1280) を下回っています。
+#         1280 以上にするか、ipv6 を外してください (RFC 8200、ADR-0027 D3)
+#
+# この場面で確かめたいこと:
+#   - D3 の運用: 1.1 で足したキーの検査は、足した版からすぐ error でよい。「1.1 で warning →
+#     1.2 で error」のような予告の運用は採らない (ドラフトの Alternatives Considered より)。
+#   - 1.0 の YAML (B3a) には影響しない。新しい error が既存の YAML を落とすことがない (D3 の約束)。
+#
+# 書いていて気になった点:
+#   - 「1.1 で足した値 (mtu: 1000) に対して 1.1 で error」は分かりやすいが、境界的な場面がある。
+#     例: 1.1 で `mtu` を足して、1.2 で「mtu と path MTU の一致」のような新しい検査を足したとき、
+#     検査が参照する `mtu` キーは「1.1 で加算した既存のキー」。これは「1.x で足したキー・値に付く」
+#     の範囲内か? ドラフトを素直に読むと「`mtu` は 1.1 で加算したキー」なので 1.2 でも error に
+#     できることになる。「足した版と error を入れた版が同じでなくてよい」ことを D3 に 1 行足すと
+#     誤解がなくなる。
+
+ndl_version: "1.1"
+
+meta:
+  name: b3b-ipv6-mtu-too-small
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: host-a, name: Host-A, implementation: physical, role: server }
+  interfaces:
+    - { id: leaf1-swp1,  node: leaf1,  name: swp1 }
+    - { id: host-a-eth0, node: host-a, name: eth0 }
+  links:
+    - { id: link-leaf1-host-a, endpoints: [leaf1-swp1, host-a-eth0], link_speed: 10G }
+
+layer3:
+  interfaces:
+    # IPv6 を持ち、mtu が 1280 未満 → 1.1 で足した新しい error の対象。
+    - id: leaf1-swp1-l3
+      node: leaf1
+      name: swp1
+      attaches_to: { interface: leaf1-swp1 }
+      ip: 10.100.0.1/24
+      ipv6: 2001:db8:100::1/64
+      mtu: 1000              # ← error: IPv6 の最小リンク MTU 1280 を下回る
