@@ -1,0 +1,115 @@
+# 場面 C6 (直した後): 棚卸し §2 の名前を直した**後**の書き方
+#
+# 題材 (C6a と同じ構成):
+#   - `layer1.lag`            → `layer1.lags`
+#   - `layer2.vxlan`          → `layer2.vxlans`
+#   - IS-IS の `level: level-1` → `level: level_1` (`level-2` → `level_2`、`level-all` → `level_all`)
+#
+# 今の mlndl (1.0) で読むとどうなるか:
+#   - 現状の実装 (`layer1.py:439`、`layer2.py:256`、`control_plane.py:212`) はこれらの名前を知らないので、
+#     - `layer1.lags` は L1Layer の未知キーで error (`extra="forbid"`)
+#     - `layer2.vxlans` は同じく未知キーで error
+#     - IS-IS の `level: level_1` は `Literal["level-1", "level-2", "level-all"]` からはずれ error
+#   - つまり**今の mlndl では読めない**。改名を行うのはメジャー更新 (2.0)。
+#
+# 約束の案ごとに「どうあるべきか」:
+#   (a) 前方互換を error のまま: 2.0 でだけ改名。1.x では C6a のまま。利用者は 2.0 への乗り換え時に
+#       この YAML に書き換える。短いコマンド 1 本の sed で済む規模なので、大きな負担ではない。
+#       `ndl_version: "2.0"` を上げることも強制できるので、版と形の整合が取れる。
+#   (b) 新しい版だと知らせて止める: 2.0 の mlndl で C6a (旧名) を読むと「この YAML は 1.0 ですが、
+#       パッケージは 2.0 です。`ndl_version` を上げて、`lag` を `lags` に、`vxlan` を `vxlans` に、
+#       `level-N` を `level_N` に直してください」のまとまった案内。利用者の視点で原因と直し方が
+#       一致する。(a) を支える道具として自然。
+#   (c) 未知のキーを warning にして読み進める: 1.x の間に `lags` も `lag` も受け付ける、を意味する。
+#       両方書かれた場合の優先順位、ndl-viz など下流のツールのどちらを見るか、など曖昧さが増える。
+#       棚卸し §1 の「移動先を示す error」の流儀 (ADR-0025) と逆向きで、採らない方がよい。
+#
+# example-author の推奨:
+#   - 1.0 を出した後、改名は 2.0 で一括 (この YAML が valid になるのは 2.0 から)。
+#   - 2.0 の mlndl には C6a を読んだときに「移動先を示す error」を入れる (ADR-0025 と同じ流儀)。
+#   - 1.x の間は改名しない (この YAML は 1.x では読めない)。
+#
+# なお、この版の約束が `ndl_version: "2.0"` との同期を**強制**するかは別論点:
+#   - `ndl_version: "1.0"` のまま新形式を書いた YAML は、2.0 の mlndl では error にする (版と形の不整合)。
+#   - これが (b) の案内メッセージの前提になる。
+
+ndl_version: "2.0"              # 改名は 2.0 から
+
+meta:
+  name: after-rename-snippet
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: leaf2-swp2, node: leaf2, name: swp2 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 10G }
+    - { id: link-leaf1-leaf2, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G }   # IS-IS の通り道 (統合担当が足した)
+
+  # ↓ 複数形 `lags` (改名後)
+  lags:
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+      lacp: { mode: active }
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+      lacp: { mode: active }
+
+  ethernet_segments:
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - { ethernet_segment: es-server1 }
+
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # ↓ 複数形 `vxlans` (改名後)
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32 }
+
+control_plane:
+  isis:
+    - id: isis-core
+      nodes: [{ node: leaf1 }, { node: leaf2 }]
+  routing_neighbors:
+    - id: isis-adj-leaf1-leaf2
+      type: isis
+      instance: isis-core
+      from: { node: leaf1, interface: leaf1-swp2 }
+      to:   { node: leaf2, interface: leaf2-swp2 }
+      # ↓ 下線区切り (改名後)
+      level: level_2

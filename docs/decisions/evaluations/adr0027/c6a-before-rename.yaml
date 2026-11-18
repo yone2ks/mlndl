@@ -1,0 +1,112 @@
+# 場面 C6 (直す前): 棚卸し §2 の名前を直す**前**の書き方
+#
+# 題材:
+#   - `layer1.lag`            (単数形。ほかのコレクションはすべて複数形)
+#   - `layer2.vxlan`          (単数形)
+#   - IS-IS の `level: level-1` (ハイフン区切り。ほかの列挙はすべて下線区切り)
+#
+# 今の mlndl (1.0) で読むとどうなるか:
+#   - これらは実装の現状 (`layer1.py:439`、`layer2.py:256`、`control_plane.py:212`) にそのまま合う。
+#   - error も warning も出ずに通る。
+#
+# 利用者としてほしいこと (直す提案):
+#   - `lag` → `lags`、`vxlan` → `vxlans`、`level-1` → `level_1` / `level-2` → `level_2` / `level-all` → `level_all`。
+#   - ほかのコレクション・列挙とそろえる。
+#
+# 約束の案ごとに「どうあるべきか」:
+#   (a) 前方互換を error のまま: 名前の変更は破壊的なので 2.0 でだけ行える。1.0 の約束を「名前は 1.x の
+#       間は変えない」と書くなら、この YAML は 1.x の最後まで valid のまま。
+#   (b) 新しい版だと知らせて止める: 1.1 で名前を変える約束はしないので、この案では関係しない。
+#   (c) 未知のキーを warning にして読み進める: `lag` を 1.x で `lags` に改名し、`lag` は warning で
+#       読み替える、という案に対応する。読み替えがあると、下流のツールが古い名前を見続ける可能性が
+#       あり、「2.0 まで直さない人」の受け皿になる。利点は乗り換えのペースを利用者が決められること。
+#       危険は、`lag` と `lags` の両方を書いた YAML の意味が曖昧になること。
+#
+# example-author の推奨:
+#   - 名前はそろえる (`lags` / `vxlans` / `level_1` …) が、**2.0 でだけ**。1.x の間は「警告だけで
+#     読み替える」はしない。読み替えは古い形を残す力が働き、下流のツール (ndl-viz、eve-lab-builder)
+#     の切り替えが進まない。
+#   - 代わりに、1.x の間は「名前の直しは 2.0 で行う」と約束するだけに留める (加算で上書きしない)。
+#   - もし 1.x で早く直したいなら、ADR-0025 と同じく「移動先を示す error」で読み替えずに止めるのが
+#     一貫する。ただしこれ自体が破壊的なので、2.0 と同時に行うのが筋。
+
+ndl_version: "1.0"
+
+meta:
+  name: before-rename-snippet
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: leaf2-swp2, node: leaf2, name: swp2 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 10G }
+    - { id: link-leaf1-leaf2, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G }   # IS-IS の通り道 (統合担当が足した)
+
+  # ↓ 単数形 `lag` (現在の名前)
+  lag:
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+      lacp: { mode: active }
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+      lacp: { mode: active }
+
+  ethernet_segments:
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - { ethernet_segment: es-server1 }
+
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # ↓ 単数形 `vxlan` (現在の名前)
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32 }
+
+control_plane:
+  isis:
+    - id: isis-core
+      nodes: [{ node: leaf1 }, { node: leaf2 }]
+  routing_neighbors:
+    - id: isis-adj-leaf1-leaf2
+      type: isis
+      instance: isis-core
+      from: { node: leaf1, interface: leaf1-swp2 }
+      to:   { node: leaf2, interface: leaf2-swp2 }
+      # ↓ ハイフン区切り (現在の値)
+      level: level-2

@@ -1,0 +1,47 @@
+# 場面 C1: `ndl_version` を書かない YAML
+#
+# 今の mlndl (1.0) で読むとどうなるか:
+#   - `topology.py:27` が既定値 `"1.0"` を持つので、書かなくても **読める** (error にならない)。
+#   - リファレンス (`docs/reference/README.ja.md:54`) は「必須」と書いているので、仕様文書と実装がずれている。
+#
+# 利用者として起きうる困りごと:
+#   - 1.x の間はたまたま通るが、2.0 の mlndl で既定値を 2.0 に上げた瞬間に、意図しないメジャー版で解釈されてしまう。
+#   - 1.1 で新しいキーが入ると、「版を書かない旧い YAML」なのか「1.1 の YAML なのに書き忘れた」のかを mlndl が区別できない。
+#
+# 約束の案ごとに「どうあるべきか」:
+#   (a) 前方互換を error のまま: `ndl_version` を必須フィールドにする (default を外す) →
+#       「ndl_version を必ず書いてください (1.0 以降は必須)」の error。
+#       乗り換えの手間は「`ndl_version: "1.0"` の一行を足す」だけで小さい。
+#   (b) 新しい版だと知らせて止める: このケース (version 欠落) は「新しい版かどうか分からない」ので、
+#       結局 (a) と同じく「書いてください」の error が自然。
+#   (c) 未知のキーを warning にして読み進める: 版の欠落は「未知のキー」ではないので、この案では
+#       既定値の 1.0 で読むしかない。利用者からは「通ったけど何版として読まれた?」が見えなくなる。
+#
+# example-author の推奨: (a)。既定値をスキーマから外し、書き忘れは error。1.0 の前に直すなら破壊的ではない
+# (今も「書きなさい」と文書で言っているので、書いていない YAML は規約違反)。
+# もし既定を残すなら、少なくとも「既定値で読んだ」ことを info で知らせたい。
+
+meta:
+  name: missing-ndl-version
+  network_types: [l1-physical]
+
+layer1:
+  nodes:
+    - id: spine1
+      name: Spine-1
+      implementation: vm
+      role: spine
+      device_type: cumulus_linux
+    - id: leaf1
+      name: Leaf-1
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1, name: swp51 }
+  links:
+    - id: link-spine1-leaf1
+      endpoints: [spine1-swp1, leaf1-swp51]
+      link_speed: 10G
+      link_role: underlay

@@ -211,3 +211,14 @@ EVPN-VXLAN では VLAN の番号は機器の中だけの番号で、機器ごと
 L2VNI の `vlan` を `vlans` (リスト) にし、旧 `vlan` は移動先を示す error、1 台の機器で 1 つの VNI に VLAN は 1 つまで、anycast gateway の一致は VNI 単位、とする案。
 Pass B (2026-11-15) で、D3 の定義を L2VNI に入る / 入らない VLAN の 2 段にし、SVI から機器を導くのを L2VNI の中に限り、SVI の VRF の食い違いを error に足した (改訂 1)。
 Pass C (2026-11-15) でも参照の向きは 4/5 が案 A で、ユーザーが案 A で確定した。同じ機器での `vlan_id` の重複の検査に SVI も数え、`anycast_gateway` と `vrrp` の混在を warning に足した。
+
+### 1.0 に向けて (2026-11-18〜)
+
+| ADR | タイトル | Status | Pass |
+|-----|---------|--------|------|
+| [evaluations/release-1.0](evaluations/release-1.0/inventory.md) | 1.0 に向けた棚卸し (1.0 の前に決めること・やること・後でよいこと) | — | — |
+| [drafts/0027](drafts/0027-compatibility-promise.md) | 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更 | Draft | A |
+| [evaluations/adr0027](evaluations/adr0027/) | ADR-0027 試し書き (C1〜C6) | — | — |
+
+1.0 の後は破壊的な変更にメジャーバージョンの更新が要る、という方針の中身を決める。`ndl_version` を必須にし、YAML より古い mlndl は版の違いを知らせて止まる。
+1.x で許すのはキー・値を足す、値域を広げる、検査を緩める、warning を足すこと。既存の YAML を落とす新しい error は 2.0 まで待ち、`--strict` はその版の warning を error にすることだけを約束する。

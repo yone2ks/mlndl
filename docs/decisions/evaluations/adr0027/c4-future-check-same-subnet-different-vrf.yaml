@@ -1,0 +1,68 @@
+# 場面 C4: 1.0 で valid だが、1.x で足しうる新検査に引っかかる YAML
+#
+# 想定する将来の検査 (まだ未実装):
+#   「同じ機器の 2 つの L3 IF が、同じ /N サブネットに属し、別の VRF にある」 → warning。
+#   leaky VRF や意図しない重複なので、知らせる値がある。似た検査として「VRRP の両端の priority が
+#   同じ」なども候補。ここでは前者を題材にする。
+#
+# この YAML は:
+#   - leaf1 に swp1 (vrf-tenant-a, 10.100.0.1/24) と swp2 (vrf-tenant-b, 10.100.0.2/24) がある。
+#   - 2 つは **同じ /24** で、**別の VRF**。
+#   - 1.0 の意味の検査にはこの条件はないので、今は error も warning も出ずに通る。
+#
+# 約束の案ごとに「どうあるべきか」:
+#   (a) 前方互換を error のまま: 1.0 で通った YAML は、1.1 で検査を足しても通ることを約束する。
+#       足せるのは「warning か info」まで。この YAML は 1.1 で warning になり、`--strict` を使う
+#       CI では落ちうる。棚卸しに書いた約束 (「検査を強めるのは破壊的」) は守られる。
+#   (b) 新しい版だと知らせて止める: この YAML は版も合っているので、版に関する約束からは出てこない。
+#       「検査を強める = 破壊的」の面はそのまま。
+#   (c) 未知のキーを warning にして読み進める: 検査の追加はキーの追加とは独立なので、この約束は
+#       ここに影響しない。
+#
+# つまり C4 の論点は版の約束ではなく「`validate()` の結果の約束」。
+# example-author の提案:
+#   - 1.x の間は、**新しい検査は warning 以下**でだけ足す (error に昇格するのはメジャー更新)。
+#   - `--strict` を既定にしない (CI だけで使う前提にする)。
+#   - error を緩める (warning に下げる) のは加算。これはすでに棚卸しに書かれている。
+#
+# この約束が守られる限り、1.0 で書いた YAML は 1.x の間ずっと「error なしで読める」ことが保証される。
+
+ndl_version: "1.0"
+
+meta:
+  name: future-check-same-subnet-different-vrf
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: host-a, name: Host-A, implementation: physical, role: server }
+    - { id: host-b, name: Host-B, implementation: physical, role: server }
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: host-a-eth0, node: host-a, name: eth0 }
+    - { id: host-b-eth0, node: host-b, name: eth0 }
+  links:
+    - { id: link-leaf1-host-a, endpoints: [leaf1-swp1, host-a-eth0], link_speed: 10G }
+    - { id: link-leaf1-host-b, endpoints: [leaf1-swp2, host-b-eth0], link_speed: 10G }
+
+layer3:
+  vrfs:
+    - { id: vrf-tenant-a, rd: "65001:100" }
+    - { id: vrf-tenant-b, rd: "65001:200" }
+  interfaces:
+    # 意図せず同じ 10.100.0.0/24 を 2 つの VRF で使っている。
+    # 1.0 では error も warning も出ないが、将来 warning を足す候補。
+    - id: leaf1-swp1-l3
+      node: leaf1
+      name: swp1
+      attaches_to: { interface: leaf1-swp1 }
+      ip: 10.100.0.1/24
+      vrf: vrf-tenant-a
+    - id: leaf1-swp2-l3
+      node: leaf1
+      name: swp2
+      attaches_to: { interface: leaf1-swp2 }
+      ip: 10.100.0.2/24
+      vrf: vrf-tenant-b

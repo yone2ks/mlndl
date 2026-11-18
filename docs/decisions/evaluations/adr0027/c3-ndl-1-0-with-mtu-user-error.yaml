@@ -1,0 +1,56 @@
+# 場面 C3: `ndl_version: "1.0"` のまま 1.1 で足される想定の `mtu` を書いた YAML (書き手の誤り)
+#
+# 今の mlndl (1.0) で読むとどうなるか:
+#   - C2 と同じく、L3Interface の `extra="forbid"` で `mtu` が拒まれる。
+#   - こちらは `ndl_version: "1.0"` なので、版はこの mlndl で読める。純粋に書き手が
+#     「1.0 で書けないキーを書いた」ケース。
+#
+# 利用者としてほしいこと:
+#   - 「1.0 では `mtu` は書けません。1.1 以降で足す予定です」という、原因 (版と機能のミスマッチ) と
+#     直し方 (キーを外す / `ndl_version` を上げる) の両方を示す error。
+#
+# 約束の案ごとに「どうあるべきか」:
+#   (a) 前方互換を error のまま: 「`layer3.interfaces[].mtu` は未知のキーです」と pydantic の既定メッセージ。
+#       直し方は利用者が検索する必要がある。
+#   (b) 新しい版だと知らせて止める: ここでは版は 1.0 だから版チェックは通る。結局 (a) と同じ error に落ちる。
+#       ただし、将来の加算キーをパッケージが覚えていれば、「`mtu` は 1.1 で足す予定です。
+#       `ndl_version: "1.1"` にするか、キーを外してください」とは案内できる。
+#   (c) 未知のキーを warning にして読み進める: `mtu` を黙って捨てる。利用者の誤り (綴り誤り / 版違い) が
+#       隠れる。この約束は、書き手の誤りを見逃す副作用が大きい。
+#
+# example-author の推奨: (a) が基本。(c) は推さない。
+# 追加でよい案: パッケージが「将来の予約語」(1.1 以降で足す予定のフィールド名) を覚えていて、
+# そのいずれかにぶつかったら「このキーは `ndl_version: "X.Y"` 以降で足す予定です」と案内する。
+# 未知のキーが多いと保守負荷が増すので、予約語の表は「加算 ADR が合意されたときだけ」更新する。
+
+ndl_version: "1.0"           # 1.0 のまま
+
+meta:
+  name: ndl-1-0-with-future-mtu
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+  links:
+    - id: link-spine1-leaf1
+      endpoints: [spine1-swp1, leaf1-swp51]
+      link_speed: 10G
+      link_role: underlay
+
+layer3:
+  interfaces:
+    - id: spine1-swp1-l3
+      node: spine1
+      name: swp1
+      attaches_to: { interface: spine1-swp1 }
+      ip: 10.1.0.0/31
+      mtu: 9000              # 1.0 には存在しないキー。書き手の誤り
+    - id: leaf1-swp51-l3
+      node: leaf1
+      name: swp51
+      attaches_to: { interface: leaf1-swp51 }
+      ip: 10.1.0.1/31

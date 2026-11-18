@@ -1,0 +1,74 @@
+# 場面 C5: `attaches_to: esxi-01` の文字列の糖衣構文と、`meta` に未知のキーを書いた YAML
+#
+# 今の mlndl (1.0) で読むとどうなるか:
+#   - `attaches_to: esxi-01` の文字列は、`layer1.py:84` あたりで `{node: esxi-01}` と等価に読まれる (糖衣構文)。
+#   - `meta` は `extra="allow"` (`topology.py:16`) なので、未知のキー (`author`、`created` など) を受け付ける。
+#   - どちらも通る。
+#
+# 利用者としてほしいこと:
+#   - **この 2 つは「残す」と約束してほしい。** 糖衣構文は書き味の要で、手書きの小さい YAML では
+#     とても便利。`meta` に自由に書ける欄があるのは、実運用で利用者ごとに足すメタ情報 (author、
+#     created、プロジェクト名、ticket ID) に対応するのに重要。
+#
+# 約束の案ごとに「どうあるべきか」:
+#   (a) 前方互換を error のまま: 糖衣構文を 1.x の間「仕様の一部」として明記し、2.0 でも外さない約束。
+#       `meta` の `extra="allow"` も「`meta` だけが未知のキーを受け付ける」と明記。棚卸し §1 の
+#       「残す形として明記する」の 2 項目は、この約束案と一致している。
+#   (b) 新しい版だと知らせて止める: ここには影響しない (版は 1.0、既知のキーしか使っていない)。
+#   (c) 未知のキーを warning にして読み進める: `meta` 以外にも未知キーの猶予が生まれ、`meta` の
+#       既定扱い (`extra="allow"`) との境界が曖昧になる。危険。
+#       また `attaches_to` を文字列で書く糖衣構文は「未知のキー」とは別の話で、この案には関係しない。
+#
+# example-author の推奨:
+#   - 糖衣構文は約束の一部として明記する (これはすでに棚卸しの第 1 項目にある)。
+#   - `meta` の `extra="allow"` も約束に残す。ただし「`meta` **だけ**」を強調する ((c) 案を採らない
+#     ことで境界を保つ)。
+#   - `meta` の推奨キーは informative に (`docs/reference/README.ja.md` に例を示す)。推奨外も valid。
+
+ndl_version: "1.0"
+
+meta:
+  name: sugar-and-meta-extra-demo
+  network_types: [l1-physical]
+  # ↓ 未知のキー。`meta` だけは extra="allow" なので通る。
+  author: yone                        # 利用者が自由に足すメタ情報
+  created: "2026-11-18"
+  ticket: NET-1234
+  tags: [lab, poc]                    # 実運用で足したくなる軸は、ここに書いて下流のツールで拾う
+  project:
+    name: dc-lab
+    owner: netops
+
+layer1:
+  nodes:
+    # 物理ホスト
+    - id: esxi-01
+      name: ESXi-01
+      implementation: physical
+      role: hypervisor
+
+    # VM — attaches_to を文字列で書く糖衣構文。`{node: esxi-01}` と等価。
+    - id: spine1
+      name: Spine-1
+      implementation: vm
+      role: spine
+      device_type: cumulus_linux
+      attaches_to: esxi-01            # ← 糖衣構文
+
+    # VM — 対比のためこちらは正規形で書く。
+    - id: leaf1
+      name: Leaf-1
+      implementation: vm
+      role: leaf
+      device_type: cumulus_linux
+      attaches_to: { node: esxi-01 }  # ← 正規形
+
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+
+  links:
+    - id: link-spine1-leaf1
+      endpoints: [spine1-swp1, leaf1-swp51]
+      link_speed: 10G
+      link_role: underlay
