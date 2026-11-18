@@ -217,7 +217,7 @@ Pass C (2026-11-15) でも参照の向きは 4/5 が案 A で、ユーザーが�
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
 | [evaluations/release-1.0](evaluations/release-1.0/inventory.md) | 1.0 に向けた棚卸し (1.0 の前に決めること・やること・後でよいこと) | — | — |
-| [0027](0027-compatibility-promise.md) | 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更 (実装はまだ) | **Accepted** | C |
+| [0027](0027-compatibility-promise.md) | 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更 (2026-11-19 実装) | **Accepted** | C |
 | [drafts/0027](drafts/0027-compatibility-promise.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0027 | A |
 | [evaluations/adr0027](evaluations/adr0027/evaluation.md) | ADR-0027 横断評価メモ (Pass B) と Pass C の結果。試し書き C1〜C6、`passb/` B1〜B6、`passc/` P1〜P4b | — | — |
 

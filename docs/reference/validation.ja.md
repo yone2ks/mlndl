@@ -12,6 +12,12 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 
 `python -m mlndl validate --strict` は warning を error として扱います。決め方は [ADR-0002](../decisions/0002-id-naming-convention.md) D8 にあります。
 
+### CI で使うとき
+
+`--strict` は、そのバージョンの warning をすべて error にします。1.x のマイナーバージョンで warning が増えることがあるので ([ADR-0027](../decisions/0027-compatibility-promise.md) D4)、CI では `mlndl==1.1.*` のようにマイナーバージョンを固定してください。
+上げるときは、まず `--strict` なしで流して新しい warning を確かめ、直してから `--strict` に戻します。パッチバージョンで warning が増えることはありません。
+1.0 で error にならなかった YAML は、1.x のどのバージョンでも error になりません (この文書に error と書いてあったのに実装が見逃していた誤りを、バグの修正として直す場合を除く)。
+
 検査は 2 段階で行います。
 
 1. **スキーマ**: キーの名前と値の型、必須のキー、列挙の値、1 つのエンティティの中で決まる規則 (`container` × `hypervisor` など)。ここで誤りがあると次の段階に進めません
@@ -23,7 +29,8 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 |---|---|
 | ファイルが 1MB を超えない | error |
 | YAML として読める。同じマッピングに同じキーを 2 回書いていない | error |
-| `ndl_version` の主番号が 1 | error |
+| `ndl_version` を書いている。引用符で囲んだ `"<メジャー>.<マイナー>"` の文字列 (`ndl_version: 1.0` のように数で書くと error)。メジャーが 1 より古くない ([ADR-0027](../decisions/0027-compatibility-promise.md) D5) | error |
+| `ndl_version` がこの mlndl の読めるバージョン (`mlndl.LANGUAGE_VERSION`) より新しくない。新しければ、ほかの検査より先にこの error 1 本だけで止まる (Python では `mlndl.UnsupportedVersionError`)。メジャーとマイナーは数として比べる (`1.10` は `1.9` より新しい) | error |
 | 決められたキーしか書いていない (`meta` を除く) | error |
 
 ## すべての区画に共通

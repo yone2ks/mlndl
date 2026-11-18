@@ -86,21 +86,19 @@ implementation: physical    # 物理機器
 implementation: container   # コンテナ
 ```
 
-### 3. `ndl_version` — 必須フィールド
+### 3. `ndl_version` — 必須フィールドと互換の約束
 
-```python
-class MLNDLTopology(BaseModel):
-    ndl_version: str = "1.0"
+> **→ 詳細: [ADR-0027](docs/decisions/0027-compatibility-promise.md)**
 
-    @model_validator(mode="before")
-    @classmethod
-    def check_version(cls, data: dict) -> dict:
-        ver = data.get("ndl_version", "")
-        major = int(ver.split(".")[0]) if ver else 0
-        if major != 1:
-            raise ValueError(f"Unsupported MLNDL version: {ver}. Expected 1.x")
-        return data
-```
+- `ndl_version` は必須。引用符で囲んだ `"<メジャー>.<マイナー>"` の文字列。**この YAML を読むのに要る、最も古い mlndl のバージョン**を表す（書いたときのバージョンではない）
+- 検査は `src/mlndl/version.py` の `check_ndl_version`。parser が pydantic に渡す前に呼ぶ（モデルの `check_version` は保険）。書かない・数で書いた・書式違反・メジャーが古いと `ValueError`、
+  mlndl の `LANGUAGE_VERSION` より新しいと `UnsupportedVersionError`（`ValueError` のサブクラス）。新しいバージョンの YAML は、未知のキーの error より先にこの 1 本で止める
+- パッケージの `メジャー.マイナー` は `LANGUAGE_VERSION` と同じにする（1.0 のリリースから）。エクスポーターの出力のルートに `meta: {ndl_version, mlndl_version}`
+- **1.x で許す**: 任意のキー・値・コレクションを足す、型・値域を広げる、必須を任意に、検査を緩める、warning を足す（マイナーだけ。パッチではキーも warning も足さない）
+- **2.0 が要る**: 改名・削除、必須にする、既定値・意味を変える、型を狭める、検査を強める。新しい error は 1.x で足したキー・値に付くものだけ。
+  文書（ADR の本文・この CLAUDE.md の表・`validation.ja.md`）に error と書いてあったのに実装が見逃した誤りを直すのはバグの修正
+- 規範: YAML、検査の結果と severity、公開の API（`__all__`）、CLI、エクスポーターの規範キー（`docs/exporter-cytoscape.md` の「規範」の列）。参考: 区画の中のモデルの属性と型、`derive.py`、メッセージの文面、`schema.json`
+- 1.0 を出す前の破壊的な変更はこの約束の対象外（名前と型の直しは ADR-0028 で決める）
 
 ### 4. セキュリティ
 
@@ -482,7 +480,8 @@ mlndl/
 │       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
 │       ├── index.py            # IdIndex（id → エンティティの索引）
 │       ├── derive.py           # 参照をたどって求める関係（L2VNI の機器ごとの VLAN ADR-0026、Ethernet Segment の脚 ADR-0023、VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
-│       ├── parser.py           # yaml.safe_load + 1MB 制限
+│       ├── parser.py           # yaml.safe_load + 1MB 制限 + ndl_version の検査（pydantic の前）
+│       ├── version.py          # LANGUAGE_VERSION / __version__ / UnsupportedVersionError（ADR-0027）
 │       ├── validator.py        # 整合性チェック
 │       └── exporter/
 │           ├── yaml.py
@@ -585,6 +584,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0024](docs/decisions/0024-remove-node-overrides.md) | 機器の `overrides` をなくす | **C**（2026-11-09 実装） | `layer1.nodes[].overrides`（`dict[str, Any]`）をなくし、書いたら理由と移動先を示す error。下流のツールの値（CPU / RAM / イメージ等）は下流のツールの設定で機器の id を引いて持つ。ツール向けの汎用の欄は 1.x では足さない（補足は `description`、分類は `labels`、それ以外は ADR で専用のフィールド）。要るなら名前空間付きの `map[str, str]` を検討し `dict[str, Any]` には戻さない |
 | [ADR-0025](docs/decisions/0025-end-grace-for-old-forms.md) | 1.0 の前に旧形式の猶予 (warning) をやめる | **C**（2026-11-09 実装） | 「1.x の間は読み替えて warning」とした旧形式（L3 IF の `interface`、短縮形 `interface: vlan-N`、`{interface: <LAG 等>}`、VLAN のポートの `node`、`vtep_source` / `members`）を移動先を示す error に。OSPF / IS-IS の通り道の食い違いを error に繰り上げ。エクスポーターの旧キー（L3 IF の `interface` / `kind` / `vlan` / `subinterface` + `vlan_id` / `lag`、推定の `lo_ip` / `lo_ipv6`）を外す。ADR-0014・0015 を Accepted に。1.0 の後も「読み替えて warning」は既定にしない |
 | [ADR-0026](docs/decisions/0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる | **C**（2026-11-15 実装） | L2VNI の `vlan`（単数）を `vlans`（リスト）に。旧 `vlan` は移動先を示す error。L2VNI に入る VLAN ではブロードキャストドメインは L2VNI、VLAN のエントリは「番号とポート」。参照は L2VNI → VLAN の片方向（案 C の VLAN → L2VNI は却下）。参加機器は VTEP から、その機器の VLAN はポート ∪ SVI から導く（`derive.vlan_port_nodes` / `vlan_svi_nodes` / `l2vni_node_vlans`）。端点・`vlan_member` エッジはポートだけ。1 台で 2 VLAN・1 VLAN が 2 VNI・ES の脚で番号違い・SVI の VRF 違いは error。anycast の一致は VNI 単位。エクスポーターは L2VNI に `vlans` と `node_vlans: [{node, vlan}]` |
+| [ADR-0027](docs/decisions/0027-compatibility-promise.md) | 互換の約束 | **C**（2026-11-19 実装） | 1.0 の後に 1.x で許す変更（加算・緩和・warning）と 2.0 が要る変更（改名・必須化・既定値・意味・検査の強化）。新しい error は 1.x で足したキー・値だけ。`--strict` はそのバージョンの warning を error にすることだけを約束（CI はマイナーを固定）。`ndl_version` は必須の文字列で「読むのに要る最も古いバージョン」。新しい YAML は `UnsupportedVersionError` 1 本で止める。パッケージの `メジャー.マイナー` = `LANGUAGE_VERSION`。エクスポーターの規範キーと出力の `meta`。`meta` だけが未知のキーを受け付ける。糖衣構文と旧形式の error は 2.0 まで残す |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag`。ADR-0023 で機器 1 台の LAG と `ethernet_segments` に分け直した |
 
 ---

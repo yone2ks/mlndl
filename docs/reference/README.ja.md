@@ -40,7 +40,7 @@ MLNDL (Multi-Layer Network Description Language) で書けることと、その�
 MLNDL のファイルは YAML で書きます。いちばん外側は次のキーからなるマッピングです。
 
 ```yaml
-ndl_version: "1.0"      # 必須。MLNDL の版
+ndl_version: "1.0"      # 必須。引用符で囲んだ文字列。この YAML を読むのに要る、最も古い mlndl のバージョン
 meta:                   # ファイルの説明
   name: dc-lab
 layer1: {...}           # 物理: 機器・L1 IF・リンク・LAG
@@ -51,8 +51,8 @@ control_plane: {...}    # 制御プレーン: BGP・OSPF・IS-IS・BFD・セッ�
 
 | キー | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `ndl_version` | 文字列 | ○ | MLNDL の版。今は `"1.0"`。主番号が 1 でなければ error |
-| `meta` | マッピング |  | `name` (文字列)、`network_types` (文字列の列)。ほかのキーを書いてもよい (ここだけは知らないキーを受け付ける) |
+| `ndl_version` | 文字列 | ○ | この YAML を読むのに要る、最も古い mlndl のバージョン (書いたときの mlndl のバージョンではない)。`"<メジャー>.<マイナー>"` の形で、引用符で囲む (引用符がないと YAML は `1.10` を数の 1.1 と読む)。今は `"1.0"`。書かない・書式が違う・メジャーが 1 より古いと error。mlndl より新しければ、バージョンの違いを知らせて止まる ([互換の約束](#互換の約束)) |
+| `meta` | マッピング |  | `name` (文字列)、`network_types` (文字列の列)。ほかのキーを書いてもよい (ここだけは知らないキーを受け付ける)。下流のツールの設定は、そのツールの名前をキーにして置く (`meta.ndl-viz` など)。mlndl が足すキーは下線区切りの名前にし、ハイフンを含む名前はツールに空けておく |
 | `layer1` | マッピング |  | [layer1.md](layer1.ja.md) |
 | `layer2` | マッピング |  | [layer2.md](layer2.ja.md) |
 | `layer3` | マッピング |  | [layer3.md](layer3.ja.md) |
@@ -125,6 +125,18 @@ control_plane: {...}    # 制御プレーン: BGP・OSPF・IS-IS・BFD・セッ�
 
 古い書き方は読み替えず、書くと新しい書き方を示す error になります (例: L3 IF の `interface` → `name`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members`。[ADR-0025](../decisions/0025-end-grace-for-old-forms.md))。
 一覧は [validation.md](validation.ja.md) の「旧構造と廃止キー」と「旧形式」にあります。
+
+## 互換の約束
+
+1.0 の後に何が変わりうるかの約束です ([ADR-0027](../decisions/0027-compatibility-promise.md))。
+
+- 新しい mlndl は、同じメジャーバージョンの古い YAML を読めます。1.0 で error にならなかった YAML は、1.x のどのバージョンでも error になりません (文書どおりに直したバグの修正を除く)。warning は増えることがあります
+- 古い mlndl は、新しいバージョンの YAML を読めません。YAML の `ndl_version` が mlndl より新しければ、バージョンの違いを知らせて止まります (Python では `mlndl.UnsupportedVersionError`)
+- 1.x で足すのは、任意のキー・値、緩めた検査、warning です。名前・形・必須かどうか・既定値・意味を変えるのは 2.0 です
+- `--strict` は、そのバージョンの warning を error にします。CI では mlndl のマイナーバージョンを固定してください ([validation.md](validation.ja.md) の「CI で使うとき」)
+- **規範** (この約束の対象): YAML の書き方、検査の結果と重さ、Python の公開の API (`parse` / `parse_file` / `validate` / `validate_all` / `ValidationResult` / `ValidationError` / `MLNDLTopology` とその最上位の属性 / `IdIndex` / `Ref` / `LANGUAGE_VERSION` / `UnsupportedVersionError`)、CLI (サブコマンド・`--strict` / `--format`・終了コード・行頭の `ERROR` / `WARNING` / `INFO`)、エクスポーターの規範キー ([exporter-cytoscape.md](../exporter-cytoscape.md))
+- **参考** (1.x でも変わる): Python のモデルの中身 (区画の中の属性と型)、`derive.py`、メッセージの文面、`schema.json`。この「参考」は、`role` や `labels` のような注釈側の構成子 (mlndl が値を検査しないもの) とは別の区別です
+- パッケージのバージョンの `メジャー.マイナー` は、その mlndl が読める最も新しい `ndl_version` (`mlndl.LANGUAGE_VERSION`) と同じです (1.0 のリリースから)
 
 ## 用語集
 

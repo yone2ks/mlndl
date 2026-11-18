@@ -1,6 +1,6 @@
 # ADR-0027: 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更
 
-- **Status**: Accepted (2026-11-18 に Pass C で確定。実装はまだ)
+- **Status**: Accepted (2026-11-18 に Pass C で確定。2026-11-19 に実装: `ndl_version` の検査・`LANGUAGE_VERSION`・`UnsupportedVersionError`・出力の `meta`・docs。ndl-viz の対応は要らない (出力のルートの未知のキーを読まない))
 - **Date**: 2026-11-18
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、
   ユーザー (`ndl_version` を必須に、古い mlndl はバージョンの違いを知らせて止まる、新しい error は 1.x で足したキー・値だけ、`--strict` はバージョンを固定してもらう、eve-lab-builder のキーは推定で書く、リンクの端は `source` / `target` のまま)
@@ -204,7 +204,7 @@
 - 文書: `docs/reference/README.ja.md` (D8)、`validation.ja.md` (D4)、`docs/exporter-cytoscape.md` (「規範」の列、ルートの `meta`、`source` / `target` に向きがないこと)、CLAUDE.md §3 (サンプルのコードも)
 - 下流: ndl-viz (未知のキー・値を無視することの確認。出力の `meta` の表示は任意)
 
-**改訂の注記** (実装のときに各 ADR に足す):
+**改訂の注記** (2026-11-19 の実装で各 ADR に足した):
 - ADR-0002 の末尾: 「**改訂 ([ADR-0027](0027-compatibility-promise.md), 2026-11-18)**: D8 の severity (error / warning / info) の意味を 1.0 の約束に入れた。severity を上げる・下げるときの条件は ADR-0027 D2・D3 に従う」
 - ADR-0015 の末尾: 「**改訂 ([ADR-0027](0027-compatibility-promise.md))**: `Ref` を公開の API に入れた。`Ref` の検査は 1.x の間、同じ条件で同じ結果 (文面は除く) を返す。新しいコレクションへの `Ref` を足すのは加算」
 - ADR-0025 の末尾: 「**確認 ([ADR-0027](0027-compatibility-promise.md) D7)**: 1.0 の後も「読み替えて warning」は既定にしない。移動先を示す error は 2.0 まで残す」
