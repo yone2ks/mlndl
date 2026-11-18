@@ -18,6 +18,7 @@ from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, ethernet_se
 from ..schema.control_plane import BgpSession
 from ..schema.layer2 import L2VxLAN, L3VxLAN
 from ..schema.topology import MLNDLTopology
+from ..version import __version__
 
 
 def export(topology: MLNDLTopology) -> dict:
@@ -39,7 +40,9 @@ def export(topology: MLNDLTopology) -> dict:
     _export_tunnels(topology, elements)
     _export_routing_neighbors(topology, elements)
 
-    return elements
+    # ルートの meta (規範キー。ADR-0027 D6): 入力の YAML の ndl_version と、出力した mlndl のバージョン。
+    # 入力の meta (下流のツールの設定など) は流さない (ADR-0027 D7)
+    return {"meta": {"ndl_version": topology.ndl_version, "mlndl_version": __version__}, **elements}
 
 
 def export_json(topology: MLNDLTopology, indent: int = 2) -> str:
