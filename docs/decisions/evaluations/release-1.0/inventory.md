@@ -11,6 +11,9 @@
 
 ### 1. 互換の約束 (ADR-0027)
 
+→ [ADR-0027](../../0027-compatibility-promise.md) で決めた (2026-11-18)。2・3 は ADR-0028 で決める。
+
+
 - `ndl_version` を必須にするか。CLAUDE.md §3・`docs/reference/README.ja.md`・`validation.ja.md` は「必須」と書くが、実装は既定値 `"1.0"` を持ち、書かなくても通る (`src/mlndl/schema/topology.py:27`・`:40`)
 - 新しいマイナーバージョンの YAML の扱い。全モデルが `extra="forbid"` なので、1.1 で足したキーを 1.0 の mlndl は `Extra inputs are not permitted` で拒む。`ndl_version: "1.9"` と書いても版の違いは知らせない (2026-11-18 に確かめた)
 - 1.x の間に許す変更: キー・値の追加、値域を広げる、検査を緩める、検査を強める、warning を足す (`--strict` で止まる)
@@ -40,7 +43,8 @@
 ## 1.0 の前にやること (破壊的ではないが、利用者が最初に見る見本)
 
 - examples と fixture の不統一
-  - anycast gateway なのに `gateway_redundancy` がない: `examples/eveng-evpn-lab.yaml:209-243`、`tests/fixtures/valid_full_dc.yaml:287-293`、`valid_multisite_wan.yaml:338-349`
+  - ~~anycast gateway なのに `gateway_redundancy` がない: `examples/eveng-evpn-lab.yaml:209-243`、`tests/fixtures/valid_full_dc.yaml:287-293`、`valid_multisite_wan.yaml:338-349`~~ —
+    2026-11-18 に確かめたところ誤り。同じ IP を共有する SVI は、examples と valid の fixtures でみな `gateway_redundancy` を書いている (ADR-0027 Pass C で example-author が指摘)
   - SVI の `name` が `Vlan100` (リファレンス) と `vlan-100` (`valid_multi_vlan.yaml`・`valid_full_dc.yaml`・`valid_multisite_wan.yaml`) で混在。SVI の id も `leaf1-vlan100` と `leaf1-vlan-10` で混在
   - `valid_full_dc.yaml` は MLAG なのに leaf2 の SVI がない
   - `valid_twinport_transceiver.yaml:91-97` は LAG を片側しか書かず、ADR-0023 の前の理解のコメントが残る

@@ -217,9 +217,11 @@ Pass C (2026-11-15) でも参照の向きは 4/5 が案 A で、ユーザーが�
 | ADR | タイトル | Status | Pass |
 |-----|---------|--------|------|
 | [evaluations/release-1.0](evaluations/release-1.0/inventory.md) | 1.0 に向けた棚卸し (1.0 の前に決めること・やること・後でよいこと) | — | — |
-| [drafts/0027](drafts/0027-compatibility-promise.md) | 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更 (改訂 1) | Draft | A |
-| [evaluations/adr0027](evaluations/adr0027/evaluation.md) | ADR-0027 横断評価メモ (Pass B)。試し書き C1〜C6、`passb/` B1〜B6 | — | — |
+| [0027](0027-compatibility-promise.md) | 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更 (実装はまだ) | **Accepted** | C |
+| [drafts/0027](drafts/0027-compatibility-promise.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0027 | A |
+| [evaluations/adr0027](evaluations/adr0027/evaluation.md) | ADR-0027 横断評価メモ (Pass B) と Pass C の結果。試し書き C1〜C6、`passb/` B1〜B6、`passc/` P1〜P4b | — | — |
 
 1.0 の後は破壊的な変更にメジャーバージョンの更新が要る、という方針の中身を決める。`ndl_version` を必須にし、YAML より古い mlndl は版の違いを知らせて止まる。
 1.x で許すのはキー・値を足す、値域を広げる、検査を緩める、warning を足すこと。既存の YAML を落とす新しい error は 2.0 まで待ち、`--strict` はその版の warning を error にすることだけを約束する。
 Pass B (2026-11-18) で、エクスポーターの規範キーの一覧と出力のルートの `meta` (バージョン)、バグの修正の線引き、`ndl_version` の書式と比べ方を足した (改訂 1)。
+Pass C (2026-11-18) で確定した。1.0 の前の名前と型の直し (`lags` / `vxlans` / IS-IS の `level_all`、`vteps` と `address_families` の `min_length=1`、既定値の一覧) は ADR-0028 で決める。

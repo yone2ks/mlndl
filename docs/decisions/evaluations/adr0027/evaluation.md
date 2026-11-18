@@ -106,3 +106,39 @@ B6 は、試し書き担当が「1.0 の実装が見逃している」と想定�
 7. **1.0 の後も残す形** (糖衣構文、`meta` の受け付け、旧形式の error) と、1.0 を出す前の変更は対象外であること
 8. **利用者向けの書き方** (向きをそのまま書く、規範キー)
 9. **1.0 の前に必須になるもの** (名前の直し、`vteps` の `min_length=1`、`address_families` の `min_length=1`、既定値の一覧) と、それを決める場所
+
+## Pass C の結果 (2026-11-18)
+
+5 エージェントが drafts/0027 を読まずに本メモから再設計した。骨子 (約束の範囲・変更の表・新しい error とバグの修正・`--strict`・`ndl_version`・パッケージのバージョン・残す形・利用者向けの書き方) は改訂 1 と同じ結論になった。
+ユーザーに 2 点を確かめた: eve-lab-builder の規範キーは推定のまま書き、確かめられるようになったら直す。リンクの端は `source` / `target` のままで、向きがないことを明記する (ADR-0006)。
+確定版は [ADR-0027](../../0027-compatibility-promise.md)。試し書きは [passc/](passc/README.md)。
+
+**試し書きの検証** (統合担当):
+
+| ファイル | 今の validator | この ADR (と ADR-0028) を実装したら |
+|---|---|---|
+| P1 (`ndl_version` を引用符なしで) | error: `Input should be a valid string` (分かりにくい) | 「引用符で囲む」専用の error |
+| P2 (`"1.1"` と書いたが 1.0 のキーだけ) | valid | 1.0 の mlndl ではバージョンの違いの error。「キーを使っていないなら下げても読める」を添える |
+| P3 (`meta.ndl-viz` などに下流のツールの設定) | valid | valid |
+| P4a (`lags` / `vxlans` / `level_*`) | `lags` / `vxlans` の未知のキー、`level_2` の値域の error | ADR-0028 で valid |
+| P4b (`lags` / `vnis` / `level_1_2`) | 同上 | 採らない案 |
+
+**割れた点と判断**:
+
+| 論点 | 意見 | 判断 |
+|---|---|---|
+| 名前の直しの名前 | Pass B の linguist: `vnis`・`level_1_2`。Pass C: 全員 `vxlans`・`level_all` (linguist も撤回) | 推奨は `vxlans`・`level_all`。決めるのは ADR-0028 |
+| 名前と型の直しをどこで決めるか | spec-architect・dsl-designer: 別の ADR | **ADR-0028**。この ADR は一覧だけ |
+| 出力の `meta.ndl_version` | Pass B の初版: `LANGUAGE_VERSION`。network-tech・spec-architect: 入力の YAML の値 | **入力の YAML の値** |
+| バージョンの違いの例外の型 | dsl-designer: `UnsupportedVersionError(ValueError)` | 採る |
+| Python のモデルの扱い | dsl-designer の表は「必須を任意に」などを Python の利用者には 2.0 としたが、同じ報告でモデルの中身は参考とした | **モデルの中身は参考**。表は 1.x にそろえた |
+| 規範キーの範囲 | network-tech が ndl-viz のソースで確かめ直し、`gateway_redundancy` などを規範に上げた | 採る |
+| リンクの端の名前 | ユーザー: YAML は `endpoints: [a, b]` | `source` / `target` のまま、向きがないと明記 (ユーザー決定) |
+| eve-lab-builder の規範キー | 手元にソースがない | 推定で書き、後で直す (ユーザー決定) |
+
+**採らなかった指摘**:
+
+- linguist の利用者向けの文案のうち「1.x の間は検査の結果 (error / warning / info) も変わらない」: 採らない — 1.x で warning を足す (ユーザー決定) と食い違う。「error になるかどうかは変わらない。warning は増えうる」に直した
+- dsl-designer の「既定値の変更は、書かなくても今までと同じ値になる範囲でだけ 1.x で許す」: 採らない — 意味がはっきりしない。既定値の変更は 2.0 のまま
+- dsl-designer の「区画の中のモデルのクラス名も規範」: 採らない — 規範は `MLNDLTopology` と最上位の属性まで
+- 棚卸しの「anycast gateway なのに `gateway_redundancy` がない examples」: 誤りだった (example-author が指摘し、統合担当が確かめた)。棚卸しを直した

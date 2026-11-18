@@ -1,6 +1,6 @@
 # ADR-0027: 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更
 
-- **Status**: Draft (改訂 1。2026-11-18 の横断評価 [evaluations/adr0027/evaluation.md](../evaluations/adr0027/evaluation.md) を反映)
+- **Status**: Superseded by [0027](../0027-compatibility-promise.md) (2026-11-18 に Pass C で確定。この版は改訂 1)
 - **Date**: 2026-11-18
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author、ユーザー (D3・D4・D5 の 4 つの論点)
 - **Pass**: A (5 エージェントの評価を 1 回取り、割れた 4 つの論点をユーザーが決めた。改訂 1 は Pass B の指摘の反映)
