@@ -4,7 +4,7 @@
 
     vlan: Annotated[str, Ref("layer2.vlans")]
     vteps: Annotated[list[str], Ref("layer2.vteps")] = []
-    l3vni: Annotated[str | None, Ref("layer2.vxlan", where=("type", "l3vni"))] = None
+    l3vni: Annotated[str | None, Ref("layer2.vxlans", where=("type", "l3vni"))] = None
     update_source: Annotated[str, Ref("layer3.interfaces", "layer3.tunnel_interfaces")]   # 複数のコレクション
 
 validator は Ref の付いたフィールドをスキーマから見つけ、指している id が実在するかを検査する。
@@ -55,12 +55,12 @@ COLLECTION_LABELS = {
     "layer1.nodes": "ノード",
     "layer1.interfaces": "L1 インターフェース",
     "layer1.links": "リンク",
-    "layer1.lag": "LAG",
+    "layer1.lags": "LAG",
     "layer1.ethernet_segments": "Ethernet Segment",
     "layer2.vlans": "VLAN",
     "layer2.bridges": "bridge",
     "layer2.vteps": "VTEP",
-    "layer2.vxlan": "VNI",
+    "layer2.vxlans": "VNI",
     "layer2.subinterfaces": "サブインターフェース",
     "layer3.vrfs": "VRF",
     "layer3.interfaces": "L3 インターフェース",

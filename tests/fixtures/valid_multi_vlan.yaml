@@ -159,7 +159,7 @@ layer2:
     - {id: vtep-leaf2, sources: [leaf2-lo]}
     - {id: vtep-leaf3, sources: [leaf3-lo]}
 
-  vxlan:
+  vxlans:
     - id: vni-10100
       type: l2vni
       vni: 10100

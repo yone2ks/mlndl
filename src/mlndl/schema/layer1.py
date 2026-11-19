@@ -6,7 +6,7 @@
   参照先の種類はキーで示す (ADR-0001 D8)。どのキーを書けるかはエンティティごとに決まる
 - role: ADR-0003 C2 — 自由文字列、コアは値域チェックなし
 - implementation: ADR-0004 — vm | physical | container
-- lag: ADR-0023 — 常に機器 1 台の LAG。複数の機器の LAG は ethernet_segments で束ねる
+- lags: ADR-0023 — 常に機器 1 台の LAG。複数の機器の LAG は ethernet_segments で束ねる
 - labels: ADR-0009 — 多軸分類の注釈側構成子。コアは値域・キー域チェックなし
 - description: ADR-0011 D7 — 全エンティティに任意の自由記述
 - id 命名規則: ADR-0002 — ^[a-z][a-z0-9]*(-[a-z0-9]+)*$（推奨、強制なし）
@@ -34,7 +34,7 @@ class AttachesToObj(BaseModel):
     """attaches_to のオブジェクト形式。ATTACH_KEYS のいずれか 1 キーだけを書く。
 
     キー名が参照先の種類を示す (ADR-0001 D2・D8):
-      node → layer1.nodes / interface → layer1.interfaces (L1 IF のみ) / lag → layer1.lag /
+      node → layer1.nodes / interface → layer1.interfaces (L1 IF のみ) / lag → layer1.lags /
       vlan → layer2.vlans / subinterface → layer2.subinterfaces
     """
 
@@ -297,12 +297,48 @@ class L1Link(BaseModel):
 # ---------------------------------------------------------------------------
 
 class LacpConfig(BaseModel):
-    """LACP パラメータ"""
+    """LAG の束ね方 (ADR-0028 D4)
+
+    mode: active / passive (LACP で束ねる)、static (LACP を使わずに束ねる)。lacp を書くなら必須。
+    lacp を書かない LAG は「束ね方を書いていない」。言語として既定値は定めない
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["active", "passive", "on"] = "active"
-    min_links: int = 1
+    mode: Literal["active", "passive", "static"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_old_forms(cls, data: Any) -> Any:
+        """旧形式の min_links と、空の lacp に、移動先・書き方を示すエラーを返す (ADR-0028 D4・D7)"""
+        if not isinstance(data, dict):
+            return data
+        if "min_links" in data:
+            raise ValueError(
+                "min_links は LACP を使うかと関係なく効くので、LAG の直下 (lags[].min_links) に移しました。"
+                "lacp の下から LAG の直下に移してください (ADR-0028)"
+            )
+        if "mode" not in data or data["mode"] is None:
+            raise ValueError(
+                "lacp を書くなら mode を書きます: LACP で束ねるなら active / passive、LACP を使わずに束ねるなら static。"
+                "束ね方を書かないなら lacp ごと消してください (ADR-0028 D4)"
+            )
+        return data
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def reject_old_mode(cls, v: Any) -> Any:
+        """旧値 on と、YAML が引用符なしの on / off / yes / no から読んだ真偽値に、書き方を示すエラーを返す (ADR-0028 D7)"""
+        if isinstance(v, bool):
+            raise ValueError(
+                "YAML が引用符なしの on などを真偽値として読みました。LACP を使わずに束ねる LAG は mode: static、"
+                "LACP で束ねるなら mode: active / passive と書きます (ADR-0028)"
+            )
+        if v == "on":
+            raise ValueError(
+                "lacp.mode の on は static に改名しました。LACP を使わずに束ねる LAG は mode: static と書きます (ADR-0028)"
+            )
+        return v
 
 
 # 複数の機器にまたがる LAG (旧 type: mlag) だけが持っていたキー。どれも書かない (ADR-0022 / ADR-0023)
@@ -322,8 +358,9 @@ class Lag(BaseModel):
     id: str                                             # 推奨プレフィックス lag- (ADR-0002 D7)
     node: Annotated[str, Ref("layer1.nodes")]
     name: str | None = None                             # 機器上の名前 (Port-Channel10 / bond0 / ae0)
-    members: Annotated[list[str], Ref("layer1.interfaces")]
+    members: Annotated[list[str], Ref("layer1.interfaces")] = Field(min_length=1)
     lacp: LacpConfig | None = None
+    min_links: int | None = Field(default=None, ge=1)   # 最低何本のメンバーが上がれば LAG が上がるか。LACP と独立 (ADR-0028 D4)
     description: str | None = None
 
     @model_validator(mode="before")
@@ -335,7 +372,7 @@ class Lag(BaseModel):
         old = [k for k in _MULTI_CHASSIS_KEYS if k in data]
         if data.get("type") == "mlag" or old:
             raise ValueError(
-                "複数の機器にまたがる LAG (MLAG / vPC / MC-LAG / ESI-LAG) は、機器ごとの LAG を layer1.lag に 1 つずつ"
+                "複数の機器にまたがる LAG (MLAG / vPC / MC-LAG / ESI-LAG) は、機器ごとの LAG を layer1.lags に 1 つずつ"
                 "書き (node は 1 つ)、それらを layer1.ethernet_segments の members で束ねます。"
                 + (f"{' / '.join(old)} は書きません。" if old else "")
                 + "ピアリンクは 2 台をつなぐ普通の LAG として書き、ドメインの番号や MAC は構成図に書きません"
@@ -343,9 +380,16 @@ class Lag(BaseModel):
             )
         if "type" in data:
             raise ValueError(
-                "layer1.lag の type はなくしました。LAG は常に機器 1 台の LAG なので、type を消してください (ADR-0023 D1)"
+                "layer1.lags の type はなくしました。LAG は常に機器 1 台の LAG なので、type を消してください (ADR-0023 D1)"
             )
         return data
+
+    @field_validator("members", mode="before")
+    @classmethod
+    def members_not_empty(cls, v: Any) -> Any:
+        if isinstance(v, list) and not v:
+            raise ValueError("LAG の members に、束ねる L1 IF の id を 1 つ以上書いてください (ADR-0028 D3)")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +440,7 @@ class EthernetSegment(BaseModel):
 
     id: str                                             # 推奨プレフィックス es- (ADR-0002 D7)
     name: str | None = None
-    members: list[SegmentMember]
+    members: list[SegmentMember] = Field(min_length=2)
     redundancy_mode: Literal["all_active", "single_active"] | None = None
     description: str | None = None
 
@@ -413,12 +457,12 @@ class EthernetSegment(BaseModel):
                 )
         return data
 
-    @field_validator("members")
+    @field_validator("members", mode="before")
     @classmethod
-    def at_least_two(cls, v: list[SegmentMember]) -> list[SegmentMember]:
-        if len(v) < 2:
+    def at_least_two(cls, v: Any) -> Any:
+        if isinstance(v, list) and len(v) < 2:
             raise ValueError(
-                "ethernet_segments の members は 2 つ以上書きます。1 台の機器だけの LAG は layer1.lag に書けば足ります"
+                "ethernet_segments の members は 2 つ以上書きます。1 台の機器だけの LAG は layer1.lags に書けば足ります"
                 " (ADR-0023 D2)"
             )
         return v
@@ -429,12 +473,23 @@ class EthernetSegment(BaseModel):
 # ---------------------------------------------------------------------------
 
 class L1Layer(BaseModel):
-    """Layer 1 全体（nodes / interfaces / links / lag / ethernet_segments）"""
+    """Layer 1 全体（nodes / interfaces / links / lags / ethernet_segments）"""
 
     model_config = ConfigDict(extra="forbid")
 
     nodes: list[L1Node] = []
     interfaces: list[L1Interface] = []
     links: list[L1Link] = []
-    lag: list[Lag] = []
+    lags: list[Lag] = []
     ethernet_segments: list[EthernetSegment] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_old_names(cls, data: Any) -> Any:
+        """旧名 lag に移動先を示すエラーを返す (ADR-0028 D1・D7)"""
+        if isinstance(data, dict) and "lag" in data:
+            raise ValueError(
+                "layer1.lag は layer1.lags に改名しました。中身は変わりません。"
+                "id を持つエントリの一覧は複数形にそろえました (ADR-0028)"
+            )
+        return data

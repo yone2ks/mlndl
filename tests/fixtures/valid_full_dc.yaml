@@ -153,50 +153,57 @@ layer1:
       link_speed: 1G
       link_role: access
 
-  lag:
+  lags:
     # peer-link。機器ごとの普通の LAG として書く (ADR-0023 D6)
     - id: lag-leaf1-peer
       node: leaf1
       name: peerlink
       members: [leaf1-swp49, leaf1-swp50]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     - id: lag-leaf2-peer
       node: leaf2
       name: peerlink
       members: [leaf2-swp49, leaf2-swp50]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     # Server1 向けの bond。MLAG でも LAG は機器ごとにある (ADR-0023 D1)
     - id: lag-leaf1-server1
       node: leaf1
       name: bond1
       members: [leaf1-swp1]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     - id: lag-leaf2-server1
       node: leaf2
       name: bond1
       members: [leaf2-swp1]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     # Server1 側 LACP bond（MLAG 対向）
     - id: lag-server1-bond0
       node: server1
       members: [server1-eth0, server1-eth1]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     # Leaf3 → Server2 LACP bond（単一ノード、2本）
     - id: lag-leaf3-server2
       node: leaf3
       members: [leaf3-swp1, leaf3-swp2]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     # Server2 側 LACP bond
     - id: lag-server2-bond0
       node: server2
       members: [server2-eth0, server2-eth1]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
   ethernet_segments:
     # leaf1 / leaf2 の bond1 を Server1 から 1 本に見せる (ADR-0023 D2)。clag-id・system MAC は書かない
@@ -217,7 +224,7 @@ layer2:
       sources: [leaf1-lo, leaf2-lo]
       address: 10.0.100.12/32
 
-  vxlan:
+  vxlans:
     - id: vni-10100
       type: l2vni
       vni: 10100

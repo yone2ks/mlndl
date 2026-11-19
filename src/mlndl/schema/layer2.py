@@ -11,6 +11,11 @@ from .layer1 import AttachesToObj, restrict_attach_keys
 from .refs import Ref
 
 
+def _missing_or_empty(data: dict, key: str) -> bool:
+    """key を書いていないか、空のリストを書いたか (型の違いは pydantic に任せる)"""
+    return key not in data or data[key] == []
+
+
 PORT_KEYS = ("interface", "lag", "ethernet_segment")
 
 
@@ -100,8 +105,19 @@ class Bridge(BaseModel):
 
     id: str                                 # 推奨プレフィックス bridge- (ADR-0002 D7)
     name: str | None = None
-    ports: list[BridgePort] = []
+    ports: list[BridgePort] = Field(min_length=1)
     description: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def needs_ports(cls, data: Any) -> Any:
+        """ports を書かない・空の bridge に書き方を示すエラーを返す (ADR-0028 D3)"""
+        if isinstance(data, dict) and _missing_or_empty(data, "ports"):
+            raise ValueError(
+                "bridge の ports に、転送する側 (事業者網の箱) のポートを {interface: <L1 IF の id>} などで 1 つ以上書いてください"
+                " (ADR-0018 D1・ADR-0028 D3)"
+            )
+        return data
 
 
 class Vtep(BaseModel):
@@ -152,9 +168,9 @@ class L2VxLAN(BaseModel):
 
     id: str
     type: Literal["l2vni"]
-    vni: int
+    vni: int = Field(ge=1, le=16777215)                 # 24 ビット。0 は除く (RFC 7348 §5・ADR-0028 D5)
     vlans: Annotated[list[str], Ref("layer2.vlans")] = Field(min_length=1)
-    vteps: Annotated[list[str], Ref("layer2.vteps")] = []
+    vteps: Annotated[list[str], Ref("layer2.vteps")] = Field(min_length=1)
     description: str | None = None
 
     @model_validator(mode="before")
@@ -174,6 +190,8 @@ class L2VxLAN(BaseModel):
                     f" (sources: [<ループバックの L3 IF の id>])、L2VNI では vteps: [<VTEP の id>] で参照してください"
                     f" (ADR-0014 D4・ADR-0025)"
                 )
+            if _missing_or_empty(data, "vteps"):
+                raise ValueError("L2VNI が載る VTEP を vteps: [<layer2.vteps の id>] で書いてください (ADR-0014 D3・ADR-0028 D3)")
         return data
 
     @field_validator("vlans")
@@ -184,12 +202,6 @@ class L2VxLAN(BaseModel):
             raise ValueError(f"vlans に {', '.join(dup)} を 2 回書いています。1 回だけ書いてください (ADR-0026 D1)")
         return v
 
-    @model_validator(mode="after")
-    def needs_vteps(self) -> "L2VxLAN":
-        if not self.vteps:
-            raise ValueError("L2VNI が載る VTEP を vteps: [<layer2.vteps の id>] で書いてください (ADR-0014 D3)")
-        return self
-
 
 class L3VxLAN(BaseModel):
     """L3VNI — Symmetric IRB 用 VRF ↔ VNI バインディング"""
@@ -198,7 +210,7 @@ class L3VxLAN(BaseModel):
 
     id: str
     type: Literal["l3vni"]
-    vni: int
+    vni: int = Field(ge=1, le=16777215)                 # 24 ビット。0 は除く (RFC 7348 §5・ADR-0028 D5)
     vrf: Annotated[str, Ref("layer3.vrfs")]
     irb_mode: Literal["symmetric", "asymmetric"] | None = None
     description: str | None = None
@@ -253,5 +265,15 @@ class L2Layer(BaseModel):
     vlans: list[VLAN] = []
     bridges: list[Bridge] = []
     vteps: list[Vtep] = []
-    vxlan: list[VxLAN] = []
+    vxlans: list[VxLAN] = []
     subinterfaces: list[Subinterface] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_old_names(cls, data: Any) -> Any:
+        """旧名 vxlan に移動先を示すエラーを返す (ADR-0028 D1・D7)"""
+        if isinstance(data, dict) and "vxlan" in data:
+            raise ValueError(
+                "layer2.vxlan は layer2.vxlans に改名しました。中身 (type / vni / vlans / vteps) は変わりません (ADR-0028)"
+            )
+        return data

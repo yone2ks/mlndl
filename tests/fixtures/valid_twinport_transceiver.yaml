@@ -87,10 +87,11 @@ layer1:
       link_speed: 100G
       link_role: underlay
 
-  lag:
+  lags:
     - id: lag-spine1-to-leaf3
       node: spine1
       members: [spine1-eth1-2-a, spine1-eth1-2-b]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
       # NOTE: leaf3 側にも対向 LAG が必要なはずだが、ここでは spine1 側のみ記述。
       # 現行スキーマでは「対向 LAG への参照」フィールドが無い。

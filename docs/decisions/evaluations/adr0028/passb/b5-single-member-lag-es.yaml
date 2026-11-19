@@ -1,0 +1,63 @@
+# ADR-0028 Pass B: メンバー 1 つの LAG を 2 台で作り Ethernet Segment で束ねた見本 (valid のつもり)
+#
+# ドラフトのとおりなら: valid
+#   D3 — `Lag.members` は 1 以上 (型で `min_length=1`)。1 つの LAG は valid。
+#        ドラフト本文: 「1 つの LAG は ES の脚で使う」
+#   D1 — `layer1.lag` → `layer1.lags` の改名後の形
+#
+# 期待する結果: error も warning もなし
+#
+# 何を確かめるためのファイルか:
+#   - MLAG の典型で、メンバー 1 つの LAG を 2 台で作り、ES でまとめる形。
+#     LAG を書く理由は「将来メンバーを増やしうる」「下流のツールが bond の
+#     単位で設定を出すから、1 メンバーでも bond にまとめる」など、実機の都合で
+#     ある。構成図 (ADR-0022) の粒度でも書ける。
+#   - ES の脚は `{lag: ...}` で指す。LAG が 1 メンバーでも、ES の脚としては
+#     「機器ごとの LAG」であることが大事 (ADR-0023 D2)。
+#
+# 検証の注意:
+#   - members = 1 のときに、_validate_ethernet_segments の「脚どうしがリンクで
+#     つながる」検査が誤発火しないかを別に確かめた。leaf1-swp1 と leaf2-swp1 は
+#     それぞれ server1-eth0 / server1-eth1 につながり、互いにはつながらないので
+#     ピアリンクの疑いは出ないはず。
+#
+# 検証は改名を戻したコピーを想定。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-b5-single-member-lag-es
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1,  node: leaf1,  name: swp1 }
+    - { id: leaf2-swp1,  node: leaf2,  name: swp1 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G, link_role: access }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 10G, link_role: access }
+
+  lags:
+    # 1 メンバーの LAG を 2 台で作る。ADR-0023 D1 — LAG は常に機器 1 台
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+
+  ethernet_segments:
+    # 2 台の LAG を 1 本の ES に束ねる (ADR-0023 D2)
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }

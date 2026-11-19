@@ -1,0 +1,47 @@
+# ADR-0028 Pass B: `lacp: {}` を書いた見本 (error のつもり)
+#
+# ドラフトのとおりなら: error
+#   D4 — 「`lacp: {}` (中身のない `lacp`) は error にする。書くなら `mode` か
+#   `min_links` を書く」
+#
+# 期待するメッセージ (提案):
+#   layer1.lags[0].lacp:
+#     lacp の中身が空です。書くなら mode (active / passive / on) か min_links を
+#     書いてください。LACP を書かない LAG は lacp のキーごと書きません (ADR-0028 D4)
+#
+# 判断の根拠:
+#   LacpConfig の既定値をなくした (D4) ので、`lacp: {}` は「空の LACP」=
+#   「mode も min_links も書いていない」になる。これは `lacp` キーごと省いたのと
+#   同じ意味で、冗長な書き方になる。読み手が「`lacp` と書いてあるから LACP を
+#   張りたいのだろう」と推し量る余地を残すのは、ADR-0023 D4・ADR-0028 の
+#   「書かなければ書いていない」の原則と合わない。
+#
+# 実装の案 (ADR には書かれていないが、添えて報告する):
+#   LacpConfig に `model_validator(mode="after")` で mode と min_links の両方が
+#   None のときに ValueError を出す。field_validator("lacp") でも可。
+#
+# 検証は改名を戻したコピーを想定。公開リポジトリなので個人名・絶対パスは書かない。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-b2-empty-lacp
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G, link_role: access }
+
+  lags:
+    - id: lag-leaf1-bond1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+      lacp: {}   # ★ D4 で error の対象

@@ -145,7 +145,7 @@ layer2:
     - id: vtep-leaf2
       sources: [leaf2-lo1]
 
-  vxlan:
+  vxlans:
     - id: vni-10010
       type: l2vni
       vni: 10010

@@ -22,7 +22,7 @@ layer1:
     - {id: r2-eth2, node: r2}
     - {id: r3-eth0, node: r3}
     - {id: r3-eth1, node: r3}
-  lag:
+  lags:
     - {id: lag-r3-po1, node: r3, members: [r3-eth0, r3-eth1]}
     - {id: lag-peer, node: r1, members: [r1-eth2]}
     - {id: lag-r1-a, node: r1, members: [r1-eth0]}

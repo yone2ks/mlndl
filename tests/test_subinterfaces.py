@@ -33,7 +33,7 @@ layer1:
     - {id: r2-eth0, node: r2}
     - {id: r2-eth1, node: r2}
     - {id: r3-eth0, node: r3}
-  lag:
+  lags:
     - {id: lag-r1-bond0, node: r1, members: [r1-eth1, r1-eth2]}
     - {id: lag-peer, node: r2, members: [r2-eth1]}
     - {id: lag-r1-a, node: r1, members: [r1-eth0]}

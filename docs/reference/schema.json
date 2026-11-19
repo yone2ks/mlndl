@@ -33,7 +33,7 @@
     },
     "AttachesToObj": {
       "additionalProperties": false,
-      "description": "attaches_to のオブジェクト形式。ATTACH_KEYS のいずれか 1 キーだけを書く。\n\nキー名が参照先の種類を示す (ADR-0001 D2・D8):\n  node → layer1.nodes / interface → layer1.interfaces (L1 IF のみ) / lag → layer1.lag /\n  vlan → layer2.vlans / subinterface → layer2.subinterfaces",
+      "description": "attaches_to のオブジェクト形式。ATTACH_KEYS のいずれか 1 キーだけを書く。\n\nキー名が参照先の種類を示す (ADR-0001 D2・D8):\n  node → layer1.nodes / interface → layer1.interfaces (L1 IF のみ) / lag → layer1.lags /\n  vlan → layer2.vlans / subinterface → layer2.subinterfaces",
       "properties": {
         "node": {
           "anyOf": [
@@ -108,19 +108,44 @@
           "type": "string"
         },
         "min_tx": {
-          "default": 300,
-          "title": "Min Tx",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Tx"
         },
         "min_rx": {
-          "default": 300,
-          "title": "Min Rx",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Rx"
         },
         "multiplier": {
-          "default": 3,
-          "title": "Multiplier",
-          "type": "integer"
+          "anyOf": [
+            {
+              "maximum": 255,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Multiplier"
         },
         "nodes": {
           "default": [],
@@ -218,6 +243,8 @@
           "type": "string"
         },
         "local_as": {
+          "maximum": 4294967295,
+          "minimum": 1,
           "title": "Local As",
           "type": "integer"
         }
@@ -247,6 +274,8 @@
           "title": "Address"
         },
         "local_as": {
+          "maximum": 4294967295,
+          "minimum": 1,
           "title": "Local As",
           "type": "integer"
         }
@@ -306,7 +335,6 @@
           "title": "To"
         },
         "address_families": {
-          "default": [],
           "items": {
             "enum": [
               "ipv4_unicast",
@@ -317,6 +345,7 @@
             ],
             "type": "string"
           },
+          "minItems": 1,
           "title": "Address Families",
           "type": "array"
         },
@@ -342,7 +371,8 @@
         "id",
         "type",
         "from",
-        "to"
+        "to",
+        "address_families"
       ],
       "title": "BgpSession",
       "type": "object"
@@ -368,10 +398,10 @@
           "title": "Name"
         },
         "ports": {
-          "default": [],
           "items": {
             "$ref": "#/$defs/BridgePort"
           },
+          "minItems": 1,
           "title": "Ports",
           "type": "array"
         },
@@ -389,7 +419,8 @@
         }
       },
       "required": [
-        "id"
+        "id",
+        "ports"
       ],
       "title": "Bridge",
       "type": "object"
@@ -528,6 +559,7 @@
           "items": {
             "$ref": "#/$defs/SegmentMember"
           },
+          "minItems": 2,
           "title": "Members",
           "type": "array"
         },
@@ -675,9 +707,9 @@
         },
         "level": {
           "enum": [
-            "level-1",
-            "level-2",
-            "level-all"
+            "level_1",
+            "level_2",
+            "level_all"
           ],
           "title": "Level",
           "type": "string"
@@ -850,7 +882,7 @@
     },
     "L1Layer": {
       "additionalProperties": false,
-      "description": "Layer 1 全体（nodes / interfaces / links / lag / ethernet_segments）",
+      "description": "Layer 1 全体（nodes / interfaces / links / lags / ethernet_segments）",
       "properties": {
         "nodes": {
           "default": [],
@@ -876,12 +908,12 @@
           "title": "Links",
           "type": "array"
         },
-        "lag": {
+        "lags": {
           "default": [],
           "items": {
             "$ref": "#/$defs/Lag"
           },
-          "title": "Lag",
+          "title": "Lags",
           "type": "array"
         },
         "ethernet_segments": {
@@ -1096,7 +1128,7 @@
           "title": "Vteps",
           "type": "array"
         },
-        "vxlan": {
+        "vxlans": {
           "default": [],
           "items": {
             "discriminator": {
@@ -1115,7 +1147,7 @@
               }
             ]
           },
-          "title": "Vxlan",
+          "title": "Vxlans",
           "type": "array"
         },
         "subinterfaces": {
@@ -1144,6 +1176,8 @@
           "type": "string"
         },
         "vni": {
+          "maximum": 16777215,
+          "minimum": 1,
           "title": "Vni",
           "type": "integer"
         },
@@ -1156,10 +1190,10 @@
           "type": "array"
         },
         "vteps": {
-          "default": [],
           "items": {
             "type": "string"
           },
+          "minItems": 1,
           "title": "Vteps",
           "type": "array"
         },
@@ -1180,7 +1214,8 @@
         "id",
         "type",
         "vni",
-        "vlans"
+        "vlans",
+        "vteps"
       ],
       "title": "L2VxLAN",
       "type": "object"
@@ -1343,6 +1378,8 @@
           "type": "string"
         },
         "vni": {
+          "maximum": 16777215,
+          "minimum": 1,
           "title": "Vni",
           "type": "integer"
         },
@@ -1390,24 +1427,21 @@
     },
     "LacpConfig": {
       "additionalProperties": false,
-      "description": "LACP パラメータ",
+      "description": "LAG の束ね方 (ADR-0028 D4)\n\nmode: active / passive (LACP で束ねる)、static (LACP を使わずに束ねる)。lacp を書くなら必須。\nlacp を書かない LAG は「束ね方を書いていない」。言語として既定値は定めない",
       "properties": {
         "mode": {
-          "default": "active",
           "enum": [
             "active",
             "passive",
-            "on"
+            "static"
           ],
           "title": "Mode",
           "type": "string"
-        },
-        "min_links": {
-          "default": 1,
-          "title": "Min Links",
-          "type": "integer"
         }
       },
+      "required": [
+        "mode"
+      ],
       "title": "LacpConfig",
       "type": "object"
     },
@@ -1439,6 +1473,7 @@
           "items": {
             "type": "string"
           },
+          "minItems": 1,
           "title": "Members",
           "type": "array"
         },
@@ -1452,6 +1487,19 @@
             }
           ],
           "default": null
+        },
+        "min_links": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Links"
         },
         "description": {
           "anyOf": [
@@ -1908,6 +1956,7 @@
         "mtu": {
           "anyOf": [
             {
+              "maximum": 65535,
               "minimum": 68,
               "type": "integer"
             },

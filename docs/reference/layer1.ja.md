@@ -12,8 +12,8 @@ layer1:
     - {id: leaf1-swp51, node: leaf1,  name: swp51}
   links:
     - {id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G}
-  lag:
-    - {id: lag-leaf1-bond0, node: leaf1, name: bond0, members: [leaf1-swp1, leaf1-swp2]}
+  lags:
+    - {id: lag-leaf1-bond0, node: leaf1, name: bond0, members: [leaf1-swp1, leaf1-swp2], lacp: {mode: active}}
   ethernet_segments:
     - {id: es-server1, members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]}
 ```
@@ -23,8 +23,11 @@ layer1:
 | `nodes` | [[機器](#nodes)] | |
 | `interfaces` | [[L1 IF](#interfaces)] | |
 | `links` | [[リンク](#links)] | |
-| `lag` | [[LAG](#lag)] | 機器 1 台の LAG |
+| `lags` | [[LAG](#lags)] | 機器 1 台の LAG |
 | `ethernet_segments` | [[Ethernet Segment](#ethernet_segments)] | 複数の機器の脚を相手から 1 本に見せる関係 (MLAG / vPC / MC-LAG / ESI-LAG) |
+
+id を持つエントリの一覧は複数形です。以前の `lag` は `lags` に改名しました。書くと移動先を示す error です ([ADR-0028](../decisions/0028-names-and-types.md) D1)。
+1 つを指す参照キーは単数のままです (`attaches_to: {lag: <id>}`、VLAN のポートの `{lag:}`)。
 
 ## nodes
 
@@ -75,7 +78,7 @@ L1 IF。物理ポート、VM の vNIC、コンテナの veth など。IP は持�
 
 MTU はリンクには書きません。MTU はインターフェースの設定で、リンク (ケーブル) の性質ではないためです ([ADR-0020](../decisions/0020-remove-l1-link-mtu.md))。
 
-## lag
+## lags
 
 LAG。機器 1 台の上の port-channel / bond / ae です ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D1)。
 MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG は機器ごとにあるので、機器ごとに 1 つずつ書きます。
@@ -87,8 +90,9 @@ MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG は機器ごとにあるの
 | `id` | id | ○ | | 推奨プレフィックス `lag-` |
 | `node` | id | ○ | `layer1.nodes` | LAG を持つ機器 (1 台) |
 | `name` | 文字列 | | | 機器上の名前 (`Port-Channel10`、`bond0`、`ae0`) |
-| `members` | [id] | ○ | `layer1.interfaces` | メンバーの L1 IF |
-| `lacp` | [LACP の設定](#lacp-の設定) | | | |
+| `members` | [id] | ○ | `layer1.interfaces` | メンバーの L1 IF。1 つ以上 (メンバー 1 つの LAG は ES の脚で使う) |
+| `lacp` | [束ね方](#束ね方-lacp) | | | 書かなければ「束ね方を書いていない」 |
+| `min_links` | 整数 | | | 最低何本のメンバーが上がっていれば LAG が上がるか。1 以上。LACP を使うかと関係なく効く。既定値はない |
 | `description` | 文字列 | | | |
 
 ピアリンク (MLAG / vPC で 2 台をつなぐ LAG) も、機器ごとの普通の LAG として書きます。役割は L1 リンクの `link_role: peer-link` で示せますが、注釈なので検査には使いません ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D6)。
@@ -96,12 +100,29 @@ MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG は機器ごとにあるの
 以前の `type: lacp` / `type: mlag`、`nodes`、`peer_link`、`peer_link_interface`、`domain_id`、`system_mac`、`client_lag` は書けません。書くと移動先を示す error になります。
 ドメインの番号や MAC は構成図の粒度ではないので書きません ([ADR-0022](../decisions/0022-diagram-granularity.md))。
 
-### LACP の設定
+### 束ね方 (lacp)
 
 | キー | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `mode` | `active` / `passive` / `on` | (`active`) | |
-| `min_links` | 整数 | (`1`) | |
+| `mode` | `active` / `passive` / `static` | ○ | `active` / `passive` は LACP で束ねる。`static` は LACP を使わずに束ねる (Cisco / Arista の `channel-group N mode on`、Junos の LACP を書かない AE など) |
+
+```yaml
+lags:
+  - {id: lag-leaf1-bond1, node: leaf1, members: [leaf1-swp1, leaf1-swp2], lacp: {mode: active}, min_links: 2}
+  - {id: lag-leaf1-bond2, node: leaf1, members: [leaf1-swp3], lacp: {mode: static}}
+  - {id: lag-leaf1-bond3, node: leaf1, members: [leaf1-swp4]}             # 束ね方は書いていない
+```
+
+| 書き方 | 意味 |
+|---|---|
+| `lacp` を書かない | 束ね方を書いていない (LACP を使うか使わないか分からない) |
+| `lacp: {mode: active}` / `{mode: passive}` | LACP で束ねる |
+| `lacp: {mode: static}` | LACP を使わずに束ねる |
+| `lacp: {}` | error。`mode` を書く |
+| `min_links: 2` (LAG の直下) | 最低 2 本のメンバーが上がっていれば LAG が上がる。`lacp` と独立 |
+
+`lacp.mode` と `min_links` に既定値はありません。どの値になるかは機器の既定値です ([ADR-0028](../decisions/0028-names-and-types.md) D4)。
+以前の `mode: on` は `static` に改名しました。引用符なしの `on` は YAML が真偽値の `true` と読むためです。`on` と真偽値、`lacp` の下の `min_links` は、書くと移動先を示す error になります。
 
 
 ## ethernet_segments
@@ -113,12 +134,12 @@ MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG は機器ごとにあるの
 |---|---|---|---|---|
 | `id` | id | ○ | | 推奨プレフィックス `es-` |
 | `name` | 文字列 | | | 表示名 |
-| `members` | [`{lag:}` / `{interface:}`] | ○ | `layer1.lag` / `layer1.interfaces` | 脚。2 つ以上で、機器はすべて別 |
+| `members` | [`{lag:}` / `{interface:}`] | ○ | `layer1.lags` / `layer1.interfaces` | 脚。2 つ以上で、機器はすべて別 |
 | `redundancy_mode` | `all_active` / `single_active` | | | 脚がそろって転送するか、同時に転送するのは 1 本か。既定値はなく、書かなければ「書いていない」 |
 | `description` | 文字列 | | | |
 
 ```yaml
-lag:
+lags:
   - {id: lag-leaf1-peer,    node: leaf1, name: peerlink, members: [leaf1-swp49, leaf1-swp50]}   # ピアリンクは普通の LAG
   - {id: lag-leaf2-peer,    node: leaf2, name: peerlink, members: [leaf2-swp49, leaf2-swp50]}
   - {id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1]}

@@ -1,0 +1,39 @@
+# ADR-0028 Pass B: `members: []` の LAG を書いた見本 (error のつもり)
+#
+# ドラフトのとおりなら: error
+#   D3 — 「`Lag.members`: 必須、1 つ以上」 (今は空でも通る)
+#
+# 期待するメッセージ (pydantic 既定):
+#   layer1.lags[0].members: List should have at least 1 item (type: too_short)
+#
+# ドラフト D3 は 「メッセージは今の親切な文 (vteps の例) を保つ」 と書いているが、
+# この条件は vteps / address_families に向いたもので、members への親切なメッセージ
+# は書かれていない。pydantic 既定で足りると読める。
+# ただし、下流で「LAG の中身が空だと意味がない (束ねるものがないため)」ことを伝えたい
+# なら、field_validator で親切な文を出す案もある。ドラフトの隙間として報告する。
+#
+# 実装のメモ: 今は `members: Annotated[list[str], Ref("layer1.interfaces")]` で
+# min_length を持たない。D3 の表のとおり `Field(min_length=1)` を足せばよい。
+#
+# 検証は改名を戻したコピーを想定。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-b5b-empty-lag
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+
+  links: []
+
+  lags:
+    # ★ D3 で error の対象
+    - id: lag-leaf1-bond1
+      node: leaf1
+      name: bond1
+      members: []

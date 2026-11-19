@@ -23,12 +23,12 @@ id: Leaf1_swp51         # error: 大文字と _ は書けない
 | エンティティ | プレフィックス | 例 |
 |---|---|---|
 | `layer1.links` | `link-` | `link-spine1-leaf1` |
-| `layer1.lag` | `lag-` | `lag-leaf1-server1` |
+| `layer1.lags` | `lag-` | `lag-leaf1-server1` |
 | `layer1.ethernet_segments` | `es-` | `es-server1` |
 | `layer2.vlans` | `vlan-` | `vlan-100` |
 | `layer2.bridges` | `bridge-` | `bridge-wideether` |
 | `layer2.vteps` | `vtep-` | `vtep-leaf1-leaf2` |
-| `layer2.vxlan` | `vni-` | `vni-10100` |
+| `layer2.vxlans` | `vni-` | `vni-10100` |
 | `layer2.subinterfaces` | `subif-` | `subif-border1-swp5-200` |
 | `layer3.vrfs` | `vrf-` | `vrf-tenant-a` |
 | `layer3.tunnel_interfaces` | `tunnel-` | `tunnel-border1-dc2` |
@@ -49,20 +49,20 @@ mlndl は値域を検査しません。`role` と `labels` の推奨値は [role
 
 ## 列挙
 
-決まった値だけを書ける文字列。各ページの表に値を並べます。
+決まった値だけを書ける文字列。各ページの表に値を並べます。複数の語からなる値は下線で区切ります (ハイフンは使いません。[ADR-0028](../decisions/0028-names-and-types.md) D2)。
 
 | キー | 値 |
 |---|---|
 | `layer1.nodes[].implementation` | `vm` / `physical` / `container` |
 | `layer1.ethernet_segments[].redundancy_mode` | `all_active` / `single_active` |
-| `layer1.lag[].lacp.mode` | `active` / `passive` / `on` |
-| `layer2.vxlan[].type` | `l2vni` / `l3vni` |
-| `layer2.vxlan[].irb_mode` | `symmetric` / `asymmetric` |
+| `layer1.lags[].lacp.mode` | `active` / `passive` / `static` |
+| `layer2.vxlans[].type` | `l2vni` / `l3vni` |
+| `layer2.vxlans[].irb_mode` | `symmetric` / `asymmetric` |
 | `layer3.interfaces[].gateway_redundancy[].mode` | `vrrp` / `hsrp` / `anycast_gateway` |
 | `layer3.tunnel_interfaces[].type` | `gre` / `ipip` / `ipsec_vti` / `wireguard` |
 | `control_plane.routing_neighbors[].type` | `bgp` / `ospf` / `isis` |
 | `control_plane.routing_neighbors[].address_families` | `ipv4_unicast` / `ipv6_unicast` / `l2vpn_evpn` / `vpnv4` / `vpnv6` |
-| `control_plane.routing_neighbors[].level` (IS-IS) | `level-1` / `level-2` / `level-all` |
+| `control_plane.routing_neighbors[].level` (IS-IS) | `level_1` / `level_2` / `level_all` |
 
 ## IP アドレス
 
@@ -82,9 +82,12 @@ mlndl は値域を検査しません。`role` と `labels` の推奨値は [role
 |---|---|---|
 | `layer2.vlans[].vlan_id` | 1〜4094 | 範囲外は error。同じ機器の上での重複は error |
 | `layer2.subinterfaces[].vlan_id` | 1〜4094 | 範囲外は error |
-| `layer2.vxlan[].vni` | 1〜16777215 (24 ビット) | 範囲は検査しない。L2VNI と L3VNI を通して重複すると error |
-| `local_as` | 1〜4294967295 (4 バイト AS) | 範囲は検査しない |
-| `layer3.tunnel_interfaces[].mtu` | 68 以上 | 範囲外は error |
+| `layer2.vxlans[].vni` | 1〜16777215 (24 ビット) | 範囲外は error。L2VNI と L3VNI を通して重複すると error |
+| `local_as` | 1〜4294967295 (4 バイト AS) | 範囲外は error。予約の AS (23456・65535 など) は通す |
+| `layer3.tunnel_interfaces[].mtu` | 68〜65535 | 範囲外は error |
+| `layer1.lags[].min_links` | 1 以上 | 範囲外は error |
+| BFD の `min_tx` / `min_rx` (ミリ秒) | 1 以上 | 範囲外は error |
+| BFD の `multiplier` | 1〜255 | 範囲外は error |
 | `group_id` (VRRP / HSRP) | — | 同じ IF・同じ mode・同じアドレスファミリーで重複すると error |
 
 ## 速度

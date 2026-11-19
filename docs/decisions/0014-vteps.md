@@ -164,6 +164,8 @@ VTEP として使うアドレス、という役割の違いだけを表し、ど
 - **ループバックの ip が全員同じなら `address` を省略可** (network-tech-reviewer・dsl-designer): 却下 (ユーザー判断) — 本文 D2
 - **L3VNI にも `vteps`** (spec-architect・network-tech-reviewer): 今回は見送り — 本文 D3
 
+> **改訂 ([ADR-0028](0028-names-and-types.md), 2026-11-20)**: D3 の L2VNI の `vteps` を型で必須・1 つ以上にした (今までは既定値 `[]` で、空を validator で error にしていた)。結果は変わらない。`layer2.vxlan` は `layer2.vxlans` に改名した。
+
 ## References
 
 - 試し書き: `evaluations/adr0014/` (1 回目の 4 案)、`evaluations/adr0014/neutral/` (方式中立モデルで 7 構成)

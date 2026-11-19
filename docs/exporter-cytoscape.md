@@ -42,7 +42,7 @@
 | `vrfs` | ○ | このノードの L3 IF が属する VRF の id (並び順は参考) |
 | `vlans` | ○ | このノードにポートがある VLAN の id (Ethernet Segment は脚のすべてのノード。ADR-0013 D5・ADR-0023 D8)。L2VNI の `vlans` とは意味が違う |
 | `vteps` | ○ | このノードが終端する VTEP: `{id, source, address?, address_v6?, shared_with?}`。`source` は L3 IF の name、`shared_with` は共有相手のノード (ADR-0014) |
-| `lags` | ○ | このノードの LAG: `{id, name?, members, lacp?, ethernet_segment?, description?}`。`members` はメンバーの L1 IF の name (リンクの `source_if` / `target_if` と同じ)。`lacp` は書かれた値だけ。`ethernet_segment` はこの LAG が脚の ES (ADR-0023) |
+| `lags` | ○ | このノードの LAG: `{id, name?, members, lacp?, min_links?, ethernet_segment?, description?}`。`members` はメンバーの L1 IF の name (リンクの `source_if` / `target_if` と同じ)。`lacp` (`{mode}`。`active` / `passive` / `static`) と `min_links` は書かれたときだけ (ADR-0028 D4)。`ethernet_segment` はこの LAG が脚の ES (ADR-0023) |
 | `subinterfaces` |  | このノードのサブ IF: `{id, parent, vlan_id, name?}` (ADR-0012) |
 | `tunnels` | ○ | このノードのトンネル IF (ADR-0011 D6): `id` / `type` / `source` / `destination_interface` / `destination_ip` / `ip` / `vrf` |
 | `local_as` | ○ | BGP の AS 番号 (default VRF のインスタンスのもの。なければ最初に出てくるインスタンス) |
@@ -139,7 +139,7 @@ underlay / overlay は出さない。知りたいときは次のように導く 
 `l2vpn_evpn` / `vpnv4` / `vpnv6` を運べば overlay の情報を運ぶセッション、default VRF で `ipv4_unicast` / `ipv6_unicast` だけなら underlay の経路を運ぶセッション、
 両方なら両方、default 以外の VRF で `ipv4_unicast` / `ipv6_unicast` ならテナントの経路 (どちらでもない)。
 
-OSPF / IS-IS の辺は、`from` / `to` に `node`・`interface` (OSPF は L3 IF かトンネル IF、IS-IS は L1 IF の id)・`interface_name` (トンネル IF なら出さない) を持ち、`area` (OSPF。ドット区切り 4 オクテット) か `level` (IS-IS) を持つ。
+OSPF / IS-IS の辺は、`from` / `to` に `node`・`interface` (OSPF は L3 IF かトンネル IF、IS-IS は L1 IF の id)・`interface_name` (トンネル IF なら出さない) を持ち、`area` (OSPF。ドット区切り 4 オクテット) か `level` (IS-IS。`level_1` / `level_2` / `level_all`) を持つ。
 `transport_link` は BGP と同じ規則で両端の `interface` から導いた値 (ADR-0018 D4。IS-IS は L1 IF の対向を直接見る)。**すべて規範**。
 
 ### VLAN の端点 (`vlan_member.endpoints[]`)

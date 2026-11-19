@@ -1,0 +1,154 @@
+# ADR-0028 Pass B: 値域の外側の端を書いた見本 (9 本の error のつもり)
+#
+# ドラフトのとおりなら: error (D5 の値域の違反。9 本まとめて出るはず)
+#
+# 1 ファイルに入れる理由: pydantic は 1 回で全部の型エラーをまとめて返す (ADR-0027)。
+# 値域はすべて pydantic の `Field(ge=.., le=..)` で表せるので、1 回のパースで 9 本の
+# error が出るはず。
+#
+# 期待する error (D5 の表のとおり):
+#
+#   1) control_plane.bgp[0].nodes[0].local_as (= 0)
+#      Input should be greater than or equal to 1 (type: greater_than_equal)
+#      根拠: RFC 7607 — AS 0 は使えない
+#   2) control_plane.routing_neighbors[0].to.local_as (= 4294967296)
+#      Input should be less than or equal to 4294967295 (type: less_than_equal)
+#      根拠: RFC 6793 — 4 バイトの AS の最大値
+#   3) layer2.vxlans[0].vni (= 0)
+#      Input should be greater than or equal to 1
+#      根拠: RFC 7348 §5 — 0 は多くの実装が受け付けない
+#   4) layer2.vxlans[1].vni (= 16777216)
+#      Input should be less than or equal to 16777215
+#      根拠: 24 ビット
+#   5) control_plane.bfd[0].min_tx (= 0)
+#      Input should be greater than or equal to 1
+#      根拠: 0 や負の値は意味がない
+#   6) control_plane.bfd[1].multiplier (= 0)
+#      Input should be greater than or equal to 1
+#   7) control_plane.bfd[2].multiplier (= 256)
+#      Input should be less than or equal to 255
+#      根拠: RFC 5880 §4.1 — Detect Mult は 8 ビット
+#   8) layer1.lags[0].lacp.min_links (= 0)
+#      Input should be greater than or equal to 1
+#   9) layer3.tunnel_interfaces[0].mtu (= 65536)
+#      Input should be less than or equal to 65535
+#      根拠: RFC 791 — IPv4 の Total Length は 16 ビット
+#
+# D5 の文は親切なメッセージを強制していない (ADR-0028 Consequences の「悪くなること」
+# の 2 本目は address_families / vteps / lacp: {} の話で、値域はふれていない)。
+# pydantic 既定のメッセージで足りると読める。
+#
+# 検証は改名を戻したコピーを想定。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-b3-ranges
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: leaf2-swp2, node: leaf2, name: swp2 }
+
+  links:
+    - { id: link-leaf1-leaf2-1, endpoints: [leaf1-swp1, leaf2-swp1], link_speed: 10G, link_role: underlay }
+    - { id: link-leaf1-leaf2-2, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G, link_role: underlay }
+
+  lags:
+    # ★ 誤り (8): lacp.min_links = 0 は 1 以上のはず
+    - id: lag-leaf1-bond1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1, leaf1-swp2]
+      lacp: { mode: active, min_links: 0 }
+
+layer2:
+  vlans:
+    - { id: vlan-100, vlan_id: 100 }
+    - { id: vlan-200, vlan_id: 200 }
+
+  vteps:
+    - { id: vtep-leaf1, sources: [leaf1-lo] }
+
+  # ↓ D1 改名後の複数形
+  vxlans:
+    # ★ 誤り (3): vni = 0 は 1 以上のはず
+    - id: vni-a
+      type: l2vni
+      vni: 0
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1]
+    # ★ 誤り (4): vni = 16777216 は 16777215 以下のはず
+    - id: vni-b
+      type: l3vni
+      vni: 16777216
+      vrf: vrf-tenant-a
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-b
+      route_targets:
+        import: ["65001:100"]
+        export: ["65001:100"]
+
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32 }
+    - { id: leaf1-swp1-l3, node: leaf1, name: swp1, ip: 10.1.0.0/31, attaches_to: {interface: leaf1-swp1} }
+    - { id: leaf2-swp1-l3, node: leaf2, name: swp1, ip: 10.1.0.1/31, attaches_to: {interface: leaf2-swp1} }
+
+  tunnel_interfaces:
+    # ★ 誤り (9): mtu = 65536 は 65535 以下のはず
+    - id: tunnel-leaf1-ext
+      node: leaf1
+      type: gre
+      source: leaf1-lo
+      destination_ip: 203.0.113.1
+      ip: 172.31.0.1/30
+      mtu: 65536
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        # ★ 誤り (1): local_as = 0 は 1 以上のはず
+        - { node: leaf1, local_as: 0 }
+        - { node: leaf2, local_as: 65002 }
+
+  bfd:
+    # ★ 誤り (5): min_tx = 0 は 1 以上のはず
+    - id: bfd-a
+      min_tx: 0
+      min_rx: 300
+      multiplier: 3
+      nodes: [leaf1]
+    # ★ 誤り (6): multiplier = 0 は 1 以上のはず
+    - id: bfd-b
+      min_tx: 300
+      min_rx: 300
+      multiplier: 0
+      nodes: [leaf1]
+    # ★ 誤り (7): multiplier = 256 は 255 以下のはず
+    - id: bfd-c
+      min_tx: 300
+      min_rx: 300
+      multiplier: 256
+      nodes: [leaf1]
+
+  routing_neighbors:
+    # ★ 誤り (2): to.local_as = 4294967296 は 4294967295 以下のはず
+    - id: bgp-peer-leaf1-ext
+      type: bgp
+      instance: bgp-default
+      from: { node: leaf1, update_source: leaf1-lo }
+      to:   { address: 203.0.113.1, local_as: 4294967296 }
+      address_families: [ipv4_unicast]

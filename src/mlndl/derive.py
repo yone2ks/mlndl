@@ -80,7 +80,7 @@ def ethernet_segments(topology: MLNDLTopology) -> dict[str, SegmentInfo]:
         return {}
     l1 = topology.layer1
     iface_node = {i.id: i.node for i in l1.interfaces}
-    lags = {g.id: g for g in l1.lag}
+    lags = {g.id: g for g in l1.lags}
     out: dict[str, SegmentInfo] = {}
     for es in l1.ethernet_segments:
         info = SegmentInfo()
@@ -101,7 +101,7 @@ def ethernet_segments(topology: MLNDLTopology) -> dict[str, SegmentInfo]:
 
 def port_legs(port, topology: MLNDLTopology, segments: dict[str, SegmentInfo] | None = None) -> list[str]:
     """VLAN / bridge のポートが指す L1 IF。LAG はメンバーに、Ethernet Segment は脚の L1 IF に展開する"""
-    lags = {g.id: g for g in topology.layer1.lag} if topology.layer1 else {}
+    lags = {g.id: g for g in topology.layer1.lags} if topology.layer1 else {}
     if port.ethernet_segment is not None:
         segs = segments if segments is not None else ethernet_segments(topology)
         info = segs.get(port.ethernet_segment)
@@ -117,9 +117,9 @@ def vlan_endpoints(topology: MLNDLTopology) -> list[VlanEndpoint]:
         return []
     l1 = topology.layer1
     l1ifs = {i.id: i for i in l1.interfaces}
-    lags = {g.id: g for g in l1.lag}
+    lags = {g.id: g for g in l1.lags}
     lags_of: dict[str, list[str]] = defaultdict(list)       # L1 IF id → それをメンバーに持つ LAG
-    for g in l1.lag:
+    for g in l1.lags:
         for m in g.members:
             lags_of[m].append(g.id)
     peer: dict[str, str] = {}                                # L1 IF id → リンクの対向の L1 IF id
@@ -201,7 +201,7 @@ def vlan_port_nodes(topology: MLNDLTopology,
         return out
     l1 = topology.layer1
     iface_node = {i.id: i.node for i in l1.interfaces} if l1 else {}
-    lag_node = {g.id: g.node for g in l1.lag} if l1 else {}
+    lag_node = {g.id: g.node for g in l1.lags} if l1 else {}
     segs = segments if segments is not None else ethernet_segments(topology)
     for vlan in topology.layer2.vlans:
         out[vlan.id]                                         # ポートのない VLAN も空集合で載せる
@@ -232,7 +232,7 @@ def l2vni_participants(topology: MLNDLTopology) -> dict[str, set[str]]:
         return out
     l3_node = {i.id: i.node for i in topology.layer3.interfaces} if topology.layer3 else {}
     vtep_nodes = {v.id: {l3_node[s] for s in v.sources if s in l3_node} for v in topology.layer2.vteps}
-    for vx in topology.layer2.vxlan:
+    for vx in topology.layer2.vxlans:
         if vx.type == "l2vni":
             out[vx.id] = set().union(*(vtep_nodes.get(t, set()) for t in vx.vteps))
     return out
@@ -252,7 +252,7 @@ def l2vni_node_vlans(topology: MLNDLTopology,
     ports = vlan_port_nodes(topology, segments)
     svis = vlan_svi_nodes(topology)
     participants = l2vni_participants(topology)
-    for vx in topology.layer2.vxlan:
+    for vx in topology.layer2.vxlans:
         if vx.type != "l2vni":
             continue
         members = participants.get(vx.id, set())
@@ -268,7 +268,7 @@ def vlan_l2vnis(topology: MLNDLTopology) -> dict[str, list[str]]:
     """VLAN の id → その VLAN を vlans に書いた L2VNI の id (書いた順。ADR-0026 D5 の逆引き)"""
     out: dict[str, list[str]] = defaultdict(list)
     if topology.layer2:
-        for vx in topology.layer2.vxlan:
+        for vx in topology.layer2.vxlans:
             if vx.type == "l2vni":
                 for vlan in vx.vlans:
                     if vx.id not in out[vlan]:
@@ -575,7 +575,7 @@ class _Fabric:
     def __init__(self, topology: MLNDLTopology) -> None:
         self.peer, self.link_of = _l1_peers(topology)
         l1 = topology.layer1
-        self.lag_members = {g.id: set(g.members) for g in l1.lag} if l1 else {}
+        self.lag_members = {g.id: set(g.members) for g in l1.lags} if l1 else {}
         # L1 IF id → それをポートに持つ bridge (LAG のポートはメンバーに展開する)
         self.bridges_of: dict[str, set[str]] = defaultdict(set)
         if topology.layer2:

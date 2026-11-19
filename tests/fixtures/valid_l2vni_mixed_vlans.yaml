@@ -57,7 +57,7 @@ layer1:
     - {id: link-leaf3-server3, endpoints: [leaf3-swp1,  server3-eth0], link_speed: 10G, link_role: access}
     - {id: link-leaf4-server4, endpoints: [leaf4-swp1,  server4-eth0], link_speed: 10G, link_role: access}
 
-  lag:
+  lags:
     # ピアリンクは機器ごとの普通の LAG (ADR-0023 D6)
     - {id: lag-leaf1-peer,    node: leaf1, name: peerlink, members: [leaf1-swp49]}
     - {id: lag-leaf2-peer,    node: leaf2, name: peerlink, members: [leaf2-swp49]}
@@ -88,7 +88,7 @@ layer2:
     - {id: vtep-leaf3,       sources: [leaf3-lo]}
     - {id: vtep-leaf4,       sources: [leaf4-lo]}
 
-  vxlan:
+  vxlans:
     - id: vni-10020
       type: l2vni
       vni: 10020

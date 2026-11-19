@@ -5,7 +5,7 @@ validator の参照検査と、利用者向けの MLNDLTopology.resolve() が使
 
     index = topology.index()
     index.get("vtep-leaf1-leaf2")            # → Vtep
-    index.get("vni-10100", "layer2.vxlan")   # パスを指定して引く
+    index.get("vni-10100", "layer2.vxlans")   # パスを指定して引く
     index.ids("layer1.nodes")                # → {"spine1", "leaf1", ...}
 """
 

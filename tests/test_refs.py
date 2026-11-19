@@ -133,7 +133,7 @@ layer1:
   interfaces: [{id: r1-eth0, node: r1}, {id: r2-eth0, node: r2}]
 layer2:
   vlans: [{id: vlan-100, vlan_id: 100}]
-  vxlan:
+  vxlans:
     - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-r1]}
   vteps: [{id: vtep-r1, sources: [r1-lo]}]
 layer3:
@@ -173,13 +173,13 @@ def test_where_filter():
 
 def test_list_reference_path_has_index():
     errs = _errors(BASE.replace("vteps: [vtep-r1]}", "vteps: [vtep-r1, nope]}"))
-    assert [e.path for e in errs] == ["layer2.vxlan[0].vteps[1]"]
+    assert [e.path for e in errs] == ["layer2.vxlans[0].vteps[1]"]
 
 
 def test_alias_is_used_in_path():
     """from は Python の予約語なので from_ だが、パスは YAML どおり from"""
     body = BASE + ("control_plane:\n  bgp: [{id: bgp-default, nodes: [{node: r1, local_as: 65001}]}]\n"
-                   "  routing_neighbors:\n    - {id: bgp-peer-a, type: bgp, from: {node: nope, update_source: r1-lo},"
+                   "  routing_neighbors:\n    - {id: bgp-peer-a, type: bgp, address_families: [ipv4_unicast], from: {node: nope, update_source: r1-lo},"
                    " to: {address: 192.0.2.1, local_as: 65002}}\n")
     assert [e.path for e in _errors(body)][0] == "control_plane.routing_neighbors[0].from.node"
 
@@ -198,7 +198,7 @@ def test_resolve():
 
 def test_resolve_with_path():
     t = parse_file(FIXTURES / "valid_full_dc.yaml")
-    assert t.resolve("vni-10100", "layer2.vxlan").vni == 10100
+    assert t.resolve("vni-10100", "layer2.vxlans").vni == 10100
     assert t.resolve("vni-10100", "layer2.vlans") is None
 
 
@@ -214,7 +214,7 @@ def test_index_ids_with_where():
     t = parse_file(FIXTURES / "valid_full_dc.yaml")
     index = t.index()
     assert isinstance(index, IdIndex)
-    assert index.ids("layer2.vxlan", ("type", "l3vni")) == {"vni-10900"}
+    assert index.ids("layer2.vxlans", ("type", "l3vni")) == {"vni-10900"}
     assert "layer2.vteps" in index.paths()
 
 
@@ -228,7 +228,7 @@ def test_new_syntax_gets_reference_check_from_ref_alone():
         source: Annotated[str, Ref("layer3.interfaces")]
 
     errors: list = []
-    _walk_refs(PeerKeepalive(source="nope"), "layer1.lag[0].peer_keepalive", parse(BASE).index(), errors)
+    _walk_refs(PeerKeepalive(source="nope"), "layer1.lags[0].peer_keepalive", parse(BASE).index(), errors)
     assert [(e.path, e.message) for e in errors] == [
-        ("layer1.lag[0].peer_keepalive.source", "未定義の L3 インターフェース 'nope' を参照しています"),
+        ("layer1.lags[0].peer_keepalive.source", "未定義の L3 インターフェース 'nope' を参照しています"),
     ]

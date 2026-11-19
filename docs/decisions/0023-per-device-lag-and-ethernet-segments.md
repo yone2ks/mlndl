@@ -216,6 +216,8 @@ layer3:
 - **`members` を LAG の id の文字列だけにする**: single-active の物理 IF の脚を書けない。後からキー付きに変えると破壊的な変更になる
 - **`{ethernet_segment:}` をサブ IF / L3 IF の `attaches_to` でも受ける**: サブ IF 1 つで両機器に効いて短くなるが、L3 IF の `node` と IP が機器ごとに違うので、結局機器ごとに書くことになる
 
+> **改訂 ([ADR-0028](0028-names-and-types.md), 2026-11-20)**: D1 の `layer1.lag` を `layer1.lags` に改名した。`lacp` は `{mode}` だけになり (`active` / `passive` / `static`。書くなら `mode` は必須)、`mode` の既定値 `active` をなくした。`on` は `static` に改名した (引用符なしの `on` は YAML が `true` と読むため)。`min_links` は LACP を使うかと関係なく効くので LAG の直下に移し、既定値 `1` をなくした。`members` は 1 つ以上、ES の `members` の 2 つ以上は型にも書いた。
+
 ## References
 
 - 最終形の記述例 (12 パターン): [evaluations/adr0023/patterns.yaml](evaluations/adr0023/patterns.yaml)。

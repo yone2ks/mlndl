@@ -1,0 +1,123 @@
+# ADR-0028 Pass B: 値域の内側の端を書いた見本 (valid のつもり)
+#
+# ドラフトのとおりなら: valid
+#   D5 の値域はいずれも閉区間 (greater_than_equal / less_than_equal) として読む。
+#   端の値 (1, 4294967295, 16777215, 255, 65535) はちょうど境界の内側にある。
+#
+# 期待する結果: error も warning もなし
+#
+# 値域の端の対応:
+#   - local_as = 1              (BGP インスタンスの機器。RFC 7607: 0 は不可)
+#   - local_as = 4294967295     (トポロジー外の相手。RFC 6793: 4 バイト AS の最大)
+#   - vni = 1                   (L2VNI。RFC 7348: 0 は多くの実装が受け付けない)
+#   - vni = 16777215            (L3VNI。24 ビットの最大)
+#   - min_tx = 1, min_rx = 1    (BFD タイマー)
+#   - multiplier = 255          (BFD。RFC 5880 §4.1: 8 ビット)
+#   - min_links = 1             (LAG の lacp。1 以上)
+#   - mtu = 65535               (トンネル。RFC 791: 16 ビット)
+#
+# 補足:
+#   予約の AS (23456 の AS_TRANS / 65535) や文書用の VNI の端は error にしない。
+#   ここでは「D5 の値域」の端を試す。
+#
+# 検証は改名を戻したコピーを想定。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-b4-ranges-ok
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: leaf2-swp2, node: leaf2, name: swp2 }
+
+  links:
+    - { id: link-leaf1-leaf2-1, endpoints: [leaf1-swp1, leaf2-swp1], link_speed: 10G, link_role: underlay }
+    - { id: link-leaf1-leaf2-2, endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G, link_role: underlay }
+
+  lags:
+    # min_links = 1 (値域の内側の端)
+    - id: lag-leaf1-bond1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1, leaf1-swp2]
+      lacp: { mode: active, min_links: 1 }
+
+layer2:
+  vlans:
+    - { id: vlan-100, vlan_id: 100 }
+    - { id: vlan-200, vlan_id: 200 }
+
+  vteps:
+    - { id: vtep-leaf1, sources: [leaf1-lo] }
+
+  vxlans:
+    # vni = 1 (下端)
+    - id: vni-a
+      type: l2vni
+      vni: 1
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1]
+    # vni = 16777215 (上端)
+    - id: vni-b
+      type: l3vni
+      vni: 16777215
+      vrf: vrf-tenant-a
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-b
+      route_targets:
+        import: ["65001:100"]
+        export: ["65001:100"]
+
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32 }
+    - { id: leaf1-swp1-l3, node: leaf1, name: swp1, ip: 10.1.0.0/31, attaches_to: {interface: leaf1-swp1} }
+    - { id: leaf2-swp1-l3, node: leaf2, name: swp1, ip: 10.1.0.1/31, attaches_to: {interface: leaf2-swp1} }
+
+  tunnel_interfaces:
+    # mtu = 65535 (上端)
+    - id: tunnel-leaf1-ext
+      node: leaf1
+      type: gre
+      source: leaf1-lo
+      destination_ip: 203.0.113.1
+      ip: 172.31.0.1/30
+      mtu: 65535
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        # local_as = 1 (下端)
+        - { node: leaf1, local_as: 1 }
+        - { node: leaf2, local_as: 65002 }
+
+  bfd:
+    # min_tx = 1, min_rx = 1, multiplier = 255 (すべて値域の内側の端)
+    - id: bfd-global
+      min_tx: 1
+      min_rx: 1
+      multiplier: 255
+      nodes: [leaf1, leaf2]
+
+  routing_neighbors:
+    # to.local_as = 4294967295 (上端)
+    - id: bgp-peer-leaf1-ext
+      type: bgp
+      instance: bgp-default
+      from: { node: leaf1, update_source: leaf1-lo }
+      to:   { address: 203.0.113.1, local_as: 4294967295 }
+      address_families: [ipv4_unicast]

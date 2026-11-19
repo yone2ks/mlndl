@@ -1,0 +1,86 @@
+# ADR-0028 Pass A: 既定値をなくした場合に書く量が増えるかを確かめる見本 (valid のつもり)
+#
+# 何を確かめるためのファイルか:
+#   - LacpConfig の既定値 (mode = "active"・min_links = 1) をなくすと、
+#     LACP を書く LAG すべてで mode と min_links の両方を書く必要がある
+#   - BFDConfig の既定値 (min_tx = 300・min_rx = 300・multiplier = 3) をなくすと、
+#     どの BFD インスタンスでも 3 つを書く必要がある
+#   - 「書かなければ書いていない」で書き心地が悪化するか、それとも明示でかえって読みやすいか
+#
+# 判断の材料:
+#   - LACP は「書かない LAG」も多い (a1 を参照)。既定値があっても意味の違いが読みにくい。
+#     mode=active, min_links=1 を暗黙に取るのを「LACP を張る」と区別しにくい
+#   - BFD のタイマーは機器依存で、Cumulus / Cisco / Junos で推奨値が違う。既定値 300/300/3 を
+#     暗黙に取るのは、ハードウェアに応じた値と食い違いうる。明示が安全
+#
+# 懸念:
+#   - a1 では LAG が 5 本あり、そのうち 3 本が LACP 明示。min_links を毎回書く手間
+#   - 1 つの mlndl トポロジーに BFD インスタンスは普通 1 つ。既定値をなくす手間は小さい
+#
+# ---
+# 下は a1 を最小化し、LACP と BFD を既定値なしで書いた見本。
+# 既定値を残す案で書くと lacp: {mode: active} の 1 行で済むが、ここでは
+# min_links を毎回書いている。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-a5-defaults-removed
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1,  node: leaf1,  name: swp1  }
+    - { id: leaf1-swp49, node: leaf1,  name: swp49 }
+    - { id: leaf1-swp50, node: leaf1,  name: swp50 }
+    - { id: leaf2-swp1,  node: leaf2,  name: swp1  }
+    - { id: leaf2-swp49, node: leaf2,  name: swp49 }
+    - { id: leaf2-swp50, node: leaf2,  name: swp50 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-leaf2-peer-1, endpoints: [leaf1-swp49, leaf2-swp49], link_speed: 10G, link_role: peer-link }
+    - { id: link-leaf1-leaf2-peer-2, endpoints: [leaf1-swp50, leaf2-swp50], link_speed: 10G, link_role: peer-link }
+    - { id: link-leaf1-server1,      endpoints: [leaf1-swp1,  server1-eth0], link_speed: 10G, link_role: access }
+    - { id: link-leaf2-server1,      endpoints: [leaf2-swp1,  server1-eth1], link_speed: 10G, link_role: access }
+
+  lags:
+    # LACP を書く LAG は mode と min_links の両方を明示する
+    - id: lag-leaf1-peer
+      node: leaf1
+      name: peerlink
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: { mode: active, min_links: 2 }
+    - id: lag-leaf2-peer
+      node: leaf2
+      name: peerlink
+      members: [leaf2-swp49, leaf2-swp50]
+      lacp: { mode: active, min_links: 2 }
+
+    # 静的 LAG (LACP 不使用)。lacp: のキーごと書かないのが「LACP を張らない」の表現
+    - { id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1] }
+    - { id: lag-leaf2-server1, node: leaf2, name: bond1, members: [leaf2-swp1] }
+
+    - id: lag-server1-bond0
+      node: server1
+      name: bond0
+      members: [server1-eth0, server1-eth1]
+      lacp: { mode: passive, min_links: 1 }
+
+  ethernet_segments:
+    - id: es-server1
+      members: [{ lag: lag-leaf1-server1 }, { lag: lag-leaf2-server1 }]
+
+control_plane:
+  bfd:
+    # 既定値がないので、min_tx / min_rx / multiplier を 3 つとも書く
+    - id: bfd-global
+      min_tx: 300
+      min_rx: 300
+      multiplier: 3
+      nodes: [leaf1, leaf2]

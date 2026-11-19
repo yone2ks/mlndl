@@ -143,17 +143,17 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
         l1 = topology.layer1
         node_ids = {n.id for n in l1.nodes}
         interface_ids = {i.id for i in l1.interfaces}
-        lag_ids = {lag.id for lag in l1.lag}
+        lag_ids = {lag.id for lag in l1.lags}
         iface_node = {i.id: i.node for i in l1.interfaces}
-        lag_nodes = {lag.id: {lag.node} for lag in l1.lag}
-        member_lag = {m: lag.id for lag in l1.lag for m in lag.members}
+        lag_nodes = {lag.id: {lag.node} for lag in l1.lags}
+        member_lag = {m: lag.id for lag in l1.lags for m in lag.members}
         es_ids = {es.id for es in l1.ethernet_segments}
     segments = ethernet_segments(topology)
 
     if topology.layer2:
         l2 = topology.layer2
         vlan_ids = {v.id for v in l2.vlans}
-        l3vni_ids = {v.id for v in l2.vxlan if v.type == "l3vni"}
+        l3vni_ids = {v.id for v in l2.vxlans if v.type == "l3vni"}
         subif_ids = {si.id for si in l2.subinterfaces}
         for si in l2.subinterfaces:
             parent = si.attaches_to.target
@@ -272,7 +272,7 @@ def _validate_ethernet_segments(l1, iface_node, member_lag, spaces, errors):
     for link in l1.links:
         x, y = link.endpoints
         peer[x], peer[y] = y, x
-    lags = {g.id: g for g in l1.lag}
+    lags = {g.id: g for g in l1.lags}
     owner: dict[str, str] = {}              # 脚の参照先・脚の L1 IF → それを脚に持つ最初の ES
     for i, es in enumerate(l1.ethernet_segments):
         written = {m.target for m in es.members}
@@ -360,7 +360,7 @@ def _segment_of_leg(l1) -> dict[str, str]:
     """Ethernet Segment の脚 (LAG / L1 IF の id) と、脚の LAG のメンバー → ES の id"""
     if l1 is None:
         return {}
-    lag_members = {g.id: g.members for g in l1.lag}
+    lag_members = {g.id: g.members for g in l1.lags}
     out: dict[str, str] = {}
     for es in l1.ethernet_segments:
         for m in es.members:
@@ -494,10 +494,10 @@ def _validate_l2(l2, node_ids, iface_node, lag_nodes, member_lag, spaces, segmen
 
     # VxLAN — VNI 一意性チェック
     seen_vnis: dict[int, str] = {}
-    for i, vx in enumerate(l2.vxlan):
+    for i, vx in enumerate(l2.vxlans):
         if vx.vni in seen_vnis:
             errors.append(ValidationError(
-                f"layer2.vxlan[{i}].vni",
+                f"layer2.vxlans[{i}].vni",
                 f"VNI {vx.vni} が '{seen_vnis[vx.vni]}' と重複しています",
             ))
         else:
@@ -536,7 +536,7 @@ class _L2vniContext:
             return ctx
         ctx.bad_vlans = {v for v, vnis in ctx.vlan_l2vnis.items() if len(vnis) > 1}
         vlans = {v.id: v for v in topology.layer2.vlans}
-        for i, vx in enumerate(topology.layer2.vxlan):
+        for i, vx in enumerate(topology.layer2.vxlans):
             if not isinstance(vx, L2VxLAN):
                 continue
             mine = [v for v in vx.vlans if v in vlans and v not in ctx.bad_vlans]
@@ -565,7 +565,7 @@ def _validate_l2vnis(topology: MLNDLTopology, ctx: _L2vniContext, node_ids, erro
     if not topology.layer2:
         return
     vlans = {v.id: v for v in topology.layer2.vlans}
-    l2vnis = [(i, vx) for i, vx in enumerate(topology.layer2.vxlan) if isinstance(vx, L2VxLAN)]
+    l2vnis = [(i, vx) for i, vx in enumerate(topology.layer2.vxlans) if isinstance(vx, L2VxLAN)]
     index_of = {vx.id: i for i, vx in l2vnis}
     participants = l2vni_participants(topology)
     svis_of: dict[str, list] = {}
@@ -579,15 +579,15 @@ def _validate_l2vnis(topology: MLNDLTopology, ctx: _L2vniContext, node_ids, erro
         first, *rest = ctx.vlan_l2vnis[v]
         for other in rest:
             i = index_of[other]
-            j = topology.layer2.vxlan[i].vlans.index(v)
+            j = topology.layer2.vxlans[i].vlans.index(v)
             errors.append(ValidationError(
-                f"layer2.vxlan[{i}].vlans[{j}]",
+                f"layer2.vxlans[{i}].vlans[{j}]",
                 f"VLAN '{v}' は L2VNI '{first}' と '{other}' の両方の vlans にあります。"
                 f"1 つの VLAN は 1 つの L2VNI に載せます (ADR-0026 D5)",
             ))
 
     for i, vx in l2vnis:
-        path = f"layer2.vxlan[{i}]"
+        path = f"layer2.vxlans[{i}]"
         mine = [v for v in vx.vlans if v in vlans and v not in ctx.bad_vlans]
         bad_nodes = ctx.bad_nodes.get(vx.id, {})
 
@@ -661,7 +661,7 @@ def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, segments, err
         for link in topology.layer1.links:
             x, y = link.endpoints
             peer[x], peer[y] = y, x
-    lag_members = {g.id: set(g.members) for g in topology.layer1.lag} if topology.layer1 else {}
+    lag_members = {g.id: set(g.members) for g in topology.layer1.lags} if topology.layer1 else {}
     segment_of = _segment_of_leg(topology.layer1)
     vlan_ports = {pr.target for v in l2.vlans for pr in [*v.trunk_ports, *v.access_ports]}
     owner: dict[str, str] = {}          # ポートの参照先 → それを書いた最初の bridge
@@ -732,7 +732,7 @@ def _check_vni_vteps(vx, i, vtep_nodes, errors) -> set[str]:
     participants: set[str] = set()
     seen: set[str] = set()
     for j, vt in enumerate(vx.vteps):
-        path = f"layer2.vxlan[{i}].vteps[{j}]"
+        path = f"layer2.vxlans[{i}].vteps[{j}]"
         if vt in seen:
             errors.append(ValidationError(path, f"VTEP '{vt}' が重複しています (ADR-0014 D3)"))
             continue
@@ -854,8 +854,8 @@ def _check_vlan_endpoints(topology: MLNDLTopology, errors: list[ValidationError]
 
 def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
                  l3vni_ids, vrf_ids, l3interface_ids, l3iface_node, vlan_ids, errors):
-    l3vni_vrf = {vx.id: vx.vrf for vx in (l2.vxlan if l2 else []) if isinstance(vx, L3VxLAN)}
-    vxlan_index = {vx.id: k for k, vx in enumerate(l2.vxlan if l2 else [])}
+    l3vni_vrf = {vx.id: vx.vrf for vx in (l2.vxlans if l2 else []) if isinstance(vx, L3VxLAN)}
+    vxlan_index = {vx.id: k for k, vx in enumerate(l2.vxlans if l2 else [])}
     vrf_l3vni = {v.id: v.l3vni for v in l3.vrfs}
 
     # VRF
@@ -891,7 +891,7 @@ def _validate_l3(l3, l2, node_ids, iface_node, lag_nodes, subif_nodes, spaces,
         other = vrf_l3vni.get(vrf_id)
         if other is not None and other != vx_id and other in l3vni_ids:
             errors.append(ValidationError(
-                f"layer2.vxlan[{vxlan_index[vx_id]}].vrf",
+                f"layer2.vxlans[{vxlan_index[vx_id]}].vrf",
                 f"L3VNI '{vx_id}' は VRF '{vrf_id}' を指していますが、その VRF は"
                 f" L3VNI '{other}' を指しています (ADR-0011 D9)",
             ))
@@ -1460,8 +1460,8 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
                     f"数値が 1 以上 1000 未満になる単位で書きます (ADR-0021 D3)",
                     "warning",
                 ))
-        for i, lag in enumerate(topology.layer1.lag):
-            _warn_prefix(errors, f"layer1.lag[{i}].id", lag.id, "lag-", "LAG")
+        for i, lag in enumerate(topology.layer1.lags):
+            _warn_prefix(errors, f"layer1.lags[{i}].id", lag.id, "lag-", "LAG")
         for i, es in enumerate(topology.layer1.ethernet_segments):
             _warn_prefix(errors, f"layer1.ethernet_segments[{i}].id", es.id, "es-", "Ethernet Segment")
         for i, node in enumerate(topology.layer1.nodes):
@@ -1477,8 +1477,8 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
     if topology.layer2:
         for i, vlan in enumerate(topology.layer2.vlans):
             _warn_prefix(errors, f"layer2.vlans[{i}].id", vlan.id, "vlan-", "VLAN")
-        for i, vx in enumerate(topology.layer2.vxlan):
-            _warn_prefix(errors, f"layer2.vxlan[{i}].id", vx.id, "vni-", "VNI")
+        for i, vx in enumerate(topology.layer2.vxlans):
+            _warn_prefix(errors, f"layer2.vxlans[{i}].id", vx.id, "vni-", "VNI")
         for i, vtep in enumerate(topology.layer2.vteps):
             _warn_prefix(errors, f"layer2.vteps[{i}].id", vtep.id, "vtep-", "VTEP")
         for i, si in enumerate(topology.layer2.subinterfaces):

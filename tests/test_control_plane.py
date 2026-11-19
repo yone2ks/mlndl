@@ -33,7 +33,7 @@ layer1:
     - {id: link-r1-r3, endpoints: [r1-eth1, r3-eth0]}
     - {id: link-r1-r2-a, endpoints: [r1-eth2, r2-eth2]}
     - {id: link-r1-r2-b, endpoints: [r1-eth3, r2-eth3]}
-  lag:
+  lags:
     - {id: lag-r1-po1, node: r1, members: [r1-eth2, r1-eth3]}
     - {id: lag-r2-po1, node: r2, members: [r2-eth2, r2-eth3]}
 layer2:
@@ -80,7 +80,7 @@ def _msgs(text: str, severity: str = "error") -> list[str]:
     return [f"{e.path}: {e.message}" for e in {"error": r.errors, "warning": r.warnings}[severity]]
 
 
-OK_SESSION = "- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-eth0-l3}, to: {node: r2, update_source: r2-eth0-l3}}"
+OK_SESSION = "- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-eth0-l3}, to: {node: r2, update_source: r2-eth0-l3}}"
 
 
 def test_base_session_is_valid():
@@ -93,30 +93,30 @@ def test_base_session_is_valid():
 
 class TestSchema:
     def test_endpoint_forms(self):
-        t = parse(_session("- {id: bgp-peer-r1-isp, type: bgp, from: {node: r1, update_source: r1-lo},"
+        t = parse(_session("- {id: bgp-peer-r1-isp, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-lo},"
                            " to: {address: 203.0.113.1, local_as: 64500}}"))
         s = t.control_plane.routing_neighbors[0]
         assert isinstance(s.from_, BgpInsideEndpoint) and isinstance(s.to, BgpOutsideEndpoint)
 
     def test_update_source_is_required(self):
         with pytest.raises(PydanticValidationError, match="update_source"):
-            parse(_session("- {id: bgp-peer-x, type: bgp, from: {node: r1}, to: {node: r2, update_source: r2-lo}}"))
+            parse(_session("- {id: bgp-peer-x, type: bgp, address_families: [ipv4_unicast], from: {node: r1}, to: {node: r2, update_source: r2-lo}}"))
 
     def test_node_and_address_cannot_mix(self):
         with pytest.raises(PydanticValidationError, match="address"):
-            parse(_session("- {id: bgp-peer-x, type: bgp, from: {node: r1, update_source: r1-lo, address: 10.0.0.9},"
+            parse(_session("- {id: bgp-peer-x, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-lo, address: 10.0.0.9},"
                            " to: {node: r2, update_source: r2-lo}}"))
 
     def test_outside_needs_local_as_and_host_address(self):
         with pytest.raises(PydanticValidationError):
-            parse(_session("- {id: bgp-peer-x, type: bgp, from: {node: r1, update_source: r1-lo}, to: {address: 203.0.113.1}}"))
+            parse(_session("- {id: bgp-peer-x, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-lo}, to: {address: 203.0.113.1}}"))
         with pytest.raises(PydanticValidationError):
-            parse(_session("- {id: bgp-peer-x, type: bgp, from: {node: r1, update_source: r1-lo},"
+            parse(_session("- {id: bgp-peer-x, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-lo},"
                            " to: {address: 203.0.113.1/30, local_as: 64500}}"))
 
     def test_both_outside_is_rejected(self):
         with pytest.raises(PydanticValidationError, match="両端ともトポロジー外"):
-            parse(_session("- {id: bgp-peer-x, type: bgp, from: {address: 192.0.2.1, local_as: 1},"
+            parse(_session("- {id: bgp-peer-x, type: bgp, address_families: [ipv4_unicast], from: {address: 192.0.2.1, local_as: 1},"
                            " to: {address: 192.0.2.2, local_as: 2}}"))
 
     def test_session_has_no_attaches_to(self):
@@ -164,24 +164,24 @@ class TestDerive:
         assert v.bgp_type == "ebgp" and (v.from_.local_as, v.to.local_as) == (65001, 65002)
 
     def test_lag(self):
-        v = self._view("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-po1-l3}, to: {node: r2, update_source: r2-po1-l3}}")
+        v = self._view("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-po1-l3}, to: {node: r2, update_source: r2-po1-l3}}")
         assert v.transport.lags == ["lag-r1-po1", "lag-r2-po1"]
 
     def test_loopback_is_multihop(self):
-        v = self._view("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-lo}, to: {node: r2, update_source: r2-lo}}")
+        v = self._view("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-lo}, to: {node: r2, update_source: r2-lo}}")
         assert v.transport is None and not v.transport_mismatch
 
     def test_svi_has_no_transport(self):
-        v = self._view("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-vlan10}, to: {node: r2, update_source: r2-vlan10}}")
+        v = self._view("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-vlan10}, to: {node: r2, update_source: r2-vlan10}}")
         assert v.transport is None and not v.transport_mismatch
 
     def test_unnumbered(self):
-        v = self._view("- {id: bgp-peer-r1-r3, type: bgp, from: {node: r1, update_source: r1-un}, to: {node: r3, update_source: r3-eth0-l3}}")
+        v = self._view("- {id: bgp-peer-r1-r3, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-un}, to: {node: r3, update_source: r3-eth0-l3}}")
         assert v.from_.unnumbered and not v.to.unnumbered
         assert v.transport.link == "link-r1-r3"
 
     def test_ibgp(self):
-        v = self._view("- {id: bgp-peer-r1-r3, type: bgp, from: {node: r1, update_source: r1-eth1-l3}, to: {node: r3, update_source: r3-eth0-l3}}")
+        v = self._view("- {id: bgp-peer-r1-r3, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-eth1-l3}, to: {node: r3, update_source: r3-eth0-l3}}")
         assert v.bgp_type == "ibgp"
 
 
@@ -206,35 +206,35 @@ class TestChecks:
         assert msgs == ["control_plane.routing_neighbors[0].to.node: ノード 'r2' がインスタンス 'bgp-default' の nodes にありません (ADR-0010 D5)"]
 
     def test_update_source_of_other_node(self):
-        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r2-lo}, to: {node: r2, update_source: r2-eth0-l3}}"))
+        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r2-lo}, to: {node: r2, update_source: r2-eth0-l3}}"))
         assert any(m.startswith("control_plane.routing_neighbors[0].from.update_source: 'r2-lo' はノード 'r2'") for m in msgs)
 
     def test_vrf_of_update_source(self):
         """VRF-lite の書き間違い: tenant の IF を default のインスタンスで使う"""
-        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, instance: bgp-default, from: {node: r1, update_source: r1-a},"
+        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], instance: bgp-default, from: {node: r1, update_source: r1-a},"
                               " to: {node: r2, update_source: r2-a}}", TWO_INSTANCES))
         assert len(msgs) == 2 and all("VRF 'vrf-a'" in m for m in msgs)
-        ok = _session("- {id: bgp-peer-r1-r2-a, type: bgp, instance: bgp-a, from: {node: r1, update_source: r1-a},"
+        ok = _session("- {id: bgp-peer-r1-r2-a, type: bgp, address_families: [ipv4_unicast], instance: bgp-a, from: {node: r1, update_source: r1-a},"
                       " to: {node: r2, update_source: r2-a}}", TWO_INSTANCES)
         assert _msgs(ok) == []
 
     def test_transport_mismatch(self):
-        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-eth1-l3}, to: {node: r2, update_source: r2-eth0-l3}}"))
+        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-eth1-l3}, to: {node: r2, update_source: r2-eth0-l3}}"))
         assert len(msgs) == 1 and "通り道が食い違います" in msgs[0]
         assert "リンク link-r1-r3" in msgs[0] and "リンク link-r1-r2" in msgs[0]
 
     def test_svi_on_different_vlans_is_mismatch(self):
-        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-vlan10}, to: {node: r2, update_source: r2-vlan20}}"))
+        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-vlan10}, to: {node: r2, update_source: r2-vlan20}}"))
         assert len(msgs) == 1 and "VLAN vlan-10" in msgs[0] and "VLAN vlan-20" in msgs[0]
 
     def test_transport_af(self):
-        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-lo}, to: {node: r2, update_source: r2-lo6}}"))
+        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-lo}, to: {node: r2, update_source: r2-lo6}}"))
         assert len(msgs) == 1 and "IPv4 と IPv6" in msgs[0]
-        msgs = _msgs(_session("- {id: bgp-peer-r1-isp, type: bgp, from: {node: r1, update_source: r1-lo}, to: {address: '2001:db8::99', local_as: 64500}}"))
+        msgs = _msgs(_session("- {id: bgp-peer-r1-isp, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-lo}, to: {address: '2001:db8::99', local_as: 64500}}"))
         assert len(msgs) == 1 and "アドレスファミリーが一致しません" in msgs[0]
 
     def test_unnumbered_skips_transport_af(self):
-        assert _msgs(_session("- {id: bgp-peer-r1-r3, type: bgp, from: {node: r1, update_source: r1-un}, to: {node: r3, update_source: r3-eth0-l3}}")) == []
+        assert _msgs(_session("- {id: bgp-peer-r1-r3, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-un}, to: {node: r3, update_source: r3-eth0-l3}}")) == []
 
     def test_duplicate_session(self):
         dup = OK_SESSION + "\n    " + OK_SESSION.replace("bgp-peer-r1-r2", "bgp-peer-r1-r2-again")
@@ -242,7 +242,7 @@ class TestChecks:
         assert len(msgs) == 1 and "同じ両端" in msgs[0]
 
     def test_route_reflector_client_needs_ibgp(self):
-        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, from: {node: r1, update_source: r1-eth0-l3},"
+        msgs = _msgs(_session("- {id: bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-eth0-l3},"
                               " to: {node: r2, update_source: r2-eth0-l3, route_reflector_client: true}}"))
         assert len(msgs) == 1 and "iBGP" in msgs[0]
 
@@ -265,7 +265,7 @@ class TestChecks:
         assert len(_msgs(body, "warning")) == 1
 
     def test_bfd_needs_timer_nodes(self):
-        msgs = _msgs(_session("- {id: bgp-peer-r1-r3, type: bgp, from: {node: r1, update_source: r1-eth1-l3},"
+        msgs = _msgs(_session("- {id: bgp-peer-r1-r3, type: bgp, address_families: [ipv4_unicast], from: {node: r1, update_source: r1-eth1-l3},"
                               " to: {node: r3, update_source: r3-eth0-l3}, bfd: true}"))
         assert len(msgs) == 1 and "r3" in msgs[0]
 

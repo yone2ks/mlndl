@@ -133,11 +133,11 @@ ID 命名規則も参照: [ADR-0002](docs/decisions/0002-id-naming-convention.md
 
 > **→ 詳細: [ADR-0023](docs/decisions/0023-per-device-lag-and-ethernet-segments.md) / 粒度: [ADR-0022](docs/decisions/0022-diagram-granularity.md)**
 
-MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG は機器ごとにある。`layer1.lag` は常に**機器 1 台の LAG**（`type` はなくした。`name` は機器上の名前）。
+MLAG / vPC / MC-LAG / ESI-LAG でも、実機の LAG は機器ごとにある。`layer1.lags` は常に**機器 1 台の LAG**（`type` はなくした。`name` は機器上の名前）。
 複数の機器の LAG（か L1 IF）を相手から 1 本に見せる関係は **`layer1.ethernet_segments`**（RFC 7432 の Ethernet Segment。推奨プレフィックス `es-`）で束ねる。方式名は書かない。
 
 ```yaml
-lag:
+lags:
   - {id: lag-leaf1-peer,    node: leaf1, name: peerlink, members: [leaf1-swp49, leaf1-swp50]}   # ピアリンクは普通の LAG
   - {id: lag-leaf2-peer,    node: leaf2, name: peerlink, members: [leaf2-swp49, leaf2-swp50]}
   - {id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1], lacp: {mode: active}}
@@ -158,6 +158,19 @@ ethernet_segments:
 
 廃止フィールド（書くと移動先を示す error）: `type: lacp` / `type: mlag`、`nodes`、`peer_link`、`peer_link_interface`、`domain_id`、`system_mac`、`client_lag`。
 さらに古い `port_channels`、`mlag`（トップレベルキー）も使わない
+
+### 7. 名前と型の規則（1.0 の前に直した）
+
+> **→ 詳細: [ADR-0028](docs/decisions/0028-names-and-types.md)**
+
+- **名前**: id を持つエントリの一覧は複数形（`lags` / `vxlans`。旧 `lag` / `vxlan` は移動先を示す error）、1 つを指す参照キーは単数形（`{lag:}`・`l3vni:`）。
+  例外は `gateway_redundancy`（id を持たないリスト）。列挙の値は下線区切り（IS-IS の `level_1` / `level_2` / `level_all`。旧 `level-*` は error）
+- **空のリスト**: 要素なしでは成り立たないリストは型で 1 つ以上・必須（LAG の `members`、bridge の `ports`、L2VNI の `vteps`、BGP のセッションの `address_families`。ES の `members` は 2 つ以上）。
+  `address_families` の既定値を `[ipv4_unicast]` にしない。空を許すのは、空に意味があるもの（VLAN のポート、`gateway_redundancy`）と、エントリを先に宣言するもの（インスタンスの `nodes`、各層の一覧）
+- **LAG の束ね方**: `lacp` は `{mode}` だけ（`active` / `passive` / `static`。書くなら `mode` は必須）。旧 `on`（YAML が `true` と読む）は `static` を示す error。`min_links` は LAG の直下（LACP と独立に効く。旧 `lacp.min_links` は error）
+- **既定値**: LACP と BFD のタイマーには言語として既定値を定めない（書かなければ「書いていない」）。`False` の既定値（`native` / `route_reflector_client` / セッションの `bfd`）と「`vrf` を書かない = default VRF」は 1.0 で固めた
+- **値域**: `local_as` 1〜4294967295、`vni` 1〜16777215、BFD の `min_tx` / `min_rx` 1 以上（ms）・`multiplier` 1〜255、`min_links` 1 以上、トンネルの `mtu` 68〜65535。予約の値は error にしない
+- **メッセージ**: 型に `Field(min_length=...)` を書いて `schema.json` に `minItems` を出し、文は `mode="before"` のバリデーターで案内の文にする。旧名の検査は `L1Layer` / `L2Layer` の `model_validator(mode="before")`（`extra="forbid"` の error と重ならない）
 
 ### 8. device_type は抽象キー
 
@@ -298,12 +311,13 @@ layer1:
       link_speed: 10G            # <数値><K|M|G|T>（10 進のビット毎秒。bps は付けない。ADR-0021）
       link_role: underlay        # 自由文字列。推奨: underlay/access/trunk/peer-link/management/uplink
 
-  lag:                             # ADR-0023。常に機器 1 台の LAG（type はない）
+  lags:                            # ADR-0023。常に機器 1 台の LAG（type はない）。旧名 lag は error（ADR-0028）
     - id: lag-leaf1-bond0
       node: leaf1
       name: bond0                  # 機器上の名前（参照ではない）
-      members: [leaf1-swp1, leaf1-swp2]
-      lacp: {mode: active, min_links: 1}
+      members: [leaf1-swp1, leaf1-swp2]   # 1 つ以上
+      lacp: {mode: active}         # active / passive / static（LACP を使わない）。書かなければ「書いていない」（ADR-0028 D4）
+      min_links: 1                 # LAG の直下（LACP と独立）。既定値なし
     - {id: lag-leaf1-server1, node: leaf1, name: bond3, members: [leaf1-swp3]}
     - {id: lag-leaf2-server1, node: leaf2, name: bond3, members: [leaf2-swp3]}
 
@@ -339,7 +353,7 @@ layer2:
     - id: vtep-border1
       sources: [border1-lo]      # sources が 1 つなら address は省略でき、その L3 IF の ip になる
 
-  vxlan:
+  vxlans:                        # 旧名 vxlan は error（ADR-0028）
     - id: vni-10100             # ADR-0002: vni-<N> 形式
       type: l2vni                # l2vni / l3vni を明示
       vni: 10100
@@ -431,7 +445,7 @@ control_plane:                   # ADR-0010。書かなくてもよい（デー�
       nodes: [{node: border1, local_as: 65021}]
 
   bfd:                           # タイマー。BFD を張るかはセッションの bfd で決める
-    - {id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3, nodes: [spine1, leaf1]}
+    - {id: bfd-global, min_tx: 300, min_rx: 300, multiplier: 3, nodes: [spine1, leaf1]}   # ms。タイマーは任意で既定値なし（ADR-0028）
 
   routing_neighbors:             # 1 エントリ = 1 セッション（BGP / OSPF / IS-IS）
     - id: bgp-peer-spine1-leaf1  # ADR-0002: bgp-peer-* 形式
@@ -439,7 +453,7 @@ control_plane:                   # ADR-0010。書かなくてもよい（デー�
       instance: bgp-default      # BGP のエントリが 1 つなら省略できる
       from: {node: spine1, update_source: spine1-swp1-l3}   # update_source は必須（L3 IF の id）
       to:   {node: leaf1,  update_source: leaf1-swp51-l3}
-      address_families: [ipv4_unicast]   # 1 本で複数運べる（[ipv4_unicast, l2vpn_evpn]）
+      address_families: [ipv4_unicast]   # 必須、1 つ以上（ADR-0028）。1 本で複数運べる（[ipv4_unicast, l2vpn_evpn]）
       bfd: true
       # attaches_to は書かない。通り道は update_source の L3 IF から導く（直結の /31 → link-spine1-leaf1）
     - id: bgp-peer-spine1-leaf1-overlay   # 同じ組の 2 本目は用途の語を末尾に
@@ -452,10 +466,12 @@ control_plane:                   # ADR-0010。書かなくてもよい（デー�
       instance: bgp-default
       from: {node: border1, update_source: border1-lo}
       to: {address: 203.0.113.1, local_as: 64500}       # トポロジー外の相手は address + local_as
+      address_families: [ipv4_unicast]
     - id: bgp-peer-border1-dc2-gre
       type: bgp
       from: {node: border1, update_source: tunnel-border1-dc2}   # トンネル IF も書ける（ADR-0018 D3。OSPF の interface も同じ）
       to:   {node: dc2-border1, update_source: tunnel-dc2-border1}
+      address_families: [ipv4_unicast]
       # 通り道は対になるトンネル {tunnel: [from, to]}。箱をはさむ両端が同じ bridge に届けば {bridge: <id>}（ADR-0018 D2）
     # unnumbered: update_source が ip も ipv6 も持たない L3 IF を指す（ADR-0010 D4）
     # RR: クライアント側の端点に route_reflector_client: true（iBGP のみ）
@@ -530,10 +546,12 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | ゲートウェイ冗長 | IPv4 VIP が IF のサブネット内か（IF に `ip` がなければ warning）。同一 IF・同一 mode・同一 AF で `group_id` が重複していないか。IPv6 VIP はリンクローカルか（RFC 5798）。anycast gateway 群で `ip` / `ipv6` が一致するか（VLAN が L2VNI に入っていればその L2VNI の SVI 全体、入っていなければ VLAN ごと。ADR-0026 D6）。同じ単位に anycast gateway と vrrp などが混在（warning） | error / warning |
 | トンネル | `source` が同じ node の L3 IF か。`destination_interface` が別 node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。外側のアドレスファミリーが source と destination で一致するか。VRF 参照。対向がトポロジー内なのに逆向きのトンネルがなければ info | error / info |
 | 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
-| 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members`・`vlan`（単数。→ `vlans`、ADR-0026）に移動先を示すエラー（スキーマ）。`{interface: <LAG / VLAN / サブ IF>}` など、その場所に書ける別のキーの id を指したら正しいキーを示すエラー（validator）。読み替えはしない（ADR-0025 D1） | error |
+| 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members`・`vlan`（単数。→ `vlans`、ADR-0026）、`layer1.lag` / `layer2.vxlan`（→ 複数形）、IS-IS の `level-*`（→ `level_*`）、`lacp.mode: on` と真偽値（→ `static`）、`lacp.min_links`（→ LAG の直下）（ADR-0028）に移動先を示すエラー（スキーマ）。`{interface: <LAG / VLAN / サブ IF>}` など、その場所に書ける別のキーの id を指したら正しいキーを示すエラー（validator）。読み替えはしない（ADR-0025 D1） | error |
 | L2VNI の VLAN | `vlans` は 1 つ以上・同じ id を 2 回書かない（型）。1 つの VLAN が 2 つの L2VNI に、1 台の機器に同じ L2VNI の VLAN が 2 つ（機器はポート ∪ SVI）、ES の脚の機器で同じ L2VNI の VLAN の番号が違う、同じ L2VNI の SVI の `vrf` が食い違う（error）。同じ L2VNI に同じ `vlan_id` の VLAN が 2 つ、参加ノード（VTEP から導出）に `vlans` のどの VLAN のポートも SVI もない（warning）。重ねて出さない規則あり（ADR-0026 D5） | error / warning |
 | VLAN の端点 | ポート → L1 リンクの対向 → 対向の L3 IF を id でたどって求めた端点（1 ホップ。`derive.vlan_endpoints`）の IP が、その VLAN の SVI のサブネットに入っているか。SVI がなければ検査しない（ADR-0013 D7） | info |
 | Ethernet Segment | `members` が 2 つ以上・`{lag:}` か `{interface:}`（型）。同じ機器の脚が 2 つ、1 つの脚（と脚の LAG のメンバー）が 2 つの ES に、LAG とそのメンバーの併記、脚どうしが L1 リンクでつながる（ピアリンクの疑い。`link_role` は見ない）（error）。脚に LAG のメンバーの IF（warning）（ADR-0023 D7） | error / warning |
+| 空のリスト | LAG の `members`・bridge の `ports`・L2VNI の `vteps`・BGP のセッションの `address_families` を書いていて 1 つ以上か。ES の `members` は 2 つ以上（型。文は案内の文）。`lacp` を書くなら `mode` がある（ADR-0028 D3・D4） | error |
+| 数の範囲 | `local_as`・`vni`・BFD のタイマー・`min_links`・トンネルの `mtu` が範囲内か（型。ADR-0028 D5） | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | `vlan_id` が 1..4094 か（スキーマ）。同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。ES に載せた VLAN は脚の全機器で数える。VLAN を指す SVI の機器も数える。ADR-0026 D4） | error |
 | 推奨プレフィックス | `link-` / `lag-` / `es-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
@@ -585,6 +603,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0025](docs/decisions/0025-end-grace-for-old-forms.md) | 1.0 の前に旧形式の猶予 (warning) をやめる | **C**（2026-11-09 実装） | 「1.x の間は読み替えて warning」とした旧形式（L3 IF の `interface`、短縮形 `interface: vlan-N`、`{interface: <LAG 等>}`、VLAN のポートの `node`、`vtep_source` / `members`）を移動先を示す error に。OSPF / IS-IS の通り道の食い違いを error に繰り上げ。エクスポーターの旧キー（L3 IF の `interface` / `kind` / `vlan` / `subinterface` + `vlan_id` / `lag`、推定の `lo_ip` / `lo_ipv6`）を外す。ADR-0014・0015 を Accepted に。1.0 の後も「読み替えて warning」は既定にしない |
 | [ADR-0026](docs/decisions/0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる | **C**（2026-11-15 実装） | L2VNI の `vlan`（単数）を `vlans`（リスト）に。旧 `vlan` は移動先を示す error。L2VNI に入る VLAN ではブロードキャストドメインは L2VNI、VLAN のエントリは「番号とポート」。参照は L2VNI → VLAN の片方向（案 C の VLAN → L2VNI は却下）。参加機器は VTEP から、その機器の VLAN はポート ∪ SVI から導く（`derive.vlan_port_nodes` / `vlan_svi_nodes` / `l2vni_node_vlans`）。端点・`vlan_member` エッジはポートだけ。1 台で 2 VLAN・1 VLAN が 2 VNI・ES の脚で番号違い・SVI の VRF 違いは error。anycast の一致は VNI 単位。エクスポーターは L2VNI に `vlans` と `node_vlans: [{node, vlan}]` |
 | [ADR-0027](docs/decisions/0027-compatibility-promise.md) | 互換の約束 | **C**（2026-11-19 実装） | 1.0 の後に 1.x で許す変更（加算・緩和・warning）と 2.0 が要る変更（改名・必須化・既定値・意味・検査の強化）。新しい error は 1.x で足したキー・値だけ。`--strict` はそのバージョンの warning を error にすることだけを約束（CI はマイナーを固定）。`ndl_version` は必須の文字列で「読むのに要る最も古いバージョン」。新しい YAML は `UnsupportedVersionError` 1 本で止める。パッケージの `メジャー.マイナー` = `LANGUAGE_VERSION`。エクスポーターの規範キーと出力の `meta`。`meta` だけが未知のキーを受け付ける。糖衣構文と旧形式の error は 2.0 まで残す |
+| [ADR-0028](docs/decisions/0028-names-and-types.md) | 1.0 の前の名前と型の直し | **C**（2026-11-20 実装） | id を持つエントリの一覧は複数形（`lags` / `vxlans`）、参照キーは単数形、列挙の値は下線区切り（IS-IS の `level_*`）。要素なしでは成り立たないリストは型で 1 つ以上・必須（`vteps` / `address_families` / LAG の `members` / bridge の `ports`）。LACP と BFD のタイマーは既定値なし。`lacp.mode` の `on` → `static`、`min_links` は LAG の直下。`local_as`・`vni`・BFD・`min_links`・トンネルの `mtu` に値域。旧名・旧値は移動先を示す error |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag`。ADR-0023 で機器 1 台の LAG と `ethernet_segments` に分け直した |
 
 ---

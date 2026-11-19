@@ -1,0 +1,118 @@
+# ADR-0028 Pass A: 旧名で書いた見本 (invalid のつもり、移動先を示す error になる想定)
+#
+# 何を確かめるためのファイルか:
+#   - 改名の後に残すべき「旧名の移動先を示す error」が、どのメッセージになると分かりやすいか
+#   - 3 つの改名 (lag / vxlan / level) を 1 つのファイルで並べ、同時に出たときの読みやすさを見る
+#
+# 期待する error のメッセージ案 (ADR-0025 の既存の error と同じ文体):
+#
+#   1) layer1.lag:
+#      layer1.lag は layer1.lags に改名しました。lag を lags に書き換えてください (ADR-0028)
+#
+#   2) layer2.vxlan:
+#      layer2.vxlan は layer2.vxlans に改名しました。vxlan を vxlans に書き換えてください (ADR-0028)
+#      (補足: 単数の vxlan は番号のリストにも読めるため複数形にそろえました)
+#
+#   3) control_plane.routing_neighbors[].level: level-2 / level-1 / level-all:
+#      IS-IS の level の値 'level-2' は 'level_2' に改名しました (level-1 → level_1、
+#      level-all → level_all も同じ。mlndl の Literal は下線区切りにそろえます。ADR-0028)
+#
+# ねらい: 書き手が「なぜ変わったのか」と「どう直すか」の両方を 1 行で読めるようにする。
+#
+# ---
+# 下は a1 を最小化し、改名の前の旧名 3 つを使って書いた見本。実装は今のところ
+# この 3 つを「正しい名前」として受け取るが、ADR-0028 の実装後は error になる。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-a3-old-names
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp49, node: leaf1, name: swp49 }
+    - { id: leaf1-swp50, node: leaf1, name: swp50 }
+    - { id: leaf1-swp1,  node: leaf1, name: swp1  }
+    - { id: leaf2-swp49, node: leaf2, name: swp49 }
+    - { id: leaf2-swp50, node: leaf2, name: swp50 }
+    - { id: leaf2-swp1,  node: leaf2, name: swp1  }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-leaf2-peer-1, endpoints: [leaf1-swp49, leaf2-swp49], link_speed: 10G, link_role: peer-link }
+    - { id: link-leaf1-leaf2-peer-2, endpoints: [leaf1-swp50, leaf2-swp50], link_speed: 10G, link_role: peer-link }
+    - { id: link-leaf1-server1,      endpoints: [leaf1-swp1,  server1-eth0], link_speed: 10G, link_role: access }
+    - { id: link-leaf2-server1,      endpoints: [leaf2-swp1,  server1-eth1], link_speed: 10G, link_role: access }
+
+  # ↓ 旧名 (単数)。ADR-0028 で lags に改名する想定。移動先を示す error になるはず
+  lag:
+    - id: lag-leaf1-peer
+      node: leaf1
+      name: peerlink
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: {mode: active, min_links: 2}
+    - id: lag-leaf2-peer
+      node: leaf2
+      name: peerlink
+      members: [leaf2-swp49, leaf2-swp50]
+      lacp: {mode: active, min_links: 2}
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+
+  ethernet_segments:
+    - id: es-server1
+      members: [{lag: lag-leaf1-server1}, {lag: lag-leaf2-server1}]
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - {ethernet_segment: es-server1}
+
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # ↓ 旧名 (単数)。ADR-0028 で vxlans に改名する想定。移動先を示す error になるはず
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32 }
+
+# IS-IS は level の旧名を使うためだけに置く。インスタンスと通り道を最小構成で書く
+control_plane:
+  isis:
+    - id: isis-core
+      nodes:
+        - { node: leaf1 }
+        - { node: leaf2 }
+
+  routing_neighbors:
+    # ↓ 旧名。ADR-0028 で level_2 に改名する想定。移動先を示す error になるはず
+    - id: isis-adj-leaf1-leaf2
+      type: isis
+      instance: isis-core
+      from: { node: leaf1, interface: leaf1-swp49 }
+      to:   { node: leaf2, interface: leaf2-swp49 }
+      level: level-2

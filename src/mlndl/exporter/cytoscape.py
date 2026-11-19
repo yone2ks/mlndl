@@ -55,7 +55,7 @@ def _interface_nodes(topology: MLNDLTopology) -> dict[str, list[str]]:
     if topology.layer1:
         for iface in topology.layer1.interfaces:
             nodes[iface.id] = [iface.node]
-        for lag in topology.layer1.lag:
+        for lag in topology.layer1.lags:
             nodes[lag.id] = [lag.node]
         for es_id, info in ethernet_segments(topology).items():
             nodes[es_id] = list(info.nodes)
@@ -136,14 +136,15 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
     node_lags: dict[str, list[dict]] = defaultdict(list)
 
     # LAG は機器 1 台なので、その機器に埋め込む (ADR-0023)。メンバーは L1 IF の name (リンクの source_if と同じ)。
-    # lacp は書かれた値だけ出す (既定値で埋めない)。Ethernet Segment の脚なら、その ES の id を添える
+    # lacp ({mode}) と min_links は書かれたときだけ出す (言語として既定値を定めない。ADR-0028 D4)。Ethernet Segment の脚なら、その ES の id を添える
     if_name = {i.id: i.name or i.id for i in topology.layer1.interfaces}
     lag_segment = {m: es_id for es_id, info in ethernet_segments(topology).items() for m in info.members}
-    for lag in topology.layer1.lag:
+    for lag in topology.layer1.lags:
         entry = {"id": lag.id}
         if lag.name: entry["name"] = lag.name
         entry["members"] = [if_name.get(m, m) for m in lag.members]
-        if lag.lacp is not None: entry["lacp"] = lag.lacp.model_dump(mode="json", exclude_unset=True)
+        if lag.lacp is not None: entry["lacp"] = {"mode": lag.lacp.mode}
+        if lag.min_links is not None: entry["min_links"] = lag.min_links
         if lag.id in lag_segment: entry["ethernet_segment"] = lag_segment[lag.id]
         if lag.description: entry["description"] = lag.description
         node_lags[lag.node].append(entry)
@@ -265,7 +266,7 @@ def _export_l1_edges(topology, if_to_node, if_to_name, elements):
         for leg in info.legs:
             segment_of.setdefault(leg, es_id)
     lag_membership: dict[str, dict] = {}
-    for lag in l1.lag:
+    for lag in l1.lags:
         for member in lag.members:
             lag_membership[member] = {"lag_id": lag.id}
 
@@ -363,7 +364,7 @@ def _export_ethernet_segments(topology, elements):
     if not topology.layer1 or not topology.layer1.ethernet_segments:
         return
     l1 = topology.layer1
-    node_of = {i.id: i.node for i in l1.interfaces} | {g.id: g.node for g in l1.lag}
+    node_of = {i.id: i.node for i in l1.interfaces} | {g.id: g.node for g in l1.lags}
     infos = ethernet_segments(topology)
     for es in l1.ethernet_segments:
         data: dict = {
@@ -459,7 +460,7 @@ def _export_l2_overlay(topology, if_to_name, elements):
     # VxLAN ノード。vteps は L2VNI なら書かれたもの、L3VNI なら VRF から導いたもの
     vteps = _vtep_info(topology)
     node_vlans = l2vni_node_vlans(topology)
-    for vx in topology.layer2.vxlan:
+    for vx in topology.layer2.vxlans:
         data: dict = {"layer": "layer2", "vni": vx.vni}
         if isinstance(vx, L2VxLAN):
             data.update({"id": vx.id, "label": f"L2VNI {vx.vni}", "type": "l2vni",

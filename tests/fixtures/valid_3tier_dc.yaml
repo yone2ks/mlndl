@@ -212,25 +212,29 @@ layer1:
     - { id: link-dist3-server3, endpoints: [dist3-fa0-1, server3-eth0], link_speed: 1G, link_role: access }
     - { id: link-dist4-server4, endpoints: [dist4-fa0-1, server4-eth0], link_speed: 1G, link_role: access }
 
-  lag:
+  lags:
     # ── Core1 の LACP LAG ──────────────────────────────────────────────
     - id: lag-core1-agg1
       node: core1
       members: [core1-te1-1, core1-te1-2]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     - id: lag-core1-agg2
       node: core1
       members: [core1-te1-3, core1-te1-4]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     # ── Core2 の LACP LAG ──────────────────────────────────────────────
     - id: lag-core2-agg1
       node: core2
       members: [core2-te1-1, core2-te1-2]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     - id: lag-core2-agg2
       node: core2
       members: [core2-te1-3, core2-te1-4]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1

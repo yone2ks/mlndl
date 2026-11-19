@@ -18,7 +18,7 @@ layer1:
     - {id: leaf2-swp1, node: leaf2}
     - {id: leaf1-swp49, node: leaf1}
     - {id: leaf2-swp49, node: leaf2}
-  lag:
+  lags:
     - {id: lag-leaf1-peer, node: leaf1, members: [leaf1-swp49]}
     - {id: lag-leaf2-peer, node: leaf2, members: [leaf2-swp49]}
     - {id: lag-leaf1-a, node: leaf1, members: [leaf1-swp1]}
@@ -45,7 +45,7 @@ def _topo(*vteps: str, vxlan: str = ""):
     body = 'ndl_version: "1.0"\n' + L1 + "layer2:\n  vlans: [{id: vlan-100, vlan_id: 100}]\n"
     body += "  vteps:\n" + "".join(vteps)
     if vxlan:
-        body += "  vxlan:\n" + vxlan
+        body += "  vxlans:\n" + vxlan
     return parse(body + L3)
 
 
@@ -236,7 +236,7 @@ def test_cytoscape_l3vni_vteps_derived_from_vrf():
     body = ('ndl_version: "1.0"\n' + L1 + "layer2:\n  vlans: [{id: vlan-100, vlan_id: 100}]\n  vteps:\n"
             + MLAG_A + "    - {id: vtep-border1, sources: [border1-lo1]}\n"
             + "    - {id: vtep-leaf3, sources: [leaf3-lo1]}\n"
-            + "  vxlan:\n    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-a}\n"
+            + "  vxlans:\n    - {id: vni-10900, type: l3vni, vni: 10900, vrf: vrf-a}\n"
             + L3.replace("layer3:\n", "layer3:\n  vrfs: [{id: vrf-a, l3vni: vni-10900}]\n")
             + "    - {id: leaf1-vlan-100, node: leaf1, name: Vlan100, ip: 192.168.100.1/24, vrf: vrf-a,"
               " attaches_to: {vlan: vlan-100}}\n"
@@ -251,7 +251,7 @@ def test_yaml_round_trip():
     t1 = _topo(MLAG_A, "    - {id: vtep-border1, sources: [border1-lo1]}\n",
                vxlan="    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-mlag-a]}\n")
     out = yaml_exporter.export(t1)
-    vni = yaml.safe_load(out)["layer2"]["vxlan"][0]
+    vni = yaml.safe_load(out)["layer2"]["vxlans"][0]
     assert "members" not in vni and "vtep_source" not in vni     # 旧形式のキーは書き出さない
     t2 = parse(out)
     assert t1.model_dump() == t2.model_dump()
