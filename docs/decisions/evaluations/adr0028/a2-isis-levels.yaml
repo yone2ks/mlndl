@@ -1,0 +1,76 @@
+# ADR-0028 Pass A: IS-IS の level の値を下線区切りにした見本 (valid のつもり)
+#
+# 何を確かめるためのファイルか:
+#   - IsisAdjacency.level の値: `level-1` / `level-2` / `level-all` → `level_1` / `level_2` / `level_all`
+#   - 3 つの値が並んだときに、読み書きで混乱がないか
+#   - `level_all` (L1 と L2 両方を張る) を使うと、同じ IF に 2 つの隣接を書かずに済むのが利点
+#
+# トポロジー: core 3 台と agg 1 台を環状に。Level の分担は IS-IS の典型:
+#   - core1 ↔ core2: level_2 (バックボーン)
+#   - core2 ↔ core3: level_2
+#   - core1 ↔ core3: level_2
+#   - core1 ↔ agg1:  level_1 (エリアの中の隣接)
+#   - core2 ↔ agg1:  level_all (エリア境界を兼ねる L1/L2 ルーター。RFC 1195)
+#
+# IS-IS は L2 の上で張るので、IsisEndpoint.interface は layer1.interfaces を指す
+# (L3 IF は書かなくても隣接は張れる)。ADR-0010 D8。
+#
+# このファイルは改名の後の形なので、今の実装 (level-2 等) ではスキーマで error になる。
+# 検証は改名を戻したコピーで機械的に行う前提 (level_1 → level-1 など)。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-a2-isis-levels
+  network_types: [l1-physical, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: core1, name: Core-1, implementation: physical, role: core, device_type: cisco_iosxr }
+    - { id: core2, name: Core-2, implementation: physical, role: core, device_type: cisco_iosxr }
+    - { id: core3, name: Core-3, implementation: physical, role: core, device_type: cisco_iosxr }
+    - { id: agg1,  name: Agg-1,  implementation: physical, role: core, device_type: cisco_iosxr }
+
+  interfaces:
+    - { id: core1-g0-0-0, node: core1, name: GigabitEthernet0/0/0 }   # → core2
+    - { id: core1-g0-0-1, node: core1, name: GigabitEthernet0/0/1 }   # → core3
+    - { id: core1-g0-0-2, node: core1, name: GigabitEthernet0/0/2 }   # → agg1
+
+    - { id: core2-g0-0-0, node: core2, name: GigabitEthernet0/0/0 }   # → core1
+    - { id: core2-g0-0-1, node: core2, name: GigabitEthernet0/0/1 }   # → core3
+    - { id: core2-g0-0-2, node: core2, name: GigabitEthernet0/0/2 }   # → agg1
+
+    - { id: core3-g0-0-0, node: core3, name: GigabitEthernet0/0/0 }   # → core1
+    - { id: core3-g0-0-1, node: core3, name: GigabitEthernet0/0/1 }   # → core2
+
+    - { id: agg1-g0-0-0, node: agg1, name: GigabitEthernet0/0/0 }     # → core1
+    - { id: agg1-g0-0-1, node: agg1, name: GigabitEthernet0/0/1 }     # → core2
+
+  links:
+    - { id: link-core1-core2, endpoints: [core1-g0-0-0, core2-g0-0-0], link_speed: 1G, link_role: underlay }
+    - { id: link-core1-core3, endpoints: [core1-g0-0-1, core3-g0-0-0], link_speed: 1G, link_role: underlay }
+    - { id: link-core2-core3, endpoints: [core2-g0-0-1, core3-g0-0-1], link_speed: 1G, link_role: underlay }
+    - { id: link-core1-agg1,  endpoints: [core1-g0-0-2, agg1-g0-0-0],  link_speed: 1G, link_role: underlay }
+    - { id: link-core2-agg1,  endpoints: [core2-g0-0-2, agg1-g0-0-1],  link_speed: 1G, link_role: underlay }
+
+control_plane:
+  isis:
+    # NET は書かなくてもよい (control-plane.ja.md)。読み書きが揃うよう area 0001 で 1 つのインスタンスにまとめる
+    - id: isis-core
+      nodes:
+        - { node: core1, net: "49.0001.0100.0000.0001.00" }
+        - { node: core2, net: "49.0001.0100.0000.0002.00" }
+        - { node: core3, net: "49.0001.0100.0000.0003.00" }
+        - { node: agg1,  net: "49.0001.0100.0000.0004.00" }
+
+  routing_neighbors:
+    # バックボーン: core1 ↔ core2 ↔ core3 の 3 本は level_2 で張る
+    - { id: isis-adj-core1-core2, type: isis, instance: isis-core, from: {node: core1, interface: core1-g0-0-0}, to: {node: core2, interface: core2-g0-0-0}, level: level_2 }
+    - { id: isis-adj-core2-core3, type: isis, instance: isis-core, from: {node: core2, interface: core2-g0-0-1}, to: {node: core3, interface: core3-g0-0-1}, level: level_2 }
+    - { id: isis-adj-core1-core3, type: isis, instance: isis-core, from: {node: core1, interface: core1-g0-0-1}, to: {node: core3, interface: core3-g0-0-0}, level: level_2 }
+
+    # エリアの中: core1 ↔ agg1 は level_1
+    - { id: isis-adj-core1-agg1, type: isis, instance: isis-core, from: {node: core1, interface: core1-g0-0-2}, to: {node: agg1, interface: agg1-g0-0-0}, level: level_1 }
+
+    # L1/L2 兼用のルーター (core2) と agg1 の間は level_all (RFC 1195 の L1/L2)
+    - { id: isis-adj-core2-agg1, type: isis, instance: isis-core, from: {node: core2, interface: core2-g0-0-2}, to: {node: agg1, interface: agg1-g0-0-1}, level: level_all }

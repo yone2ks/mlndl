@@ -1,0 +1,86 @@
+# ADR-0028 Pass A: 空のリストを書いた見本 (invalid のつもり、min_length=1 の error になる想定)
+#
+# 何を確かめるためのファイルか:
+#   - L2VxLAN.vteps を min_length=1 (型で) にしたときの error (今の needs_vteps は model_validator)
+#   - BgpSession.address_families を min_length=1 にし、既定値を持たないようにしたときの error
+#     (1) 空リストで書いた場合
+#     (2) キーごと省いた場合 (今は [] が入る)
+#
+# 期待する error のメッセージ案:
+#
+#   1) layer2.vxlans[0].vteps: List should have at least 1 item (type: too_short)
+#      (今の model_validator のメッセージ「L2VNI が載る VTEP を vteps: [...] で書いてください」
+#       を型レベルの min_length に移すと、文面は pydantic 既定になる。
+#       field_validator で前処理し、同じ文面を保てるようにしたい)
+#
+#   2a) control_plane.routing_neighbors[0].address_families: List should have at least 1 item
+#   2b) control_plane.routing_neighbors[1].address_families: Field required
+#
+# ねらい: 「EVPN の書き忘れ」(= l2vpn_evpn を address_families に入れ損ねる) と
+#   「全部書かない」(= キーごと省く) を区別できる。
+#   今 (既定値 []) では、どちらも「空リスト」として同じに見え、警告も error も出ない。
+#
+# ---
+# このファイルは 3 つの誤りを 1 つに含む。pydantic は複数の error をまとめて返すので、
+# 一度の検査で 3 本の error が出るはず。改名した名前 (lags / vxlans) で書く。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-a4-empty-lists
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay }
+
+layer2:
+  vlans:
+    - { id: vlan-100, vlan_id: 100 }
+
+  # vteps は 1 つだけ正しく書いておく (L2VNI の error の原因を vteps 空に絞るため)
+  vteps:
+    - { id: vtep-leaf1, sources: [leaf1-lo] }
+
+  vxlans:
+    # ★ 誤り (1): vteps: [] は 1 つ以上必要
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: []
+
+layer3:
+  interfaces:
+    - { id: spine1-lo, node: spine1, name: lo, ip: 10.0.0.1/32 }
+    - { id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32 }
+    - { id: spine1-swp1-l3, node: spine1, name: swp1, ip: 10.1.0.0/31, attaches_to: {interface: spine1-swp1} }
+    - { id: leaf1-swp51-l3, node: leaf1,  name: swp51, ip: 10.1.0.1/31, attaches_to: {interface: leaf1-swp51} }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+
+  routing_neighbors:
+    # ★ 誤り (2a): address_families を空リストで書いた
+    - id: bgp-peer-spine1-leaf1
+      type: bgp
+      from: { node: spine1, update_source: spine1-swp1-l3 }
+      to:   { node: leaf1,  update_source: leaf1-swp51-l3 }
+      address_families: []
+
+    # ★ 誤り (2b): address_families のキーを省いた
+    - id: bgp-peer-spine1-leaf1-overlay
+      type: bgp
+      from: { node: spine1, update_source: spine1-lo }
+      to:   { node: leaf1,  update_source: leaf1-lo }
