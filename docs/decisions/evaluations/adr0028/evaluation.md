@@ -105,3 +105,31 @@ Accepted の ADR (0001・0010・0011・0014・0018・0022・0023・0025・0026)�
 3. **`lacp` の書き方の意味の表** (書かない / `mode` だけ / `min_links` だけ / 両方 / `{}`) と、上の「残る論点」1
 4. **旧名・旧値の error の実装の位置とメッセージ**
 5. **影響を受けるコンポーネントと、改訂の注記が要る ADR**
+
+## Pass C の結果 (2026-11-20)
+
+5 エージェントが drafts/0028 を読まずに本メモから再設計した。骨子 (D1〜D7) は改訂 1 と同じ結論になった。
+「残る論点 1」(`min_links` の置き場所) は割れた (linguist・network-tech-reviewer: LAG の直下に移す。spec-architect・dsl-designer: `lacp` の下に残す)。
+network-tech-reviewer が、Cisco / Arista の `port-channel min-links` と Junos の `minimum-links` は LACP を使わない LAG でも効き、LACP の下にあるのは Linux bonding だけと確かめた。
+ユーザーが **LAG の直下に移す** と決めた。`lacp` は `{mode}` だけになり、書くなら `mode` が必須。
+確定版は [ADR-0028](../../0028-names-and-types.md)。試し書きは [passc/](passc/README.md)。
+
+**試し書きの検証** (統合担当。名前と `static` を今の形に戻したコピーを `--strict` で):
+
+| ファイル | 今の validator | この ADR を実装したら |
+|---|---|---|
+| P1 (1.0 の形の小さな完全な構成) | error も warning もない (`min_links` は `lacp` の下に戻した) | valid |
+| P2 (旧名・旧値) | 引用符なしの `mode: on` が `true` になり、`mode` の値域の error で止まる | 旧名・旧値ごとに移動先を示す error |
+| P3 (空と書き忘れ) | `vteps` を書かない L2VNI の error で止まる | 空・書き忘れごとに案内の error |
+
+P1 は書いた時点では `min_links` の置き場所が未決で `lacp` の下に書いていた。決定のあと、統合担当が LAG の直下に直した。
+
+**報告で確かめて直したこと** (統合担当):
+
+| 報告 | 確かめた結果 |
+|---|---|
+| spec-architect: ndl-viz の `src/types/topology.ts` が `layer1.lag` / `layer2.vxlan` を参照している | 誤り。エクスポーターの出力を読む型で、YAML の名前は出てこない。影響は `lacp` の型 (`:91`) と `PropertiesPanel.tsx:93` の `min_links` の表示 (この ADR で `min_links` を移したため) |
+| spec-architect: BFD の既定値をなくすと、`min_tx` などを書いていない YAML が error になる | 誤り。既定値をなくしても任意のまま (`None`) で、書かなければ「書いていない」になる |
+| linguist: 列挙の値の例に `route_reflector_client` | キーの名前で、列挙の値ではない |
+| linguist: YAML 1.2 は `off` / `yes` / `no` も真偽値に読む | 真偽値に読むのは YAML 1.1 (PyYAML)。YAML 1.2 の core schema は `true` / `false` だけ |
+| dsl-designer: インスタンスと BFD の `nodes` も 1 つ以上に | 採らない (Pass A・B の一致どおり、エントリを先に宣言して機器をあとから足す書き方を残す)。ADR の Alternatives に残した |

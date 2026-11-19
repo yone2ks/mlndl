@@ -1,0 +1,272 @@
+# ADR-0028 Pass C: 1.0 の形で書いた小さな完全な構成 (valid のつもり)
+#
+# このファイルで確かめること:
+#   1.0 の見本として利用者が最初に読むものになるつもりで、ADR-0028 で名前と型を直した
+#   あとの形で書く。小さく、しかしおおむねの構成要素を 1 つに入れる。
+#
+#   含めたもの:
+#     - L1: nodes / interfaces / links
+#     - LAG: lacp を 3 通りで混ぜる ── active / static / 書かない (ADR-0028 D4)
+#     - Ethernet Segment: leaf1 / leaf2 の MLAG (ADR-0023)
+#     - VLAN / L2VNI / L3VNI / VTEP / VRF / SVI と anycast gateway
+#     - BGP: underlay (/31 の eBGP) と overlay (ループバック eBGP EVPN)
+#     - BFD: タイマー 300/300/3 を明示 (ADR-0028 D4 — 既定値をなくす前提)
+#     - IS-IS: border1 ↔ branch1 の 1 本 (level_2。provider-wan の bridge を通る)
+#     - bridge: 事業者網 provider-wan の中の L2 転送 (ADR-0018)
+#
+#   ADR-0028 で改名した所 (ここを今の形に戻すと今の validator で通るはず):
+#     - lags       (旧名 lag。単数 → 複数。ADR-0028 D1)
+#     - vxlans     (旧名 vxlan。単数 → 複数。ADR-0028 D1)
+#     - level: level_2  (旧名 level: level-2。ハイフン → 下線。ADR-0028 D4)
+#     - lacp: { mode: static }  (旧値 mode: on。意味の分かる名前へ。ADR-0028 D4)
+#         ↑ 戻すときは mode: "on" と引用符が要る (引用符なしだと YAML 1.1 は True と読む)
+#
+#     - min_links は LAG の直下 (lags[].min_links。旧 lacp.min_links。ADR-0028 D4)
+#         ↑ 戻すときは lacp の下に入れる
+#
+#   改名以外で気を付けた所 (今の検査で error / warning が出ないように):
+#     - ID の文法 (ADR-0002 D1)
+#     - 推奨プレフィックス (lag- / es- / vlan- / vni- / vrf- / bgp-peer- / isis-adj- /
+#       bfd- / vtep- / bridge-)
+#     - 参照の実在 と L3 IF の node が L1 IF の node に一致
+#     - bridge のポートの対向は bridge の外側のポート (ルーターのポートを書かない疑いが出ない)
+#     - ES の脚どうしは L1 リンクでつながらない (leaf1-swp1 と leaf2-swp1 の対向は server1 の別の IF)
+#     - anycast gateway の leaf1 / leaf2 の ip は 192.168.100.1/24 で一致
+#     - VTEP が複数の ノードで共有 (sources 2 つ) のときは address 必須 (ADR-0014)
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-p1-full-1.0
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: spine1,       name: Spine-1,  implementation: vm,       role: spine,            device_type: cumulus_linux }
+    - { id: spine2,       name: Spine-2,  implementation: vm,       role: spine,            device_type: cumulus_linux }
+    - { id: leaf1,        name: Leaf-1,   implementation: vm,       role: leaf,             device_type: cumulus_linux }
+    - { id: leaf2,        name: Leaf-2,   implementation: vm,       role: leaf,             device_type: cumulus_linux }
+    - { id: server1,      name: Server-1, implementation: physical, role: server }
+    - { id: border1,      name: Border-1, implementation: vm,       role: border,           device_type: cisco_iosxr }
+    - { id: branch1,      name: Branch-1, implementation: physical, role: border,           device_type: cisco_iosxr }
+    - { id: provider-wan, name: WE-220,   implementation: physical, role: provider-network, description: "広域イーサの箱 (中の L2 転送は layer2.bridges に書く)" }
+
+  interfaces:
+    # spine1 → leaf1 / leaf2
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: spine1-swp2, node: spine1, name: swp2 }
+    # spine2 → leaf1 / leaf2
+    - { id: spine2-swp1, node: spine2, name: swp1 }
+    - { id: spine2-swp2, node: spine2, name: swp2 }
+    # leaf1
+    - { id: leaf1-swp51, node: leaf1, name: swp51 }    # → spine1
+    - { id: leaf1-swp52, node: leaf1, name: swp52 }    # → spine2
+    - { id: leaf1-swp49, node: leaf1, name: swp49 }    # peerlink
+    - { id: leaf1-swp50, node: leaf1, name: swp50 }    # peerlink
+    - { id: leaf1-swp1,  node: leaf1, name: swp1 }     # → server1 (ES の脚)
+    # leaf2
+    - { id: leaf2-swp51, node: leaf2, name: swp51 }
+    - { id: leaf2-swp52, node: leaf2, name: swp52 }
+    - { id: leaf2-swp49, node: leaf2, name: swp49 }
+    - { id: leaf2-swp50, node: leaf2, name: swp50 }
+    - { id: leaf2-swp1,  node: leaf2, name: swp1 }
+    # server1 (dual-homed)
+    - { id: server1-eth0, node: server1, name: eth0 }  # → leaf1
+    - { id: server1-eth1, node: server1, name: eth1 }  # → leaf2
+    # border1 (WAN)
+    - { id: border1-swp10, node: border1, name: GigabitEthernet0/0/10 }
+    # provider-wan (事業者網の箱の 2 ポート)
+    - { id: provider-wan-port1, node: provider-wan, name: port1 }   # → border1
+    - { id: provider-wan-port2, node: provider-wan, name: port2 }   # → branch1
+    # branch1 (WAN 側)
+    - { id: branch1-swp10, node: branch1, name: GigabitEthernet0/0/10 }
+
+  links:
+    # underlay (/31)
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay }
+    - { id: link-spine1-leaf2, endpoints: [spine1-swp2, leaf2-swp51], link_speed: 10G, link_role: underlay }
+    - { id: link-spine2-leaf1, endpoints: [spine2-swp1, leaf1-swp52], link_speed: 10G, link_role: underlay }
+    - { id: link-spine2-leaf2, endpoints: [spine2-swp2, leaf2-swp52], link_speed: 10G, link_role: underlay }
+    # MLAG peerlink — 2 台をつなぐ普通の LAG として書く (ADR-0023 D6)
+    - { id: link-leaf1-leaf2-peer-1, endpoints: [leaf1-swp49, leaf2-swp49], link_speed: 10G, link_role: peer-link }
+    - { id: link-leaf1-leaf2-peer-2, endpoints: [leaf1-swp50, leaf2-swp50], link_speed: 10G, link_role: peer-link }
+    # server1 (dual-homed。ES の脚)
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G, link_role: access }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 10G, link_role: access }
+    # WAN (事業者網への脚。回線 ID 等は description に自由文で)
+    - { id: link-border1-wan, endpoints: [border1-swp10, provider-wan-port1], link_speed: 1G, description: "回線 ID WE-220-01" }
+    - { id: link-branch1-wan, endpoints: [branch1-swp10, provider-wan-port2], link_speed: 1G, description: "回線 ID WE-220-02" }
+
+  # ADR-0028 D1: lag → lags に改名 (単数 → 複数)
+  lags:
+    # MLAG の peerlink は 2 台をつなぐ普通の LAG。LACP active を明示する
+    - id: lag-leaf1-peer
+      node: leaf1
+      name: peerlink
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: { mode: active }
+      min_links: 2
+    - id: lag-leaf2-peer
+      node: leaf2
+      name: peerlink
+      members: [leaf2-swp49, leaf2-swp50]
+      lacp: { mode: active }
+      min_links: 2
+
+    # MLAG の脚 (サーバ向け)。機器 1 台ずつの LAG を書き、ES で束ねる (ADR-0023 D1)。
+    # 装置ごとの LACP の設定は装置側に任せたいので、lacp を書かない
+    # (ADR-0028 D4: 書かなければ「書いていない」)
+    - { id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1] }
+    - { id: lag-leaf2-server1, node: leaf2, name: bond1, members: [leaf2-swp1] }
+
+    # server1 の bond は静的 (LACP を張らない)。
+    # ADR-0028 D4: 旧 mode: on を mode: static に改名
+    # 戻す時は mode: "on" (引用符つき) に書き換える。引用符なしでは YAML が True と読む
+    - id: lag-server1-bond0
+      node: server1
+      name: bond0
+      members: [server1-eth0, server1-eth1]
+      lacp: { mode: static }
+
+  ethernet_segments:
+    # MLAG ペアの脚を 1 本に見せる (ADR-0023 D2)。ESI 値・LACP system-id は書かない
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a
+      trunk_ports:
+        # ES で束ねた機器の脚にまとめて効く (ADR-0023 D5)
+        - { ethernet_segment: es-server1 }
+
+  bridges:
+    # 事業者網の箱 provider-wan の中の L2 転送 (広域イーサ)。
+    # ports は「転送する側」(箱) のポートだけ (ADR-0018 D1)。
+    # border1 / branch1 の側のポートはここに書かない (bridge を使う側)
+    - id: bridge-wideether
+      name: WE-220 Line
+      ports:
+        - { interface: provider-wan-port1 }
+        - { interface: provider-wan-port2 }
+      description: "border1 と branch1 のあいだを L2 で透過する広域イーサ"
+
+  vteps:
+    # MLAG ペアで VTEP を共有する。共有するときは address 必須 (ADR-0014 D2)
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # ADR-0028 D1: vxlan → vxlans に改名。L2VNI / L3VNI を同じリストに入れる
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+layer3:
+  vrfs:
+    - { id: vrf-default }
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets:
+        import: ["65001:100"]
+        export: ["65001:100"]
+
+  interfaces:
+    # Loopbacks (BGP update_source / VTEP source)
+    - { id: spine1-lo,  node: spine1,  name: lo, ip: 10.0.0.1/32 }
+    - { id: spine2-lo,  node: spine2,  name: lo, ip: 10.0.0.2/32 }
+    - { id: leaf1-lo,   node: leaf1,   name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,   node: leaf2,   name: lo, ip: 10.0.0.12/32 }
+    - { id: border1-lo, node: border1, name: Loopback0, ip: 10.0.0.21/32 }
+
+    # Underlay P2P (/31)
+    - { id: spine1-swp1-l3, node: spine1, name: swp1,  ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: { interface: spine1-swp1 } }
+    - { id: spine1-swp2-l3, node: spine1, name: swp2,  ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: { interface: spine1-swp2 } }
+    - { id: spine2-swp1-l3, node: spine2, name: swp1,  ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: { interface: spine2-swp1 } }
+    - { id: spine2-swp2-l3, node: spine2, name: swp2,  ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: { interface: spine2-swp2 } }
+    - { id: leaf1-swp51-l3, node: leaf1,  name: swp51, ip: 10.1.0.1/31, vrf: vrf-default, attaches_to: { interface: leaf1-swp51 } }
+    - { id: leaf1-swp52-l3, node: leaf1,  name: swp52, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: { interface: leaf1-swp52 } }
+    - { id: leaf2-swp51-l3, node: leaf2,  name: swp51, ip: 10.1.0.3/31, vrf: vrf-default, attaches_to: { interface: leaf2-swp51 } }
+    - { id: leaf2-swp52-l3, node: leaf2,  name: swp52, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: { interface: leaf2-swp52 } }
+
+    # SVI (anycast gateway。全 leaf で同じ ip / vrf)
+    - id: leaf1-vlan100
+      node: leaf1
+      name: Vlan100
+      attaches_to: { vlan: vlan-100 }
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - { mode: anycast_gateway }
+    - id: leaf2-vlan100
+      node: leaf2
+      name: Vlan100
+      attaches_to: { vlan: vlan-100 }
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - { mode: anycast_gateway }
+
+    # WAN P2P (border1 ↔ branch1。provider-wan の bridge を透過して同じサブネットに)
+    - { id: border1-swp10-l3, node: border1, name: GigabitEthernet0/0/10, ip: 10.100.0.1/30, vrf: vrf-default, attaches_to: { interface: border1-swp10 } }
+    - { id: branch1-swp10-l3, node: branch1, name: GigabitEthernet0/0/10, ip: 10.100.0.2/30, vrf: vrf-default, attaches_to: { interface: branch1-swp10 } }
+
+control_plane:
+  bgp:
+    # vrf 省略 = default VRF
+    - id: bgp-default
+      nodes:
+        - { node: spine1, local_as: 65000 }
+        - { node: spine2, local_as: 65000 }
+        - { node: leaf1,  local_as: 65001 }
+        - { node: leaf2,  local_as: 65002 }
+
+  isis:
+    # border1 ↔ branch1 の 1 本。NET は IS-IS の System ID を書く
+    - id: isis-wan
+      nodes:
+        - { node: border1, net: "49.0001.0100.0000.0021.00" }
+        - { node: branch1, net: "49.0001.0100.0000.0031.00" }
+
+  bfd:
+    # ADR-0028 D4: BFD タイマーの既定値をなくす前提で、3 つとも明示する
+    - id: bfd-global
+      min_tx: 300
+      min_rx: 300
+      multiplier: 3
+      nodes: [spine1, spine2, leaf1, leaf2]
+
+  routing_neighbors:
+    # underlay (/31 どうしの eBGP + BFD。address_families は必須なので必ず書く)
+    - { id: bgp-peer-spine1-leaf1, type: bgp, instance: bgp-default, from: { node: spine1, update_source: spine1-swp1-l3 }, to: { node: leaf1, update_source: leaf1-swp51-l3 }, address_families: [ipv4_unicast], bfd: true }
+    - { id: bgp-peer-spine1-leaf2, type: bgp, instance: bgp-default, from: { node: spine1, update_source: spine1-swp2-l3 }, to: { node: leaf2, update_source: leaf2-swp51-l3 }, address_families: [ipv4_unicast], bfd: true }
+    - { id: bgp-peer-spine2-leaf1, type: bgp, instance: bgp-default, from: { node: spine2, update_source: spine2-swp1-l3 }, to: { node: leaf1, update_source: leaf1-swp52-l3 }, address_families: [ipv4_unicast], bfd: true }
+    - { id: bgp-peer-spine2-leaf2, type: bgp, instance: bgp-default, from: { node: spine2, update_source: spine2-swp2-l3 }, to: { node: leaf2, update_source: leaf2-swp52-l3 }, address_families: [ipv4_unicast], bfd: true }
+
+    # overlay (ループバックどうしの eBGP EVPN。multihop)
+    - { id: bgp-peer-spine1-leaf1-overlay, type: bgp, instance: bgp-default, from: { node: spine1, update_source: spine1-lo }, to: { node: leaf1, update_source: leaf1-lo }, address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine1-leaf2-overlay, type: bgp, instance: bgp-default, from: { node: spine1, update_source: spine1-lo }, to: { node: leaf2, update_source: leaf2-lo }, address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf1-overlay, type: bgp, instance: bgp-default, from: { node: spine2, update_source: spine2-lo }, to: { node: leaf1, update_source: leaf1-lo }, address_families: [l2vpn_evpn] }
+    - { id: bgp-peer-spine2-leaf2-overlay, type: bgp, instance: bgp-default, from: { node: spine2, update_source: spine2-lo }, to: { node: leaf2, update_source: leaf2-lo }, address_families: [l2vpn_evpn] }
+
+    # IS-IS 1 本 (border1 ↔ branch1。provider-wan の bridge を L2 で透過する)。
+    # ADR-0028 D4: level の値は下線区切り (level-2 → level_2)
+    - id: isis-adj-border1-branch1
+      type: isis
+      instance: isis-wan
+      from: { node: border1, interface: border1-swp10 }
+      to:   { node: branch1, interface: branch1-swp10 }
+      level: level_2

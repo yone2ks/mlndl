@@ -1,0 +1,154 @@
+# ADR-0028 Pass C: 旧名・旧値をまとめて書いた見本 (error のつもり)
+#
+# このファイルで確かめること:
+#   改名した所の旧名・旧値を 1 ファイルに並べ、それぞれを「移動先を示す error」として
+#   出したときの読みやすさを見る。ADR-0025 の既存の旧形式 error と同じ文体にそろえる。
+#
+# 想定する error (上から順に):
+#
+#   1) layer1.lag:
+#        「layer1.lag は layer1.lags に改名しました。lag を lags に書き換えてください
+#        (ほかのコレクション nodes / interfaces / vlans / vrfs ... と同じ複数形に
+#        そろえました。ADR-0028 D1)」
+#
+#   2) layer2.vxlan:
+#        「layer2.vxlan は layer2.vxlans に改名しました。vxlan を vxlans に書き換えて
+#        ください (単数の vxlan は VNI の番号にも読めるため複数形にそろえました。
+#        ADR-0028 D1)」
+#
+#   3) control_plane.routing_neighbors[N].level  (値 'level-2' 等のハイフン区切り):
+#        「IS-IS の level の値 'level-2' は 'level_2' に改名しました (level-1 → level_1、
+#        level-all → level_all も同じ。mlndl の Literal は下線区切りにそろえます。
+#        ADR-0028 D4)」
+#
+#   4) layer1.lags[N].lacp.mode  (真偽値 True — mode: on を引用符なしで書くと YAML 1.1
+#      が True と読む。Pass B の b1 で確かめた):
+#        「layer1.lags[...].lacp.mode の値が真偽値 True になっています。これは
+#        YAML 1.1 が引用符のない on を真偽値と読むためです。
+#        LACP を張らない静的 LAG は lacp: { mode: static } に改名しました
+#        (ADR-0028 D4)。'mode: static' と書き換えてください」
+#
+#   5) layer1.lags[N].lacp.mode  (文字列 'on' — 引用符つきで文字列として読まれた場合):
+#        「layer1.lags[...].lacp.mode の値 'on' は 'static' に改名しました。LACP を
+#        張らない静的 LAG は lacp: { mode: static } と書きます (旧 'on' は Cisco の
+#        慣用に由来しましたが、引用符なしで YAML が True と読む問題と、on=有効=active と
+#        読み違う可能性があり改名しました。ADR-0028 D4)」
+#
+# ねらい:
+#   - 書き手が「なぜ変わったのか」と「どう直すか」の両方を 1 行で読めるようにする
+#   - 旧名の error (model_validator mode="before") と extra="forbid" の
+#     'Extra inputs are not permitted' が重ならないよう、スキーマで旧名を見つけたときに
+#     先に raise する (Pass B の評価メモに「既存の L2VxLAN.reject_old_forms と同じ形」と
+#     ある)
+#
+# 補足:
+#   - このファイルは 5 つの error を 1 つに含める試み。model_validator mode="before" が
+#     最初の旧名で raise した時点で pydantic は残りの検証を止めうるため、実際に全部が
+#     同時に出るかは実装次第 (Pass B の指摘 D7)。5 本を 1 ファイルで見せるのは
+#     「どのメッセージ案を採るか」を並べて検討するため
+#   - 公開リポジトリなので個人名・絶対パスは書かない
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-p2-old-forms
+
+layer1:
+  nodes:
+    - { id: leaf1,   name: Leaf-1,   implementation: vm,       role: leaf,   device_type: cumulus_linux }
+    - { id: leaf2,   name: Leaf-2,   implementation: vm,       role: leaf,   device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp49,  node: leaf1,   name: swp49 }
+    - { id: leaf1-swp50,  node: leaf1,   name: swp50 }
+    - { id: leaf1-swp1,   node: leaf1,   name: swp1  }
+    - { id: leaf2-swp49,  node: leaf2,   name: swp49 }
+    - { id: leaf2-swp50,  node: leaf2,   name: swp50 }
+    - { id: leaf2-swp1,   node: leaf2,   name: swp1  }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-leaf2-peer-1, endpoints: [leaf1-swp49, leaf2-swp49], link_speed: 10G, link_role: peer-link }
+    - { id: link-leaf1-leaf2-peer-2, endpoints: [leaf1-swp50, leaf2-swp50], link_speed: 10G, link_role: peer-link }
+    - { id: link-leaf1-server1,      endpoints: [leaf1-swp1,  server1-eth0], link_speed: 10G, link_role: access }
+    - { id: link-leaf2-server1,      endpoints: [leaf2-swp1,  server1-eth1], link_speed: 10G, link_role: access }
+
+  # ★ 誤り (1): lag は単数。ADR-0028 D1 で lags に改名したので、ここで error
+  # ★ 旧形式 (統合担当が追記): lacp.min_links は LAG の直下の min_links に移した (ADR-0028 D4)
+  lag:
+    - id: lag-leaf1-peer
+      node: leaf1
+      name: peerlink
+      members: [leaf1-swp49, leaf1-swp50]
+      lacp: { mode: active, min_links: 2 }
+    - id: lag-leaf2-peer
+      node: leaf2
+      name: peerlink
+      members: [leaf2-swp49, leaf2-swp50]
+      lacp: { mode: active, min_links: 2 }
+
+    # ★ 誤り (4): mode: on を引用符なしで書く。YAML 1.1 が True と読み、mode が
+    #            True になる。ADR-0028 D4 で static に改名しました
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+      lacp: { mode: on }
+
+    # ★ 誤り (5): mode: "on" を引用符つきで書く。文字列 'on' として読まれるが、
+    #            この値は ADR-0028 D4 で static に改名した
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+      lacp: { mode: "on" }
+
+  ethernet_segments:
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        - { ethernet_segment: es-server1 }
+
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # ★ 誤り (2): vxlan は単数。ADR-0028 D1 で vxlans に改名したので、ここで error
+  vxlan:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.12/32 }
+
+# IS-IS の level の旧名 (ハイフン区切り) を試すためだけに置く
+control_plane:
+  isis:
+    - id: isis-core
+      nodes:
+        - { node: leaf1 }
+        - { node: leaf2 }
+
+  routing_neighbors:
+    # ★ 誤り (3): level: level-2 (ハイフン)。ADR-0028 D4 で level_2 (下線) に改名しました
+    - id: isis-adj-leaf1-leaf2
+      type: isis
+      instance: isis-core
+      from: { node: leaf1, interface: leaf1-swp49 }
+      to:   { node: leaf2, interface: leaf2-swp49 }
+      level: level-2

@@ -1,0 +1,140 @@
+# ADR-0028 Pass C: 空のリストと省略を書いた見本 (error のつもり)
+#
+# このファイルで確かめること:
+#   ADR-0028 D3・D4 で「1 つ以上を必須」「書くなら中身を書く」とした所に、空と省略を
+#   書く。今の実装では一部しか error にならず (Pass B の試し書き b2・b3・b5b・統合担当が
+#   足した確認で確かめた)、ADR-0028 の実装後にすべて error になるはず。
+#
+# 想定する error (上から順に):
+#
+#   1) layer2.bridges[0].ports  (空リスト):
+#        「bridge のポートが 1 つも書かれていません。bridge は転送する側 (事業者網の箱) の
+#        ポートを {interface: ...} か {lag: ...} で 1 つ以上書きます。ポートがない bridge は
+#        何も転送しないため、意味がありません (ADR-0028 D3)」
+#      → 今の実装 (layer2.py:103): ports = []。空でも warning も出ない (Pass B の統合担当の
+#        確認)。ADR-0028 D3 で Field(min_length=1) を足す
+#
+#   2) layer2.vxlans[0].vteps  (キーごと省略):
+#        「L2VNI に vteps が書かれていません。L2VNI が載る VTEP を
+#        vteps: [<layer2.vteps の id>] のように 1 つ以上書いてください (ADR-0014)。
+#        どの機器が VTEP を終端するかは VTEP の sources から導きます」
+#      → 今の実装 (layer2.py:187-191): model_validator needs_vteps が error を返す。
+#        ADR-0028 D3 は型レベル min_length=1 に移す。文面は親切な文を保つ
+#
+#   3) layer1.lags[0].lacp  (中身が空 {}):
+#        「layer1.lags[...].lacp の中身が空です。書くなら mode (active / passive / static) を
+#        書いてください (min_links は LAG の直下)。LACP を書かない LAG は lacp のキーごと書きません
+#        (ADR-0028 D4)」
+#      → 今の実装: LacpConfig は mode / min_links に既定値があり、lacp: {} は valid。
+#        ADR-0028 D4 で既定値をなくし、mode を必須にする (lacp は mode だけになった。統合担当が追記)
+#
+#   4a) control_plane.routing_neighbors[0].address_families  (空リスト):
+#        「address_families に 1 つ以上のアドレスファミリーを書いてください
+#        (例: [ipv4_unicast] / [l2vpn_evpn])。空だとセッションが何も運ばない設定になり、
+#        underlay / overlay が導けません (ADR-0028 D3)」
+#      → 今の実装 (control_plane.py:161): 既定値 []。空でも error も warning も出ない。
+#        ADR-0028 D3 で既定値をなくし min_length=1
+#
+#   4b) control_plane.routing_neighbors[1].address_families  (キーごと省略):
+#        「address_families は必須です (例: [ipv4_unicast])。EVPN の書き忘れと全部を
+#        書き忘れるのを区別するため、既定値は持ちません (ADR-0028 D3)」
+#      → 4a と同じ型レベルの検査で、pydantic は 'Field required' を返す
+#
+# ねらい:
+#   - 今の実装で素通りしている空のリスト・省略 (bridges.ports、address_families) に、
+#     1.0 のうちに error を入れる
+#   - L2VNI.vteps の model_validator のメッセージ (親切な文) は型レベル min_length=1 に
+#     移しても保つ (Pass B dsl-designer の指摘)
+#   - lacp: {} は意味の冗長さ (lacp と書きながら中身が空) を error にする
+#
+# 補足:
+#   - 1 ファイルに 4 つの誤りを入れるのは、pydantic が型レベルの error をまとめて返す
+#     ことに賭けている。lacp: {} は model_validator の mode="after" で検出するため、
+#     最初の型レベルの error で止まるかは実装次第 (Pass B の D7 の議論と同じ)
+#   - 参照は実在するものにし、空・省略の誤りだけを残す (意図しない error の混入を避ける)
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-p3-empty-and-missing
+
+layer1:
+  nodes:
+    - { id: leaf1,        name: Leaf-1,        implementation: vm,       role: leaf,             device_type: cumulus_linux }
+    - { id: leaf2,        name: Leaf-2,        implementation: vm,       role: leaf,             device_type: cumulus_linux }
+    - { id: server1,      name: Server-1,      implementation: physical, role: server }
+    - { id: border1,      name: Border-1,      implementation: vm,       role: border,           device_type: cisco_iosxr }
+    - { id: provider-wan, name: WE-220,        implementation: physical, role: provider-network }
+
+  interfaces:
+    - { id: leaf1-swp1,         node: leaf1,        name: swp1 }
+    - { id: leaf2-swp1,         node: leaf2,        name: swp1 }
+    - { id: server1-eth0,       node: server1,      name: eth0 }
+    - { id: border1-swp10,      node: border1,      name: GigabitEthernet0/0/10 }
+    - { id: provider-wan-port1, node: provider-wan, name: port1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1,    server1-eth0],       link_speed: 10G, link_role: access }
+    - { id: link-border1-wan,   endpoints: [border1-swp10, provider-wan-port1], link_speed: 1G,  description: "回線 ID WE-220-01" }
+
+  lags:
+    # ★ 誤り (3): lacp: {} — mode を書いていない。LACP を書かないなら lacp の
+    #             キーごと書くべき (ADR-0028 D4)
+    - id: lag-leaf1-bond1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+      lacp: {}
+
+layer2:
+  vlans:
+    - { id: vlan-100, vlan_id: 100 }
+
+  bridges:
+    # ★ 誤り (1): ports: [] — bridge のポートが空。ポートがない bridge は何も転送しない
+    #             (ADR-0028 D3)
+    - id: bridge-wideether
+      name: WE-220 Line
+      ports: []
+
+  vteps:
+    - { id: vtep-leaf1, sources: [leaf1-lo] }
+
+  vxlans:
+    # ★ 誤り (2): vteps のキーを書かない (L2VNI が載る VTEP が決まらない)。
+    #             今の needs_vteps も error を返すが、ADR-0028 D3 で型レベル min_length=1 に移す
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo,   node: leaf1,   name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,   node: leaf2,   name: lo, ip: 10.0.0.12/32 }
+    - { id: border1-lo, node: border1, name: Loopback0, ip: 10.0.0.21/32 }
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      nodes:
+        - { node: leaf1,   local_as: 65001 }
+        - { node: leaf2,   local_as: 65002 }
+        - { node: border1, local_as: 65021 }
+
+  routing_neighbors:
+    # ★ 誤り (4a): address_families: [] — 空は「指定なし」か「何も運ばない」か決まらない
+    #              (ADR-0028 D3)
+    - id: bgp-peer-leaf1-leaf2
+      type: bgp
+      instance: bgp-default
+      from: { node: leaf1, update_source: leaf1-lo }
+      to:   { node: leaf2, update_source: leaf2-lo }
+      address_families: []
+
+    # ★ 誤り (4b): address_families のキーを書かない。ADR-0028 D3 で必須に
+    - id: bgp-peer-leaf1-border1
+      type: bgp
+      instance: bgp-default
+      from: { node: leaf1,   update_source: leaf1-lo }
+      to:   { node: border1, update_source: border1-lo }

@@ -1,6 +1,6 @@
 # ADR-0028: 1.0 の前の名前と型の直し
 
-- **Status**: Draft (改訂 1。Pass B の指摘を反映)
+- **Status**: Superseded by [0028](../0028-names-and-types.md) (2026-11-20 に Pass C で確定。この版は改訂 1)
 - **Date**: 2026-11-19
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author、ユーザー (D2・D4・D5 の 3 つの論点と、Pass B の `lacp.mode` の `static`)
 - **Pass**: A (5 エージェントの評価を 1 回取り、割れた 3 つの論点をユーザーが決めた。改訂 1 は Pass B の指摘の反映)

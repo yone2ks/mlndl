@@ -24,6 +24,8 @@
 
 ### 2. 名前の直し
 
+→ 2・3 は [ADR-0028](../../0028-names-and-types.md) で決めた (2026-11-20)。
+
 - `layer1.lag` と `layer2.vxlan` だけが単数形 (`layer1.py:439`・`layer2.py:256`)。ほかのコレクション (`nodes` / `interfaces` / `links` / `ethernet_segments` / `vlans` / `bridges` / `vteps` / `subinterfaces` / `vrfs` / `tunnel_interfaces` / `routing_neighbors`) はすべて複数形
 - IS-IS の `level` の値だけがハイフン区切り (`level-1` / `level-2` / `level-all`。`control_plane.py:212`)。ほかの値は下線区切り (`all_active` / `ipsec_vti` / `l2vpn_evpn`)
 
