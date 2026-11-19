@@ -1,0 +1,194 @@
+# ADR-0028 Pass B: 複数形コレクションと単数キーの参照が同居する見本 (valid のつもり)
+#
+# ドラフトのとおりなら: valid
+#   D1 — コレクションの名前は複数形 (`lags` / `vxlans`)、1 つを指す参照キーは
+#   単数のまま (`{lag:}` / `l3vni:`)。
+#   「`interfaces` と `{interface:}` の関係と同じ」 (D1 本文)
+#
+# 期待する結果: error も warning もなし
+#
+# 何を確かめるためのファイルか:
+#   同じ名前の **コレクション側 (複数)** と **参照キー側 (単数)** が 1 ファイルに
+#   並んで現れる箇所をすべて入れて、読み手に不自然でないかを見る。
+#
+#   コレクション (複数形)         ↔   参照キー (単数形)                           備考
+#   layer1.lags                 ↔   attaches_to: {lag: ...}                    (L3 IF の routed LAG)
+#                                   members: [{lag: ...}]                      (ES の脚)
+#   layer2.vlans               ↔   attaches_to: {vlan: ...}                   (SVI)
+#                                   layer2.vxlans[].vlans: [...]               (L2VNI の VLAN は 複数形 で参照)
+#   layer2.vxlans              ↔   vrf.l3vni: ...                             (VRF ↔ L3VNI は 1 本なので単数)
+#   layer2.vteps               ↔   layer2.vxlans[].vteps: [...]               (L2VNI の VTEP は 複数形 で参照)
+#   layer2.subinterfaces       ↔   attaches_to: {subinterface: ...}           (L3 IF がサブ IF に載る)
+#   layer1.interfaces          ↔   attaches_to: {interface: ...}              (既存の基準)
+#
+# 読み手の評価 (このファイルの中で言える範囲):
+#
+#   - `layer1.lags` (定義) と `{lag: lag-xxx}` (参照) が隣り合うと、一瞬 「どちらが
+#     どちらか」 を見分ける必要がある。ただし `interfaces` / `{interface:}` の
+#     既存の対が同じ形で、しかも参照キーがオブジェクトのキー名に出る (単語ではなく
+#     `{lag: ...}` の形) ので、文脈は取りやすい。
+#
+#   - `l3vni: vni-b` は VRF が **1 本の** L3VNI にだけ対応するので単数で正しい。
+#     参照の多重性 (1 対 1 なら単数、1 対 多なら複数) と、コレクションの名前
+#     (複数) が独立している、という規則が読み取れる。
+#
+#   - 次は複数形 (リスト) の参照: `vxlans[].vlans`・`vxlans[].vteps`・
+#     `interfaces[].gateway_redundancy`・`routing_neighbors[].address_families`。
+#     これらはコレクションの名前と同じ複数形が参照のキーに出るが、値がリスト
+#     なので直感と合う (`vlans: [vlan-100, vlan-200]`)。
+#
+#   - 懸念: `{lag: lag-xxx}` のように、参照キーの名前と id のプレフィックスの
+#     ハイフンを挟んだ形が繰り返される。これは D1 の規則ではなく ADR-0002 D7 の
+#     推奨プレフィックスの効果で、読む人にとっての冗長さの原因になる。
+#     ただし ADR-0028 の射程ではない。
+#
+# 検証は改名を戻したコピーを想定。
+
+ndl_version: "1.0"
+
+meta:
+  name: adr0028-b6-plural-collection-singular-ref
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: border1, name: Border-1, implementation: vm, role: border, device_type: cumulus_linux }
+    - { id: core1, name: Core-1, implementation: vm, role: core, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  # コレクション: `interfaces` (複数)
+  interfaces:
+    - { id: leaf1-swp1,   node: leaf1,   name: swp1 }
+    - { id: leaf1-swp2,   node: leaf1,   name: swp2 }
+    - { id: leaf2-swp1,   node: leaf2,   name: swp1 }
+    - { id: leaf2-swp2,   node: leaf2,   name: swp2 }
+    - { id: border1-swp3, node: border1, name: swp3 }
+    - { id: border1-swp4, node: border1, name: swp4 }
+    - { id: core1-swp1,   node: core1,   name: swp1 }
+    - { id: core1-swp2,   node: core1,   name: swp2 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1,  endpoints: [leaf1-swp1,   server1-eth0], link_speed: 10G, link_role: access }
+    - { id: link-leaf2-server1,  endpoints: [leaf2-swp1,   server1-eth1], link_speed: 10G, link_role: access }
+    - { id: link-leaf1-leaf2,    endpoints: [leaf1-swp2,   leaf2-swp2],   link_speed: 10G, link_role: peer-link }
+    - { id: link-border1-core1-a, endpoints: [border1-swp3, core1-swp1],  link_speed: 10G, link_role: uplink }
+    - { id: link-border1-core1-b, endpoints: [border1-swp4, core1-swp2],  link_speed: 10G, link_role: uplink }
+
+  # コレクション: `lags` (複数)。中身は機器 1 台の LAG
+  lags:
+    - id: lag-leaf1-server1
+      node: leaf1
+      name: bond1
+      members: [leaf1-swp1]
+    - id: lag-leaf2-server1
+      node: leaf2
+      name: bond1
+      members: [leaf2-swp1]
+    # Border1 ↔ Core1 の routed LAG。L3 IF の `attaches_to: {lag:}` で指す
+    - id: lag-border1-core1
+      node: border1
+      name: Port-Channel10
+      members: [border1-swp3, border1-swp4]
+      lacp: { mode: active }
+    - id: lag-core1-border1
+      node: core1
+      name: Port-Channel10
+      members: [core1-swp1, core1-swp2]
+      lacp: { mode: active }
+
+  ethernet_segments:
+    # 参照キー: `{lag:}` (単数)。コレクション `lags` を 1 つずつ指す
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  # コレクション: `vlans` (複数)
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      trunk_ports:
+        # 参照キー: `{ethernet_segment:}` と、1 本の LAG を指す `{lag:}` (単数)
+        - { ethernet_segment: es-server1 }
+
+  # コレクション: `vteps` (複数)
+  vteps:
+    - id: vtep-leaf1-leaf2
+      sources: [leaf1-lo, leaf2-lo]
+      address: 10.0.100.12/32
+
+  # コレクション: `vxlans` (複数、D1 の改名後)
+  vxlans:
+    - id: vni-a
+      type: l2vni
+      vni: 10100
+      # 参照 (複数形のリスト。値がリストなので自然):
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+    - id: vni-b
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+  # コレクション: `subinterfaces` (複数)
+  subinterfaces:
+    - id: subif-border1-pc10-200
+      attaches_to: { lag: lag-border1-core1 }  # 参照キー: 単数 `{lag:}` が `lags` を指す
+      vlan_id: 200
+      name: Port-Channel10.200
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      # 参照キー: `l3vni:` (単数、1 対 1 の関係)。コレクション `vxlans` の 1 エントリを指す
+      l3vni: vni-b
+      route_targets:
+        import: ["65001:100"]
+        export: ["65001:100"]
+
+  interfaces:
+    # ループバック (attaches_to なし)
+    - { id: leaf1-lo,   node: leaf1,   name: lo, ip: 10.0.0.11/32 }
+    - { id: leaf2-lo,   node: leaf2,   name: lo, ip: 10.0.0.12/32 }
+    - { id: border1-lo, node: border1, name: lo, ip: 10.0.0.21/32 }
+
+    # SVI。参照キー: 単数 `{vlan:}` が `vlans` を指す
+    - id: leaf1-vlan-100
+      node: leaf1
+      name: Vlan100
+      attaches_to: { vlan: vlan-100 }
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - { mode: anycast_gateway }
+    - id: leaf2-vlan-100
+      node: leaf2
+      name: Vlan100
+      attaches_to: { vlan: vlan-100 }
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy:
+        - { mode: anycast_gateway }
+
+    # routed LAG。参照キー: 単数 `{lag:}` が `lags` を指す
+    - id: border1-pc10
+      node: border1
+      name: Port-Channel10
+      attaches_to: { lag: lag-border1-core1 }
+      ip: 10.250.0.0/31
+
+    # サブ IF に載る L3。参照キー: 単数 `{subinterface:}` が `subinterfaces` を指す
+    - id: border1-pc10-200
+      node: border1
+      name: Port-Channel10.200
+      attaches_to: { subinterface: subif-border1-pc10-200 }
+      ip: 10.200.0.1/30
+      vrf: vrf-tenant-a
