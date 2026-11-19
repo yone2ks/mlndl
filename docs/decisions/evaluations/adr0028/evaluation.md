@@ -70,3 +70,38 @@
 | 予約の AS 23456 を warning に | network-tech | warning は 1.x で足せる (ADR-0027 D2)。この ADR では扱わない |
 | `local_as` の型を共有の `Annotated` に | example-author | 実装の書き方で、ADR では決めない |
 | 「旧名の error と `extra="forbid"` の error は重ならない」をテストで確かめる | dsl-designer | ADR ではなく実装のテストで確かめる (D7 にテストを書くと書く) |
+
+## 残る論点 (Pass C 向け)
+
+1. **`lacp` の下の `min_links`**: `min_links` は LACP を使うかと関係なく効く (static の LAG でも効く)。`lacp` の下に置いたままでよいか。キーの改名と構造の分割は Pass B で採らなかったが、1.0 の後は動かせない
+2. **メッセージを型とバリデーターのどちらで出すか**: `Field(min_length=...)` で `schema.json` に `minItems` を出しつつ、文は案内の文にする方法 (Pass B の dsl-designer の案) が、既存のコードの流儀と食い違わないか
+3. **D3 の線引きの最終確認**: スキーマのすべてのリストに基準 (要素なしでは成り立たないか) を当てはめ、漏れと行き過ぎがないか
+
+## Pass C への Input サマリ
+
+**Pass C で参照するもの**: 本評価メモ、[Pass A の検討](recommendation.md)、[1.0 に向けた棚卸し](../release-1.0/inventory.md)、[ADR-0027](../../0027-compatibility-promise.md) (とくに D2 と「1.0 の前に必須になるもの」の表)、
+Accepted の ADR (0001・0010・0011・0014・0018・0022・0023・0025・0026)、CLAUDE.md、`docs/reference/`、`docs/exporter-cytoscape.md`、
+試し書き (`adr0028/` の a1〜a5、`passb/` の b1〜b6)、実装 (`src/mlndl/schema/*.py`、`exporter/cytoscape.py`)、ndl-viz の `src/flow/session.ts`・`src/types/topology.ts`。
+**drafts/0028 は参照しない** (Pass C の原則)。
+
+### 前提 (ユーザー決定。蒸し返さない)
+
+- IS-IS の `level` の値は下線区切り (`level_1` / `level_2` / `level_all`)
+- `LacpConfig.mode` と `min_links` は既定値をなくす (書かなければ「書いていない」)
+- 値域を狭める直し (`local_as`・`vni`・BFD・LAG / ES の `members`・トンネルの `mtu` の上限) を入れる
+- `lacp.mode` の `on` を `static` に改名する
+
+### 一致済み (Pass A・B の全員)
+
+- `layer1.lag` → `lags`、`layer2.vxlan` → `vxlans`。旧名は移動先を示す error
+- `vteps`・`address_families` は 1 つ以上を必須、既定値なし。`address_families` の既定値を `[ipv4_unicast]` にしない
+- BFD のタイマーの既定値をなくす。`False` の既定値 (`native` / `route_reflector_client` / セッションの `bfd`) は残す
+- 棚卸し §4 の 4 点 (`type` と `mode`、2 つの `members`、エクスポーターの 2 つの `vlans`、OSPF / IS-IS の `interface`) は名前を変えない
+
+### 確定すべき論点 (優先順)
+
+1. **決定の範囲と並び**: 名前 (一覧・列挙の値)、空のリスト、既定値、値域、名前を変えないものの約束、旧名・旧値の error
+2. **規則の言い方**: 一覧の複数形の規則の範囲と例外 (`gateway_redundancy`)、列挙の値の書き方、空を許すリストの基準、値域の決め方の原則
+3. **`lacp` の書き方の意味の表** (書かない / `mode` だけ / `min_links` だけ / 両方 / `{}`) と、上の「残る論点」1
+4. **旧名・旧値の error の実装の位置とメッセージ**
+5. **影響を受けるコンポーネントと、改訂の注記が要る ADR**
