@@ -456,6 +456,8 @@ neighbors[].remote_as / type は廃止しました。各機器の AS をイン�
 3. OSPF の `area` をセッション側に置くか、インスタンスのノード側に置くか (同じ area を共有するセッションが多いと冗長)
 4. `address_families` の省略 (未指定) と空リスト (何も運ばない) を区別するか
 
+> **改訂 ([ADR-0028](0028-names-and-types.md), 2026-11-20)**: `BgpSession.address_families` を必須・1 つ以上にし、既定値 `[]` をなくした。`[ipv4_unicast]` を既定値にしないのは、1.0 で固まり、EVPN のセッションで `l2vpn_evpn` を書き忘れたのと区別できないため。`local_as` は 1〜4294967295。BFD の `min_tx` / `min_rx` / `multiplier` は既定値をなくし (書かなければ機器の既定値)、`min_tx` / `min_rx` は 1 以上、`multiplier` は 1〜255。IS-IS の `level` は `level_1` / `level_2` / `level_all`。
+
 ## References
 
 - 評価メモ: [evaluations/round3-evaluation.md](evaluations/round3-evaluation.md) (Pass B と Pass C の結果)

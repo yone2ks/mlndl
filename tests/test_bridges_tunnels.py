@@ -40,9 +40,10 @@ PORTS = """        - {interface: net-wideether-tokyo}
 """
 # bridge のエントリの最後の行。この後ろに layer2 のほかのリストや bridge を足す
 BRIDGE_END = "      description: Port-based wide-area Ethernet between Tokyo and Osaka\n"
-# bridge にポートを書かない (箱の中を L2 で透過させない)
-NO_BRIDGE = ("      ports:                                  # 箱のポートだけを書く。拠点のルーターのポートは書かない\n" + PORTS,
-             "      ports: []\n")
+# bridge を書かない (箱の中を L2 で透過させない)。ポートのない bridge は error なので、エントリごと消す (ADR-0028 D3)
+NO_BRIDGE = ("  bridges:\n    - id: bridge-wideether\n      name: WE-220\n"
+             "      ports:                                  # 箱のポートだけを書く。拠点のルーターのポートは書かない\n" + PORTS + BRIDGE_END,
+             "  bridges: []\n")
 
 
 def test_fixture_is_valid_without_warnings():
@@ -102,7 +103,7 @@ class TestTransport:
             ("    - {id: link-osaka-wideether,",
              "    - {id: link-tokyo-wideether-2, endpoints: [tokyo-rtr-ge2, net-wideether-tokyo2]}\n"
              "    - {id: link-osaka-wideether,"),
-            ("layer2:\n", "  lag:\n    - {id: lag-tokyo-po1, node: tokyo-rtr, members: [tokyo-rtr-ge0, tokyo-rtr-ge2]}\n\nlayer2:\n"),
+            ("layer2:\n", "  lags:\n    - {id: lag-tokyo-po1, node: tokyo-rtr, members: [tokyo-rtr-ge0, tokyo-rtr-ge2]}\n\nlayer2:\n"),
             (PORTS, PORTS + "        - {interface: net-wideether-tokyo2}\n"),
             ("attaches_to: {interface: tokyo-rtr-ge0}}", "attaches_to: {lag: lag-tokyo-po1}}"),
         )
@@ -177,7 +178,7 @@ class TestChecks:
             ("      address_families: [ipv4_unicast]\n    - id: ospf-adj-tokyo-osaka",
              "      address_families: [ipv4_unicast]\n"
              "    - {id: isis-adj-tokyo-osaka, type: isis, from: {node: tokyo-rtr, interface: tokyo-rtr-ge0},"
-             " to: {node: osaka-rtr, interface: osaka-rtr-ge0}, level: level-2}\n"
+             " to: {node: osaka-rtr, interface: osaka-rtr-ge0}, level: level_2}\n"
              "    - id: ospf-adj-tokyo-osaka"),
         )
         assert _views(topo)["isis-adj-tokyo-osaka"].transport.as_dict() == {"bridge": "bridge-wideether"}
@@ -232,7 +233,7 @@ class TestChecks:
         assert any("VLAN のポートにも書かれています" in m for m in _msgs(topo, "warning"))
 
     def test_lag_and_member(self):
-        lag = ("layer2:\n", "  lag:\n    - {id: lag-we-tokyo, node: net-wideether, members: [net-wideether-tokyo]}\n\nlayer2:\n")
+        lag = ("layer2:\n", "  lags:\n    - {id: lag-we-tokyo, node: net-wideether, members: [net-wideether-tokyo]}\n\nlayer2:\n")
         both = _topo(lag, (PORTS, PORTS + "        - {lag: lag-we-tokyo}\n"))
         assert any("LAG とそのメンバーを同じ bridge に書くことはできません" in m for m in _msgs(both))
         member_only = _topo(lag)

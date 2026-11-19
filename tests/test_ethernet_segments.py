@@ -34,7 +34,7 @@ layer1:
     - {id: link-leaf2-srv1, endpoints: [leaf2-swp1, srv1-eth1]}
     - {id: link-leaf2-fw1, endpoints: [leaf2-xe4, fw1-eth1]}
     - {id: link-leaf3-fw1, endpoints: [leaf3-xe4, fw1-eth2]}
-  lag:
+  lags:
     - {id: lag-leaf1-peer, node: leaf1, name: peerlink, members: [leaf1-swp49]}
     - {id: lag-leaf2-peer, node: leaf2, name: peerlink, members: [leaf2-swp49]}
     - {id: lag-leaf1-srv1, node: leaf1, name: bond1, members: [leaf1-swp1]}
@@ -120,7 +120,7 @@ class TestSchema:
     def test_old_lag_forms_are_errors(self, lag, needle):
         """旧形式は移動先を示す error。読み替えはしない (D9)"""
         with pytest.raises(pydantic.ValidationError, match=needle):
-            parse(_text().replace("  lag:\n", f"  lag:\n    - {lag}\n"))
+            parse(_text().replace("  lags:\n", f"  lags:\n    - {lag}\n"))
 
 
 # ---------------------------------------------------------------------------

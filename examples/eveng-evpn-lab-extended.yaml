@@ -184,14 +184,14 @@ layer1:
     - {id: link-leaf6-fw1-1,   endpoints: [leaf6-e1-4, fw1-port1],   link_role: trunk}
     - {id: link-leaf6-fw1-2,   endpoints: [leaf6-e1-5, fw1-port2],   link_role: trunk}
 
-  lag:
+  lags:
     # vPC peer-link。LAG は機器ごとなので、両側に 1 つずつ書く (ADR-0023 D1・D6)
-    - {id: lag-leaf3-po1, node: leaf3, name: port-channel1, members: [leaf3-e1-5, leaf3-e1-6], lacp: {mode: active, min_links: 1}}
-    - {id: lag-leaf4-po1, node: leaf4, name: port-channel1, members: [leaf4-e1-5, leaf4-e1-6], lacp: {mode: active, min_links: 1}}
+    - {id: lag-leaf3-po1, node: leaf3, name: port-channel1, members: [leaf3-e1-5, leaf3-e1-6], lacp: {mode: active}, min_links: 1}
+    - {id: lag-leaf4-po1, node: leaf4, name: port-channel1, members: [leaf4-e1-5, leaf4-e1-6], lacp: {mode: active}, min_links: 1}
 
     # server3 向け vPC。leaf3 / leaf4 にそれぞれ port-channel3 があり、es-server3 で束ねる (vpc 番号は書かない)
-    - {id: lag-leaf3-po3, node: leaf3, name: port-channel3, members: [leaf3-e1-3], lacp: {mode: active, min_links: 1}}
-    - {id: lag-leaf4-po3, node: leaf4, name: port-channel3, members: [leaf4-e1-3], lacp: {mode: active, min_links: 1}}
+    - {id: lag-leaf3-po3, node: leaf3, name: port-channel3, members: [leaf3-e1-3], lacp: {mode: active}, min_links: 1}
+    - {id: lag-leaf4-po3, node: leaf4, name: port-channel3, members: [leaf4-e1-3], lacp: {mode: active}, min_links: 1}
     - {id: lag-server3-bond0, node: server3, members: [server3-eth0, server3-eth1], lacp: {mode: active}}
 
     # server5 向け（leaf5 単独の port-channel5）
@@ -284,7 +284,7 @@ layer2:
     - {id: vtep-leaf5, sources: [leaf5-lo1]}
     - {id: vtep-leaf6, sources: [leaf6-lo1]}
 
-  vxlan:
+  vxlans:
     - {id: vni-10010, type: l2vni, vni: 10010, vlans: [vlan-10],  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3-leaf4]}
     - {id: vni-10020, type: l2vni, vni: 10020, vlans: [vlan-20],  vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf5]}
     - {id: vni-10030, type: l2vni, vni: 10030, vlans: [vlan-30],  vteps: [vtep-leaf3-leaf4, vtep-leaf5]}

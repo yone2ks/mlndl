@@ -59,6 +59,6 @@ class MLNDLTopology(BaseModel):
         """id からエンティティを引く。見つからなければ None (ADR-0015)
 
         例: topology.resolve("vtep-leaf1-leaf2") → Vtep。
-        path ("layer2.vxlan" など) を省略すると全コレクションから探す
+        path ("layer2.vxlans" など) を省略すると全コレクションから探す
         """
         return self.index().get(entity_id, path)

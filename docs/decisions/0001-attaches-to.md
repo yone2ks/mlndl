@@ -277,6 +277,8 @@ ADR-0005「mlndl の表現スコープ定義」(Pass C, 2026-05-29) により、
 
 また ADR-0005 D2-4 は本 ADR D1 の「`attaches_to` 単一手段方針」を上位 ADR として再確認している。
 
+> **改訂 ([ADR-0028](0028-names-and-types.md), 2026-11-20)**: D8 の表の `lag` の参照先 `layer1.lag` を `layer1.lags` に改名した。キー `{lag:}` は 1 つを指す参照キーなので単数のまま。旧名 `layer1.lag` は移動先を示す error。
+
 ## References
 
 - `CLAUDE.md` — 「重要な設計決定 1. `attaches_to`」(本 ADR の決定に従って改訂が必要)

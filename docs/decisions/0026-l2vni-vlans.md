@@ -254,6 +254,8 @@ Pass C の 5 エージェントは drafts/0026 を読まずに評価メモから
 - **D7**: `node_vlans` が YAML に書けないこと、機器ノードの `vlans` との書き分けを足した (linguist)
 - **範囲外**: Asymmetric IRB、VNI stitching、L2VNI の Route Target を足した (network-tech-reviewer)
 
+> **改訂 ([ADR-0028](0028-names-and-types.md), 2026-11-20)**: `layer2.vxlan` を `layer2.vxlans` に改名した。本文の `layer2.vxlan[...]` は `layer2.vxlans[...]` と読み替える。L2VNI の `vteps` は型で 1 つ以上、`vni` は 1〜16777215。
+
 ## References
 
 - 関連 ADR: ADR-0005 (D4 補則・D6)、ADR-0011 (D4・D9)、ADR-0013 (D7)、ADR-0014 (D3・D4)、ADR-0015、ADR-0018 (D4)、ADR-0022、ADR-0023 (D7)、ADR-0025

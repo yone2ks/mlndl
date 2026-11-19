@@ -51,7 +51,7 @@ class VRF(BaseModel):
 
     id: str
     rd: str | None = None           # Route Distinguisher — ASN:NN または IP:NN
-    l3vni: Annotated[str | None, Ref("layer2.vxlan", where=("type", "l3vni"))] = None
+    l3vni: Annotated[str | None, Ref("layer2.vxlans", where=("type", "l3vni"))] = None
     route_targets: RouteTargets | None = None
     description: str | None = None
 
@@ -248,7 +248,7 @@ class TunnelInterface(BaseModel):
     ipv6: IPv6Interface | None = None
     vrf: Annotated[str | None, Ref("layer3.vrfs")] = None             # トンネル IF が属する VRF (overlay 側)
     transport_vrf: Annotated[str | None, Ref("layer3.vrfs")] = None   # 外側パケットが流れる VRF
-    mtu: int | None = Field(default=None, ge=68)    # IPv4 最小 MTU (RFC 791)
+    mtu: int | None = Field(default=None, ge=68, le=65535)   # 68 は分割せずに転送できる最小 (RFC 791 §3.2)、65535 は Total Length の上限 (§3.1)
     description: str | None = None
 
     @field_validator("ip", mode="before")

@@ -46,13 +46,13 @@ class TestParser:
     def test_parse_valid_with_lag(self):
         t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")
         l1 = t.layer1
-        assert len(l1.lag) == 4
+        assert len(l1.lags) == 4
         assert len(l1.ethernet_segments) == 1
 
     def test_parse_lag_and_ethernet_segment(self):
         """LAG は機器 1 台 (ADR-0023 D1)。複数の機器の LAG は ethernet_segments で束ねる (D2)"""
         t = parse_file(FIXTURES / "valid_l1_with_lag.yaml")
-        lags = {lag.id: lag for lag in t.layer1.lag}
+        lags = {lag.id: lag for lag in t.layer1.lags}
 
         peer_link = lags["lag-leaf1-peer"]
         assert isinstance(peer_link, Lag)
@@ -143,7 +143,7 @@ layer1:
   nodes:
     - id: leaf1
   interfaces: []
-  lag:
+  lags:
     - id: lag1
       type: mlag
       nodes: [leaf1]
@@ -161,7 +161,7 @@ ndl_version: "1.0"
 layer1:
   nodes: [{id: leaf1}]
   interfaces: [{id: leaf1-swp1, node: leaf1}]
-  lag:
+  lags:
     - {id: lag-leaf1-po1, type: lacp, node: leaf1, members: [leaf1-swp1]}
 """
         with pytest.raises(Exception, match="type を消して"):

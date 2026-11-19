@@ -220,7 +220,7 @@ Pass C (2026-11-15) でも参照の向きは 4/5 が案 A で、ユーザーが�
 | [0027](0027-compatibility-promise.md) | 互換の約束 — 1.0 の後、1.x で許す変更と 2.0 が要る変更 (2026-11-19 実装) | **Accepted** | C |
 | [drafts/0027](drafts/0027-compatibility-promise.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0027 | A |
 | [evaluations/adr0027](evaluations/adr0027/evaluation.md) | ADR-0027 横断評価メモ (Pass B) と Pass C の結果。試し書き C1〜C6、`passb/` B1〜B6、`passc/` P1〜P4b | — | — |
-| [0028](0028-names-and-types.md) | 1.0 の前の名前と型の直し — `lags` / `vxlans`、IS-IS の `level` を下線に、`lacp.mode` の `static` と LAG の直下の `min_links`、空のリスト・既定値・値域 | **Accepted** | C |
+| [0028](0028-names-and-types.md) | 1.0 の前の名前と型の直し — `lags` / `vxlans`、IS-IS の `level` を下線に、`lacp.mode` の `static` と LAG の直下の `min_links`、空のリスト・既定値・値域 (2026-11-20 実装) | **Accepted** | C |
 | [drafts/0028](drafts/0028-names-and-types.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0028 | A |
 | [evaluations/adr0028](evaluations/adr0028/recommendation.md) | ADR-0028 Pass A の検討と試し書き a1〜a5。Pass B の評価は [evaluation.md](evaluations/adr0028/evaluation.md)、試し書き `passb/` B1〜B6、`passc/` P1〜P3 | — | — |
 

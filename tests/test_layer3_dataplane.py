@@ -171,7 +171,7 @@ class TestSilentContradictions:
         assert any("重複して定義" in e for e in errs)
 
     def test_vrf_l3vni_bidirectional_mismatch(self):
-        body = BASE + """  vxlan:
+        body = BASE + """  vxlans:
     - {id: vni-1, type: l3vni, vni: 10001, vrf: vrf-a}
     - {id: vni-2, type: l3vni, vni: 10002, vrf: vrf-b}
 layer3:
@@ -182,7 +182,7 @@ layer3:
         paths = {e.path for e in validate(_topo(body))}
         # VRF → L3VNI 方向と L3VNI → VRF 方向を、それぞれ独立に検出すること
         assert {"layer3.vrfs[0].l3vni", "layer3.vrfs[1].l3vni"} <= paths
-        assert {"layer2.vxlan[0].vrf", "layer2.vxlan[1].vrf"} <= paths
+        assert {"layer2.vxlans[0].vrf", "layer2.vxlans[1].vrf"} <= paths
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +313,7 @@ layer1:
   nodes: [{id: n1, description: d}]
   interfaces: [{id: n1-e0, node: n1, description: d}, {id: n1-e1, node: n1}]
   links: []
-  lag: [{id: lag-n1, node: n1, members: [n1-e0, n1-e1], description: d}]
+  lags: [{id: lag-n1, node: n1, members: [n1-e0, n1-e1], description: d}]
 layer2:
   vlans: [{id: vlan-10, vlan_id: 10, description: d}]
 layer3:
@@ -376,7 +376,7 @@ class TestExport:
             "control_plane:\n"
             "  bgp: [{id: bgp-default, nodes: [{node: leaf1, local_as: 65001}, {node: leaf2, local_as: 65002}]}]\n"
             "  routing_neighbors:\n"
-            "    - {id: bgp-peer-leaf1-leaf2, type: bgp, from: {node: leaf1, update_source: leaf1-lo0},"
+            "    - {id: bgp-peer-leaf1-leaf2, type: bgp, address_families: [ipv4_unicast], from: {node: leaf1, update_source: leaf1-lo0},"
             " to: {node: leaf2, update_source: leaf2-lo0}}\n",
         ).replace("layer2:\n  vlans:", "layer2:\n  vteps: [{id: vtep-leaf1, sources: [leaf1-lo1]}]\n  vlans:")
         leaf1 = self._leaf1(_topo(body))
@@ -518,7 +518,7 @@ class TestPassCChecks:
         ).replace(
             "layer3:",
             "  vteps:\n    - {id: vtep-leaf1, sources: [leaf1-lo]}\n    - {id: vtep-leaf2, sources: [leaf2-lo]}\n"
-            "  vxlan:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100],"
+            "  vxlans:\n    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100],"
             f" vteps: [{vteps}]}}\nlayer3:",
         )
 
@@ -526,7 +526,7 @@ class TestPassCChecks:
         """E10: leaf2 は VNI に参加するが vlan-100 のポートを持たない"""
         r = validate_all(_topo(self._vni("vtep-leaf1, vtep-leaf2")))
         assert r.errors == []
-        assert [w.path for w in r.warnings] == ["layer2.vxlan[0]"]
+        assert [w.path for w in r.warnings] == ["layer2.vxlans[0]"]
         assert "leaf2" in r.warnings[0].message
 
     def test_vni_members_matching_vlan_ports(self):

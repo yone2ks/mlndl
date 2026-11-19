@@ -1,6 +1,6 @@
 # ADR-0028: 1.0 の前の名前と型の直し
 
-- **Status**: Accepted (2026-11-20 に Pass C で確定。実装はこれから)
+- **Status**: Accepted (2026-11-20 に Pass C で確定。同日に実装: スキーマ・エクスポーター・テスト・docs・改訂の注記。ndl-viz の対応 (IS-IS の札と `min_links` の読み先) はこれから)
 - **Date**: 2026-11-20
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、
   ユーザー (IS-IS の `level` を下線区切りに、LACP の既定値をなくす、値域を狭める直しを入れる、`lacp.mode` の `on` を `static` に、`min_links` を LAG の直下に)

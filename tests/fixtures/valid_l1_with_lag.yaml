@@ -56,31 +56,35 @@ layer1:
 
   links: []
 
-  lag:
+  lags:
     # ピアリンクと Server1 向けの bond は、どちらも機器ごとの LAG (ADR-0023 D1・D6)
     - id: lag-leaf1-peer
       node: leaf1
       name: peerlink
       members: [leaf1-swp49, leaf1-swp50]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     - id: lag-leaf2-peer
       node: leaf2
       name: peerlink
       members: [leaf2-swp49, leaf2-swp50]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     - id: lag-leaf1-server1
       node: leaf1
       name: bond1
       members: [leaf1-swp1]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
     - id: lag-leaf2-server1
       node: leaf2
       name: bond1
       members: [leaf2-swp1]
-      lacp: {mode: active, min_links: 1}
+      lacp: {mode: active}
+      min_links: 1
 
   ethernet_segments:
     # leaf1 / leaf2 の bond1 を Server1 から 1 本に見せる。方式名・clag-id は書かない (ADR-0023 D2)

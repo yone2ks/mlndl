@@ -96,10 +96,10 @@ class TestPrefixWarnings:
 
     def test_vni_and_vrf_prefix(self):
         ng = _topo(
-            "layer2:\n  vxlan:\n    - {id: l3vni-tenant-a, type: l3vni, vni: 10900, vrf: tenant-a}\n"
+            "layer2:\n  vxlans:\n    - {id: l3vni-tenant-a, type: l3vni, vni: 10900, vrf: tenant-a}\n"
             "layer3:\n  vrfs:\n    - {id: tenant-a, l3vni: l3vni-tenant-a}\n"
         )
-        assert sorted(self._warn_paths(ng)) == ["layer2.vxlan[0].id", "layer3.vrfs[0].id"]
+        assert sorted(self._warn_paths(ng)) == ["layer2.vxlans[0].id", "layer3.vrfs[0].id"]
 
     @pytest.mark.parametrize("adj_type,good,bad", [
         ("bgp", "bgp-peer-leaf1-leaf2", "bgp-adj-leaf1-leaf2"),
@@ -108,9 +108,9 @@ class TestPrefixWarnings:
     ])
     def test_adjacency_prefix_depends_on_type(self, adj_type, good, bad):
         ends = {
-            "bgp": "from: {node: leaf1, update_source: leaf1-lo}, to: {node: leaf2, update_source: leaf2-lo}",
+            "bgp": "from: {node: leaf1, update_source: leaf1-lo}, to: {node: leaf2, update_source: leaf2-lo}, address_families: [l2vpn_evpn]",
             "ospf": "from: {node: leaf1, interface: leaf1-lo}, to: {node: leaf2, interface: leaf2-lo}, area: 0",
-            "isis": "from: {node: leaf1, interface: leaf1-swp1}, to: {node: leaf2, interface: leaf2-swp1}, level: level-2",
+            "isis": "from: {node: leaf1, interface: leaf1-swp1}, to: {node: leaf2, interface: leaf2-swp1}, level: level_2",
         }[adj_type]
         tmpl = L1_TWO_NODES + (
             # IS-IS の両端は同じリンクに載せる (通り道の食い違いの warning を出さない。ADR-0018 D4)
@@ -139,14 +139,14 @@ class TestPrefixWarnings:
     ])
     def test_lag_prefix(self, lag_id, warns):
         topo = _topo(L1_TWO_NODES + (
-            "  lag:\n    - {id: %s, node: leaf1, members: [leaf1-swp1, leaf1-swp2]}\n" % lag_id
+            "  lags:\n    - {id: %s, node: leaf1, members: [leaf1-swp1, leaf1-swp2]}\n" % lag_id
         ))
-        assert self._warn_paths(topo) == (["layer1.lag[0].id"] if warns else [])
+        assert self._warn_paths(topo) == (["layer1.lags[0].id"] if warns else [])
 
     def test_warning_does_not_affect_reference_resolution(self):
         """D7: プレフィックス違反でも参照解決は通常どおり動く"""
         topo = _topo(
-            "layer2:\n  vxlan:\n    - {id: l3vni-a, type: l3vni, vni: 10900, vrf: tenant-a}\n"
+            "layer2:\n  vxlans:\n    - {id: l3vni-a, type: l3vni, vni: 10900, vrf: tenant-a}\n"
             "layer3:\n  vrfs:\n    - {id: tenant-a, l3vni: l3vni-a}\n"
         )
         assert validate(topo) == []

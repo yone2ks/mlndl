@@ -70,7 +70,7 @@ layer2:
     - {id: vtep-leaf3,   sources: [leaf3-lo]}
     - {id: vtep-border1, sources: [border1-lo]}
 
-  vxlan:
+  vxlans:
     - id: vni-10020
       type: l2vni
       vni: 10020

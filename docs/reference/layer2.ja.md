@@ -7,8 +7,11 @@ L2 の構成: VLAN・bridge・VTEP・VXLAN・サブ IF。[リファレンスの�
 | `vlans` | [[VLAN](#vlans)] | 番号を持つ L2 セグメント |
 | `bridges` | [[bridge](#bridges)] | 番号を持たない L2 セグメント (事業者網の箱の中の転送) |
 | `vteps` | [[VTEP](#vteps)] | VXLAN のトンネル端点 |
-| `vxlan` | [[VNI](#vxlan)] | L2VNI と L3VNI |
+| `vxlans` | [[VNI](#vxlans)] | L2VNI と L3VNI |
 | `subinterfaces` | [[サブ IF](#subinterfaces)] | 802.1Q の routed サブ IF |
+
+id を持つエントリの一覧は複数形です。以前の `vxlan` は `vxlans` に改名しました。書くと移動先を示す error です ([ADR-0028](../decisions/0028-names-and-types.md) D1)。
+`vxlans` のエントリは VXLAN のトンネルの 1 本ずつではなく VNI です。`vnis` としなかったのは、番号のリストに見え、エントリの `vni:` と語が重なるためです。
 
 ## vlans
 
@@ -42,7 +45,7 @@ vlans:
 | キー | 型 | 参照先 | 説明 |
 |---|---|---|---|
 | `interface` | id | `layer1.interfaces` | L1 IF |
-| `lag` | id | `layer1.lag` | 機器 1 台の LAG |
+| `lag` | id | `layer1.lags` | 機器 1 台の LAG |
 | `ethernet_segment` | id | `layer1.ethernet_segments` | Ethernet Segment。脚の全機器のポートを 1 行で書ける |
 | `native` | 真偽値 (`false`) | | trunk でこの VLAN をタグなし (native VLAN) で流すなら `true` |
 
@@ -71,7 +74,7 @@ bridges:
 |---|---|---|---|
 | `id` | id | ○ | 推奨プレフィックス `bridge-` |
 | `name` | 文字列 | | |
-| `ports` | [`{interface:}` / `{lag:}` / `{ethernet_segment:}`] | | 転送する側 (箱) のポート。`node` と `native` は持たない。事業者網を PE ごとに書き、拠点が 2 台の PE に冗長に接続するなら `{ethernet_segment:}` |
+| `ports` | [`{interface:}` / `{lag:}` / `{ethernet_segment:}`] (1 つ以上) | ○ | 転送する側 (箱) のポート。`node` と `native` は持たない。事業者網を PE ごとに書き、拠点が 2 台の PE に冗長に接続するなら `{ethernet_segment:}` |
 | `description` | 文字列 | | |
 
 方式名 (E-LINE、VPLS など) は書きません。両端のルーターの L1 リンクの対向が同じ bridge のポートなら、そのあいだのセッションの通り道は `{bridge: <id>}` になります ([control-plane.md](control-plane.ja.md#通り道))。
@@ -97,7 +100,7 @@ vteps:
 | `address_v6` | IPv6 プレフィックス付きアドレス | | | |
 | `description` | 文字列 | | | |
 
-## vxlan
+## vxlans
 
 VNI。`type` で L2VNI と L3VNI を分けます。L2VNI と L3VNI を通して `vni` は重複できません。
 
@@ -107,9 +110,9 @@ VNI。`type` で L2VNI と L3VNI を分けます。L2VNI と L3VNI を通して 
 |---|---|---|---|---|
 | `id` | id | ○ | | `vni-<番号>` が慣例 |
 | `type` | `l2vni` | ○ | | |
-| `vni` | 整数 | ○ | | |
+| `vni` | 整数 (1〜16777215) | ○ | | |
 | `vlans` | [id] (1 つ以上) | ○ | `layer2.vlans` | この VNI に載る VLAN。機器によって番号が違うときは、番号ごとの VLAN のエントリを並べる。同じ id を 2 回書くと error |
-| `vteps` | [id] | | `layer2.vteps` | この VNI に参加する VTEP。参加する機器は VTEP から導く |
+| `vteps` | [id] (1 つ以上) | ○ | `layer2.vteps` | この VNI に参加する VTEP。参加する機器は VTEP から導く |
 | `description` | 文字列 | | | |
 
 L2VNI に入る VLAN では、ブロードキャストドメインを表すのは L2VNI です。VLAN のエントリは「ある番号と、その番号でつながるポート」で、
@@ -119,7 +122,7 @@ L2VNI に入る VLAN では、ブロードキャストドメインを表すの�
 vlans:
   - {id: vlan-20, vlan_id: 20, trunk_ports: [{ethernet_segment: es-server1}, {interface: leaf4-swp3}]}   # leaf1 / leaf2 / leaf4
   - {id: vlan-30, vlan_id: 30, access_ports: [{interface: leaf3-swp1}]}                                  # leaf3 だけ番号が違う
-vxlan:
+vxlans:
   - {id: vni-10020, type: l2vni, vni: 10020, vlans: [vlan-20, vlan-30], vteps: [vtep-leaf1-leaf2, vtep-leaf3, vtep-leaf4]}
 ```
 
@@ -139,7 +142,7 @@ vxlan:
 |---|---|---|---|---|
 | `id` | id | ○ | | |
 | `type` | `l3vni` | ○ | | |
-| `vni` | 整数 | ○ | | |
+| `vni` | 整数 (1〜16777215) | ○ | | |
 | `vrf` | id | ○ | `layer3.vrfs` | この VNI に対応する VRF。VRF の `l3vni` と互いに一致させる |
 | `irb_mode` | `symmetric` / `asymmetric` | | | |
 | `description` | 文字列 | | | |
@@ -159,7 +162,7 @@ subinterfaces:
 | キー | 型 | 必須 | 参照先 | 説明 |
 |---|---|---|---|---|
 | `id` | id | ○ | | 推奨プレフィックス `subif-` |
-| `attaches_to` | `{interface:}` / `{lag:}` | ○ | `layer1.interfaces` / `layer1.lag` | このサブ IF の基盤 |
+| `attaches_to` | `{interface:}` / `{lag:}` | ○ | `layer1.interfaces` / `layer1.lags` | このサブ IF の基盤 |
 | `vlan_id` | 整数 | ○ | | このリンクの上の 802.1Q のタグ番号 (1〜4094)。`layer2.vlans` への参照ではなく、照合もしない |
 | `name` | 文字列 | | | 機器上の名前 (`swp5.200`) |
 | `description` | 文字列 | | | |

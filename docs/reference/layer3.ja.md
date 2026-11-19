@@ -16,7 +16,7 @@ L3 の構成 (データプレーン): VRF・L3 IF・トンネル IF。[リファ
 |---|---|---|---|---|
 | `id` | id | ○ | | 推奨プレフィックス `vrf-` |
 | `rd` | 文字列 | | | Route Distinguisher ([書き方](types.ja.md#route-target-と-route-distinguisher)) |
-| `l3vni` | id | | `layer2.vxlan` | この VRF の L3VNI。L3VNI の `vrf` と互いに一致させる |
+| `l3vni` | id | | `layer2.vxlans` | この VRF の L3VNI。L3VNI の `vrf` と互いに一致させる |
 | `route_targets` | `{import, export}` | | | Route Target。`import` と `export` に、それぞれ文字列の列を書く ([書き方](types.ja.md#route-target-と-route-distinguisher)) |
 | `description` | 文字列 | | | |
 
@@ -59,7 +59,7 @@ interfaces:
 | `attaches_to` のキー | 参照先 | 分類 | 例 |
 |---|---|---|---|
 | `interface` | `layer1.interfaces` | L1 IF の上 | routed ポート |
-| `lag` | `layer1.lag` | LAG の上 | routed LAG。MLAG / ESI-LAG の上なら機器ごとの LAG を指す |
+| `lag` | `layer1.lags` | LAG の上 | routed LAG。MLAG / ESI-LAG の上なら機器ごとの LAG を指す |
 | `vlan` | `layer2.vlans` | VLAN の上 | SVI |
 | `subinterface` | `layer2.subinterfaces` | サブ IF の上 | router-on-a-stick |
 | (書かない) | | どれにも載らない | ループバックなど。ループバックとみなすわけではない |
@@ -118,7 +118,7 @@ tunnel_interfaces:
 | `ipv6` | IPv6 プレフィックス付きアドレス | | | |
 | `vrf` | id | | `layer3.vrfs` | トンネル IF が属する VRF |
 | `transport_vrf` | id | | `layer3.vrfs` | 外側のパケットが流れる VRF |
-| `mtu` | 整数 | | | トンネル IF の MTU。68 以上 |
+| `mtu` | 整数 | | | トンネル IF の MTU。68〜65535 |
 | `description` | 文字列 | | | |
 
 外側のアドレスファミリーは、`source` と宛先で一致させます。両端をトポロジーの中に書くときは、逆向きのトンネルも書きます (ないと info)。

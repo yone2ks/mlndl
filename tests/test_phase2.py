@@ -32,7 +32,7 @@ class TestFullDCParse:
 
     def test_layer2_vxlan_types(self):
         t = parse_file(FIXTURES / "valid_full_dc.yaml")
-        vxlans = {v.id: v for v in t.layer2.vxlan}
+        vxlans = {v.id: v for v in t.layer2.vxlans}
         assert isinstance(vxlans["vni-10100"], L2VxLAN)
         assert isinstance(vxlans["vni-10900"], L3VxLAN)
         assert vxlans["vni-10100"].vni == 10100
@@ -177,7 +177,7 @@ class TestSchemaL2L3:
         yaml_str = b"""
 ndl_version: "1.0"
 layer2:
-  vxlan:
+  vxlans:
     - id: vni-1
       type: unknown
       vni: 100

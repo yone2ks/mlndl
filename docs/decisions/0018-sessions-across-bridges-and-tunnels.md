@@ -375,6 +375,8 @@ OSPF / IS-IS では、1 行目の `update_source` を `interface` と書く。
 - **片側をトポロジー外にする書き方に warning を出す**: 採らなかった。validator は、トポロジー外の相手が自社の機器かどうかを知りえない。
 - **bridge をはさむ両端のサブ IF のタグが違うときに info を出す** (network-tech、Pass B): 採らなかった。タグ変換の契約では違うのが正しく、ノイズになる。
 
+> **改訂 ([ADR-0028](0028-names-and-types.md), 2026-11-20)**: D1 の `bridges[].ports` を必須・1 つ以上にした。ポートのない bridge は何も転送しないため。ポートが 1 つのときの warning は残す。
+
 ## References
 
 - ADR-0017 D5-2 (この ADR に渡した問い)

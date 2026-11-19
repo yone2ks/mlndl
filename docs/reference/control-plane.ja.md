@@ -34,7 +34,7 @@ bgp:
 | `nodes` | [`{node, local_as}`] | | | 参加する機器と AS。同じ機器・同じ VRF で AS は 1 つ |
 | `description` | 文字列 | | | |
 
-`nodes` の要素: `node` (id、必須、参照先 `layer1.nodes`)、`local_as` (整数、必須)。
+`nodes` の要素: `node` (id、必須、参照先 `layer1.nodes`)、`local_as` (整数 1〜4294967295、必須)。
 
 underlay / overlay の区別は書きません。セッションが運ぶアドレスファミリーと VRF から導きます ([ADR-0010](../decisions/0010-control-plane-separation.md) D6)。
 
@@ -62,10 +62,12 @@ BFD のタイマー。BFD を張るかどうかはセッションの `bfd` で�
 | キー | 型 | 必須 | 参照先 | 説明 |
 |---|---|---|---|---|
 | `id` | id | ○ | | 推奨プレフィックス `bfd-` |
-| `min_tx` | 整数 | (`300`) | | ミリ秒 |
-| `min_rx` | 整数 | (`300`) | | ミリ秒 |
-| `multiplier` | 整数 | (`3`) | | |
+| `min_tx` | 整数 (1 以上) | | | ミリ秒 (各社の CLI と同じ。RFC 5880 の packet の上ではマイクロ秒) |
+| `min_rx` | 整数 (1 以上) | | | ミリ秒 |
+| `multiplier` | 整数 (1〜255) | | | |
 | `nodes` | [id] | | `layer1.nodes` | このタイマーを使う機器。`bfd: true` のセッションの両端はここにあること |
+
+タイマーに既定値はありません。書かなければ「書いていない」で、どの値になるかは機器の既定値です ([ADR-0028](../decisions/0028-names-and-types.md) D4)。
 
 ## routing_neighbors
 
@@ -95,7 +97,7 @@ routing_neighbors:
 | `instance` | id | | `control_plane.bgp` | このセッションが属するインスタンス。BGP のインスタンスが 1 つなら省略できる |
 | `from` | [端点](#bgp-の端点) | ○ | | |
 | `to` | [端点](#bgp-の端点) | ○ | | `from` と `to` に向きの意味はない |
-| `address_families` | [`ipv4_unicast` / `ipv6_unicast` / `l2vpn_evpn` / `vpnv4` / `vpnv6`] | | | 運ぶアドレスファミリー。1 本で複数運べる |
+| `address_families` | [`ipv4_unicast` / `ipv6_unicast` / `l2vpn_evpn` / `vpnv4` / `vpnv6`] (1 つ以上) | ○ | | 運ぶアドレスファミリー。1 本で複数運べる。既定値はない (`[ipv4_unicast]` で埋めると、EVPN のセッションで `l2vpn_evpn` を書き忘れたのと区別できない) |
 | `bfd` | 真偽値 | (`false`) | | |
 | `description` | 文字列 | | | |
 
@@ -109,7 +111,7 @@ routing_neighbors:
 | | `update_source` | id | ○ | `layer3.interfaces` / `layer3.tunnel_interfaces` | セッションを張る IF。同じ機器のもの |
 | | `route_reflector_client` | 真偽値 | (`false`) | | この端がルートリフレクタのクライアント。iBGP のときだけ |
 | トポロジー外 | `address` | IP アドレス | ○ | | 相手のアドレス |
-| | `local_as` | 整数 | ○ | | 相手自身の AS |
+| | `local_as` | 整数 (1〜4294967295) | ○ | | 相手自身の AS |
 
 mlndl が両端から導くもの (書かない):
 
@@ -137,7 +139,7 @@ mlndl が両端から導くもの (書かない):
 | `type` | `isis` | ○ | | |
 | `instance` | id | | `control_plane.isis` | |
 | `from` / `to` | `{node, interface}` | ○ | `interface` は `layer1.interfaces` | IS-IS は L2 の上で張るので L1 IF を指す |
-| `level` | `level-1` / `level-2` / `level-all` | ○ | | |
+| `level` | `level_1` / `level_2` / `level_all` | ○ | | RFC 9130 の `level-1` などの区切りを下線に。ハイフンで書くと下線を示す error ([ADR-0028](../decisions/0028-names-and-types.md) D2) |
 | `bfd` | 真偽値 | (`false`) | | |
 | `description` | 文字列 | | | |
 

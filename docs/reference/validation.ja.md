@@ -32,6 +32,8 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | `ndl_version` を書いている。引用符で囲んだ `"<メジャー>.<マイナー>"` の文字列 (`ndl_version: 1.0` のように数で書くと error)。メジャーが 1 より古くない ([ADR-0027](../decisions/0027-compatibility-promise.md) D5) | error |
 | `ndl_version` がこの mlndl の読めるバージョン (`mlndl.LANGUAGE_VERSION`) より新しくない。新しければ、ほかの検査より先にこの error 1 本だけで止まる (Python では `mlndl.UnsupportedVersionError`)。メジャーとマイナーは数として比べる (`1.10` は `1.9` より新しい) | error |
 | 決められたキーしか書いていない (`meta` を除く) | error |
+| **空のリスト**: 要素なしでは成り立たないリストを書いている・空でない (LAG の `members`、bridge の `ports`、L2VNI の `vteps`、BGP のセッションの `address_families`)。何を書けばよいかを示す ([ADR-0028](../decisions/0028-names-and-types.md) D3) | error |
+| **数の範囲**: `local_as`・`vni`・`vlan_id`・BFD のタイマー・`min_links`・トンネルの `mtu` が [範囲](types.ja.md#数値) に入る ([ADR-0028](../decisions/0028-names-and-types.md) D5) | error |
 
 ## すべての区画に共通
 
@@ -55,6 +57,7 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | リンクの `link_speed` が正規形 (数値が 1 以上 1000 未満になる単位。`1000G` は `1T`) | warning |
 | **Ethernet Segment**: `members` が 2 つ以上で、`{lag:}` か `{interface:}` のどちらか一方 (型)。同じ機器の脚が 2 つない。1 つの脚 (と、その L1 IF) が 2 つの ES に入っていない。LAG とそのメンバーを併記していない。脚どうしが L1 リンクでつながっていない (ピアリンクを脚にした疑い) | error |
 | **Ethernet Segment**: 脚に LAG のメンバーの IF を書いている (`{lag:}` を促す) | warning |
+| **LAG の束ね方**: `lacp` を書くなら `mode` を書いている (`lacp: {}` は誤り)。`min_links` が 1 以上 | error |
 
 ## layer2 ([layer2.md](layer2.ja.md))
 
@@ -117,8 +120,8 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | `gateway_redundancy[].protocol` | `gateway_redundancy[].mode` |
 | `layer1.links[].mtu` | 書かない。MTU はインターフェースの設定 ([ADR-0020](../decisions/0020-remove-l1-link-mtu.md)) |
 | `layer1.nodes[].overrides` | 書かない。CPU・RAM・イメージなどは下流のツールの設定で機器の id を引いて書く ([ADR-0024](../decisions/0024-remove-node-overrides.md)) |
-| `layer1.lag[].type` (`lacp`) | 書かない。LAG は常に機器 1 台 ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D1) |
-| `layer1.lag[]` の `type: mlag`・`nodes`・`peer_link`・`peer_link_interface`・`domain_id`・`system_mac`・`client_lag` | 機器ごとの LAG と `layer1.ethernet_segments`。番号と MAC は書かない ([ADR-0022](../decisions/0022-diagram-granularity.md)・[ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D9) |
+| `layer1.lags[].type` (`lacp`) | 書かない。LAG は常に機器 1 台 ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D1) |
+| `layer1.lags[]` の `type: mlag`・`nodes`・`peer_link`・`peer_link_interface`・`domain_id`・`system_mac`・`client_lag` | 機器ごとの LAG と `layer1.ethernet_segments`。番号と MAC は書かない ([ADR-0022](../decisions/0022-diagram-granularity.md)・[ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D9) |
 | `ethernet_segments[]` の `esi`・`system_mac`・`domain_id`・`peer_link(s)` | 書かない ([ADR-0022](../decisions/0022-diagram-granularity.md)) |
 | `gateway_redundancy[]` の `anycast_mac` | 書かない。MAC アドレスは構成図の粒度ではない ([ADR-0022](../decisions/0022-diagram-granularity.md) D2) |
 | `attaches_to: {ethernet_segment:}` (L3 IF・サブ IF) | 機器ごとの LAG を `{lag:}` で指す ([ADR-0023](../decisions/0023-per-device-lag-and-ethernet-segments.md) D5) |
@@ -135,3 +138,8 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | VLAN のポートの `node` | 書かない。参照先から導く ([ADR-0013](../decisions/0013-vlan-ports-on-lag.md)) |
 | L2VNI の `vtep_source` / `members` | `layer2.vteps` と L2VNI の `vteps` ([ADR-0014](../decisions/0014-vteps.md)) |
 | L2VNI の `vlan` (単数) | `vlans: [<VLAN の id>]` ([ADR-0026](../decisions/0026-l2vni-vlans.md)) |
+| `layer1.lag` | `layer1.lags` (中身は同じ。[ADR-0028](../decisions/0028-names-and-types.md) D1) |
+| `layer2.vxlan` | `layer2.vxlans` (中身は同じ) |
+| IS-IS の `level: level-1` / `level-2` / `level-all` | `level_1` / `level_2` / `level_all` (D2) |
+| `lacp.mode: "on"`、引用符なしの `on` / `off` / `yes` / `no` (YAML が真偽値と読む) | `mode: static` (LACP を使わずに束ねる)。LACP で束ねるなら `active` / `passive` (D4) |
+| `lacp.min_links` | LAG の直下の `min_links` (D4) |

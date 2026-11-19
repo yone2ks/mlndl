@@ -29,7 +29,7 @@ layer1:
     - {id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0]}
     - {id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1]}
     - {id: link-leaf3-server3, endpoints: [leaf3-swp1, server3-eth0]}
-  lag:
+  lags:
     - {id: lag-leaf1-server1, node: leaf1, members: [leaf1-swp1]}
     - {id: lag-leaf2-server1, node: leaf2, members: [leaf2-swp1]}
   ethernet_segments:
@@ -42,7 +42,7 @@ layer2:
     - {id: vtep-leaf1-leaf2, sources: [leaf1-lo, leaf2-lo], address: 10.0.100.12/32}
     - {id: vtep-leaf3, sources: [leaf3-lo]}
     - {id: vtep-border1, sources: [border1-lo]}
-  vxlan:
+  vxlans:
     - {id: vni-10020, type: l2vni, vni: 10020, vlans: [vlan-20, vlan-30], vteps: [vtep-leaf1-leaf2, vtep-leaf3, vtep-border1]}
 layer3:
   vrfs: [{id: vrf-a}, {id: vrf-b}]
@@ -95,7 +95,7 @@ class TestSchema:
 
     def test_undefined_vlan_is_ref_error(self):
         errs = _issues(_replace("vlans: [vlan-20, vlan-30]", "vlans: [vlan-20, vlan-99]"))
-        assert errs == ["layer2.vxlan[0].vlans[1]: 未定義の VLAN 'vlan-99' を参照しています"]
+        assert errs == ["layer2.vxlans[0].vlans[1]: 未定義の VLAN 'vlan-99' を参照しています"]
 
 
 # ---------------------------------------------------------------------------
@@ -150,14 +150,14 @@ class TestChecks:
         text = _replace("vlans: [vlan-20, vlan-30]", "vlans: [vlan-20, vlan-30, vlan-31]", text)
         errs = _issues(text)
         assert len(errs) == 1
-        assert errs[0].startswith("layer2.vxlan[0].vlans: 機器 'leaf3' に、L2VNI 'vni-10020' の VLAN が 2 つあります"
+        assert errs[0].startswith("layer2.vxlans[0].vlans: 機器 'leaf3' に、L2VNI 'vni-10020' の VLAN が 2 つあります"
                                   " (vlan-30 / vlan-31)")
 
     def test_one_vlan_in_two_l2vnis(self):
         text = _replace("vtep-border1]}\nlayer3",
                         "vtep-border1]}\n    - {id: vni-10021, type: l2vni, vni: 10021, vlans: [vlan-20], vteps: [vtep-leaf3]}\nlayer3")
         errs = _issues(text)
-        assert errs == ["layer2.vxlan[1].vlans[0]: VLAN 'vlan-20' は L2VNI 'vni-10020' と 'vni-10021' の両方の vlans "
+        assert errs == ["layer2.vxlans[1].vlans[0]: VLAN 'vlan-20' は L2VNI 'vni-10020' と 'vni-10021' の両方の vlans "
                         "にあります。1 つの VLAN は 1 つの L2VNI に載せます (ADR-0026 D5)"]
 
     def test_es_legs_split_into_different_numbers(self):
@@ -177,7 +177,7 @@ class TestChecks:
         text = _replace("{id: leaf3-vlan-30, node: leaf3, name: vlan30, attaches_to: {vlan: vlan-30}, ip: 10.20.0.1/24, vrf: vrf-a",
                         "{id: leaf3-vlan-30, node: leaf3, name: vlan30, attaches_to: {vlan: vlan-30}, ip: 10.20.0.1/24, vrf: vrf-b")
         assert _issues(text) == [
-            "layer2.vxlan[0].vlans: L2VNI 'vni-10020' の SVI の vrf が食い違っています: 'leaf1-vlan-20' は vrf-a、"
+            "layer2.vxlans[0].vlans: L2VNI 'vni-10020' の SVI の vrf が食い違っています: 'leaf1-vlan-20' は vrf-a、"
             "'leaf3-vlan-30' は vrf-b。同じブロードキャストドメインのゲートウェイは同じ VRF に置きます (ADR-0026 D5)"
         ]
 

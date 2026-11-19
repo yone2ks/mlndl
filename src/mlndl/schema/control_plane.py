@@ -20,6 +20,9 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_val
 
 from .refs import Ref
 
+# 4 バイトの AS (RFC 6793)。AS 0 は使えない (RFC 7607)。予約の AS (RFC 7300・AS_TRANS) は通す (ADR-0028 D5)
+AsNumber = Annotated[int, Field(ge=1, le=4294967295)]
+
 # セッションが運ぶ経路の種類 (NLRI の AFI/SAFI)。トランスポートのアドレスファミリーとは独立 (ADR-0010 Terms)
 AddressFamily = Literal["ipv4_unicast", "ipv6_unicast", "l2vpn_evpn", "vpnv4", "vpnv6"]
 
@@ -36,7 +39,7 @@ class BgpInstanceNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node: Annotated[str, Ref("layer1.nodes")]
-    local_as: int
+    local_as: AsNumber
 
 
 class BgpInstance(BaseModel):
@@ -88,9 +91,10 @@ class BFDConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    min_tx: int = 300       # ms
-    min_rx: int = 300       # ms
-    multiplier: int = 3
+    # 既定値は定めない。書かなければ「書いていない」(どの値になるかは機器の既定値。ADR-0028 D4)
+    min_tx: int | None = Field(default=None, ge=1)              # ms (各社の CLI と同じ。RFC 5880 の packet の上では μs)
+    min_rx: int | None = Field(default=None, ge=1)              # ms
+    multiplier: int | None = Field(default=None, ge=1, le=255)  # Detect Mult は 8 ビット、0 は不正 (RFC 5880 §4.1・§6.8.6)
     nodes: Annotated[list[str], Ref("layer1.nodes")] = []
 
 
@@ -114,7 +118,7 @@ class BgpOutsideEndpoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     address: IPv4Address | IPv6Address       # 相手のホストアドレス (プレフィックス長なし)
-    local_as: int
+    local_as: AsNumber
 
 
 def _endpoint_tag(value: Any) -> str:
@@ -158,9 +162,20 @@ class BgpSession(BaseModel):
     instance: Annotated[str | None, Ref("control_plane.bgp")] = None
     from_: BgpEndpoint = Field(alias="from")
     to: BgpEndpoint
-    address_families: list[AddressFamily] = []
+    address_families: list[AddressFamily] = Field(min_length=1)   # 既定値なし。[ipv4_unicast] で埋めない (ADR-0028 D3)
     bfd: bool = False
     description: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def needs_address_families(cls, data: Any) -> Any:
+        """address_families を書かない・空のセッションに書き方を示すエラーを返す (ADR-0028 D3)"""
+        if isinstance(data, dict) and ("address_families" not in data or data["address_families"] == []):
+            raise ValueError(
+                "BGP のセッションには、運ぶ経路の種類を address_families に 1 つ以上書いてください"
+                " (例: [ipv4_unicast]、EVPN なら [l2vpn_evpn]) (ADR-0028 D3)"
+            )
+        return data
 
     @model_validator(mode="after")
     def one_end_inside(self) -> "BgpSession":
@@ -209,9 +224,20 @@ class IsisAdjacency(BaseModel):
     instance: Annotated[str | None, Ref("control_plane.isis")] = None
     from_: IsisEndpoint = Field(alias="from")
     to: IsisEndpoint
-    level: Literal["level-1", "level-2", "level-all"]       # RFC 9130
+    level: Literal["level_1", "level_2", "level_all"]       # RFC 9130 の level-type の区切りを下線に (ADR-0028 D2)
     bfd: bool = False
     description: str | None = None
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def reject_hyphen_level(cls, v: Any) -> Any:
+        """旧値 level-1 / level-2 / level-all に書き方を示すエラーを返す (ADR-0028 D7)"""
+        if isinstance(v, str) and v in ("level-1", "level-2", "level-all"):
+            raise ValueError(
+                f"IS-IS の level はハイフンではなく下線で書きます: {v} → {v.replace('-', '_')}"
+                " (level_1 / level_2 / level_all) (ADR-0028)"
+            )
+        return v
 
 
 RoutingNeighbor = Annotated[BgpSession | OspfAdjacency | IsisAdjacency, Field(discriminator="type")]

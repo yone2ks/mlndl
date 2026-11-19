@@ -105,7 +105,7 @@ MLAG_L1 = """
   links:
     - {id: link-leaf1-srv1, endpoints: [leaf1-swp1, srv1-eth0]}
     - {id: link-leaf2-srv1, endpoints: [leaf2-swp1, srv1-eth1]}
-  lag:
+  lags:
     - {id: lag-peer, node: leaf1, members: [leaf1-swp49]}
     - {id: lag-leaf1-srv1, node: leaf1, members: [leaf1-swp1]}
     - {id: lag-leaf2-srv1, node: leaf2, members: [leaf2-swp1]}

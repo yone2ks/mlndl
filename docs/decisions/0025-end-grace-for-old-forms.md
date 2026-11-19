@@ -135,6 +135,8 @@ ADR-0014 D4 (移行) はこの ADR の D1 で置き換える。
 
 > **確認 ([ADR-0027](0027-compatibility-promise.md) D7, 2026-11-18)**: 1.0 の後も「読み替えて warning」は既定にしない。移動先を示す error は 2.0 まで残す。
 
+> **改訂 ([ADR-0028](0028-names-and-types.md), 2026-11-20)**: D1 の「移動先を示す error」に、`layer1.lag` / `layer2.vxlan` (→ 複数形)、IS-IS の `level-1` / `level-2` / `level-all` (→ 下線)、`lacp.mode: on` と真偽値 (→ `static`)、`lacp.min_links` (→ LAG の直下) を足した。読み替えはしない。
+
 ## References
 
 - 試し書き: 旧形式と新形式の対 5 組と、OSPF の通り道が食い違う例 (mlndl-example-author。今の挙動で旧形式は warning、新形式は通ることを確かめた)

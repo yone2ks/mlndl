@@ -82,7 +82,7 @@ layer1:
     - {id: r2-eth1, node: r2}
   links:
     - {id: Link-r1-r2, endpoints: [R1-eth0, r2-eth0]}
-  lag:
+  lags:
     - {id: Lag-r1, node: R1, members: [R1-eth0]}
   ethernet_segments:
     - {id: Es-r1-r2, members: [{lag: Lag-r1}, {interface: r2-eth1}]}
@@ -90,7 +90,7 @@ layer2:
   vlans: [{id: Vlan-10, vlan_id: 10}]
   bridges: [{id: Bridge-r2, ports: [{interface: r2-eth0}]}]
   vteps: [{id: Vtep-r1, sources: [R1-lo]}]
-  vxlan:
+  vxlans:
     - {id: Vni-10010, type: l2vni, vni: 10010, vlans: [Vlan-10], vteps: [Vtep-r1]}
   subinterfaces:
     - {id: Subif-r2-eth0-20, attaches_to: {interface: r2-eth0}, vlan_id: 20}
@@ -107,19 +107,19 @@ control_plane:
   isis: [{id: Isis-a, nodes: [{node: R1}, {node: r2}]}]
   bfd: [{id: Bfd-a, nodes: [R1]}]
   routing_neighbors:
-    - {id: Bgp-peer-r1-r2, type: bgp, from: {node: R1, update_source: R1-lo}, to: {node: r2, update_source: r2-lo}}
+    - {id: Bgp-peer-r1-r2, type: bgp, address_families: [ipv4_unicast], from: {node: R1, update_source: R1-lo}, to: {node: r2, update_source: r2-lo}}
 """
 
 EXPECTED_PATHS = {
     "layer1.nodes[0].id",
     "layer1.interfaces[0].id",
     "layer1.links[0].id",
-    "layer1.lag[0].id",
+    "layer1.lags[0].id",
     "layer1.ethernet_segments[0].id",
     "layer2.vlans[0].id",
     "layer2.bridges[0].id",
     "layer2.vteps[0].id",
-    "layer2.vxlan[0].id",
+    "layer2.vxlans[0].id",
     "layer2.subinterfaces[0].id",
     "layer3.vrfs[0].id",
     "layer3.interfaces[0].id",
