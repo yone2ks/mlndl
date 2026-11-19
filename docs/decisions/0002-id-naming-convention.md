@@ -152,6 +152,8 @@ NetBox / neteye からのアダプターは次のルールを守る:
 > `validate(topology)` → error のみの list（従来どおり）/ `validate_all(topology, strict=False)` →
 > `ValidationResult(errors, warnings, notes)`。CLI は `python -m mlndl validate [--strict]`。
 
+> **改訂 ([ADR-0027](0027-compatibility-promise.md), 2026-11-18)**: severity (error / warning / info) の意味を 1.0 の約束に入れた。severity を上げる・下げるときの条件は ADR-0027 D2・D3 に従う。
+
 ## Consequences
 
 ### 影響範囲

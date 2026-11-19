@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import mlndl
-from mlndl import parse, parse_file, validate
+from mlndl import UnsupportedVersionError, __version__, parse, parse_file, validate
 from mlndl.exporter import cytoscape, yaml as yaml_exporter
 from mlndl.schema.layer1 import EthernetSegment, Lag
 
@@ -66,7 +66,12 @@ class TestParser:
         assert es.redundancy_mode is None       # 既定値で埋めない (ADR-0023 D4)
 
     def test_parse_empty_yaml(self):
-        t = parse(b"")
+        """空の YAML は ndl_version がないので error (ADR-0027 D5)"""
+        with pytest.raises(ValueError, match="ndl_version は必須です"):
+            parse(b"")
+
+    def test_parse_minimal_yaml(self):
+        t = parse(b'ndl_version: "1.0"\n')
         assert t.ndl_version == "1.0"
         assert t.layer1 is None
 
@@ -81,12 +86,13 @@ class TestParser:
 
 class TestVersionCheck:
     def test_version_2_raises(self):
-        with pytest.raises(Exception, match="バージョン"):
+        with pytest.raises(UnsupportedVersionError, match="ndl_version 2.0 以上を必要とします"):
             parse(b'ndl_version: "2.0"\n')
 
-    def test_version_1_1_ok(self):
-        t = parse(b'ndl_version: "1.1"\n')
-        assert t.ndl_version == "1.1"
+    def test_newer_minor_raises(self):
+        """この mlndl が知らないマイナー (ADR-0027 D5)。詳しくは test_versions.py"""
+        with pytest.raises(UnsupportedVersionError):
+            parse(b'ndl_version: "1.1"\n')
 
     def test_invalid_version_format_raises(self):
         with pytest.raises(Exception):
@@ -321,7 +327,7 @@ class TestCytoscapeExporter:
     def test_export_empty_topology(self):
         t = parse(b'ndl_version: "1.0"\n')
         result = cytoscape.export(t)
-        assert result == {"nodes": [], "edges": []}
+        assert result == {"meta": {"ndl_version": "1.0", "mlndl_version": __version__}, "nodes": [], "edges": []}
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ from .layer1 import L1Layer
 from .layer2 import L2Layer
 from .layer3 import L3Layer
 from .control_plane import ControlPlane, legacy_control_plane_errors
+from ..version import check_ndl_version
 
 
 class Meta(BaseModel):
@@ -24,7 +25,7 @@ class MLNDLTopology(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    ndl_version: str = "1.0"
+    ndl_version: str                    # 必須。"<メジャー>.<マイナー>" の文字列 (ADR-0027 D5)
     meta: Meta | None = None
     layer1: L1Layer | None = None
     layer2: L2Layer | None = None
@@ -34,18 +35,9 @@ class MLNDLTopology(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_version(cls, data: object) -> object:
-        """ndl_version のメジャーバージョンが 1 であることを確認"""
-        if not isinstance(data, dict):
-            return data
-        ver = str(data.get("ndl_version", "1.0"))
-        try:
-            major = int(ver.split(".")[0])
-        except (ValueError, IndexError):
-            raise ValueError(f"ndl_version のフォーマットが不正です: {ver!r}")
-        if major != 1:
-            raise ValueError(
-                f"サポートされていない MLNDL バージョン: {ver!r}。1.x が必要です"
-            )
+        """ndl_version の検査 (ADR-0027 D5)。parse() は pydantic に渡す前に同じ検査をする。
+        ここはモデルを直接作るとき (model_validate) のための保険"""
+        check_ndl_version(data)
         return data
 
     @model_validator(mode="before")

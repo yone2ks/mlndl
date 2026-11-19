@@ -1,0 +1,65 @@
+# 場面 B2: `ndl_version: "1.1"` で L3 IF の `mtu` を書いた YAML — 1.0 の mlndl と 1.1 の mlndl で読む
+#
+# 時系列:
+#   - 1.1 の mlndl がリリースされ、`layer3.interfaces[].mtu` (任意、整数) が加算された。
+#   - 利用者 A は 1.1 対応の mlndl を使い、新しい YAML に `ndl_version: "1.1"` と書き、`mtu: 9000` を足した。
+#   - 利用者 B はまだ 1.0 の mlndl を使っている。A から渡された YAML を読もうとする。
+#
+# ドラフト (ADR-0027) どおり実装したらどうなるはずか:
+#
+# 1.1 の mlndl で読んだとき (利用者 A の環境):
+#   - D5: `ndl_version: "1.1"` は 1.1 の mlndl が読める範囲 (`LANGUAGE_VERSION == "1.1"`) の上限と一致。版の error は出ない。
+#   - D2: 1.1 で加算した `mtu` は `extra="forbid"` の対象外なので受け付ける。error / warning なし。
+#     (ただし B3 で足す「IPv6 で mtu < 1280」のような新しい検査には、該当すれば引っかかる。
+#      この YAML の `mtu: 9000` は 1280 以上なので引っかからない)
+#
+# 1.0 の mlndl で読んだとき (利用者 B の環境):
+#   - D5: 読み込みの最初に `ndl_version` のマイナー番号を比べる。`"1.1"` > `LANGUAGE_VERSION == "1.0"`
+#     なので、**版の違いを知らせる 1 本の error で止める**。未知のキー (`mtu`) の error は出さない:
+#
+#         > この YAML は ndl_version 1.1 で書かれていますが、この mlndl が読めるのは 1.0 までです。
+#         > mlndl を更新してください (ADR-0027)
+#
+#   - D5 の規則で「未知のキー」 error より**先に**この version 比較を行う。これがないと、利用者は
+#     `mtu` の未知キー error を見て書き損じと誤認する (ドラフトの Context の第 2 項目の穴)。
+#
+# この場面で確かめたいこと:
+#   - 「古い mlndl は、新しい版の YAML を読めない。版の違いを知らせて止まる」(D8) の約束が働く位置。
+#   - 未知のキー検査よりも前に版比較を行う実装上の順序 (Consequences の「`extra="forbid"` の検査より前に」)。
+#   - メッセージが「原因 (版違い) と直し方 (mlndl を上げる)」を 1 行で結ぶかの確認。
+#
+# 書いていて迷った点:
+#   - このメッセージは 1 行で済むが、「どのキーが 1.1 のものなのか」までは出さない。D5 の既定どおり。
+#     ドラフト本文には「1.1 の予約語一覧を覚えておけば案内できる」(Pass A の C3) とあるが D5 は決めていない。
+#     Pass B の論点の 1 つ: ユーザーが「何が 1.1 由来のキーだったのか」を後から追う手段 (リリースノートへの
+#     リンク?) を error メッセージに含めるか。
+
+ndl_version: "1.1"
+
+meta:
+  name: b2-ndl-1-1-with-mtu
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay }
+
+layer3:
+  interfaces:
+    - id: spine1-swp1-l3
+      node: spine1
+      name: swp1
+      attaches_to: { interface: spine1-swp1 }
+      ip: 10.1.0.0/31
+      mtu: 9000              # 1.1 で加算された想定の任意フィールド
+    - id: leaf1-swp51-l3
+      node: leaf1
+      name: swp51
+      attaches_to: { interface: leaf1-swp51 }
+      ip: 10.1.0.1/31
+      mtu: 9000

@@ -120,6 +120,8 @@ index.ids("layer2.vxlan", ("type", "l3vni"))    # → {"vni-10900"}
 - **参照以外の制約も宣言にする** (network-tech-reviewer): 見送り — 範囲外
 - **スキーマの外部定義**: 却下 — 範囲外
 
+> **改訂 ([ADR-0027](0027-compatibility-promise.md), 2026-11-18)**: `Ref` を公開の API に入れた。`Ref` の検査は 1.x の間、同じ条件で同じ結果 (文面は除く) を返す。新しいコレクションへの `Ref` を足すのは加算。
+
 ## References
 
 - 試し書き: `evaluations/declarative-refs/comparison.md` (MLAG の peer-keepalive と BUM 配送方式を足す作業の比較)

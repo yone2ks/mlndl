@@ -14,6 +14,7 @@ import yaml
 
 from .constants import MAX_TOPOLOGY_BYTES
 from .schema.topology import MLNDLTopology
+from .version import check_ndl_version
 
 
 class _SafeLoader(yaml.SafeLoader):
@@ -51,7 +52,8 @@ def parse(source: str | bytes) -> MLNDLTopology:
         MLNDLTopology インスタンス
 
     Raises:
-        ValueError: サイズ超過 / バージョン不正
+        UnsupportedVersionError: YAML の ndl_version がこの mlndl より新しい (ValueError のサブクラス。ADR-0027 D5)
+        ValueError: サイズ超過 / ndl_version がない・書式が違う
         pydantic.ValidationError: スキーマ検証エラー
         yaml.YAMLError: YAML 構文エラー、同じマッピングでのキーの重複
     """
@@ -73,6 +75,9 @@ def parse(source: str | bytes) -> MLNDLTopology:
     if data is None:
         data = {}
 
+    # ndl_version は pydantic に渡す前に見る。新しいバージョンの YAML の未知のキーの error より先に、
+    # バージョンの違いを 1 本の error で知らせるため (ADR-0027 D5)
+    check_ndl_version(data)
     return MLNDLTopology.model_validate(data)
 
 

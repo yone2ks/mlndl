@@ -1,0 +1,87 @@
+# 場面 P4 (案 b): 名前の直しの後の小さな完全な例 — linguist の対案
+#
+# 案 b の選択 (評価メモ「残る論点」1):
+#   - `layer2.vxlan`  → `layer2.vnis`    (中身は VNI のエントリで `vteps` と並ぶ。linguist 案)
+#   - IS-IS の値     → `level_1` / `level_2` / `level_1_2`   (「Level 1-2」の CLI 慣用。linguist 案)
+#
+# ねらい:
+#   - P4a と同じ構成の例を、名前だけを差し替えて書く。書き心地の差 (単独のセマンティクスと
+#     他のキーとの並び) を Handback で報告する。
+#
+# この YAML の構成: 2 leaf + 1 server の EVPN-VXLAN。backbone に IS-IS Level 1-2 (境界ノードの想定)。
+# ── 技術的な補足: Level 1-2 は Level 1 と Level 2 を**両方**喋るノードに付く値。P4a の `level_2` は
+#    単独で意味を持つが、`level_1_2` は「2 つの level を同時に処理する」意味なので、意味論の階層が
+#    実は違う (3 値の列挙なのに 1 値だけ合成)。このあとの Handback の比較で指摘する。
+
+ndl_version: "1.0"
+
+meta:
+  name: p4b-vnis-level-combined
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: server1, name: Server-1, implementation: physical, role: server }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf1-swp2, node: leaf1, name: swp2 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+    - { id: leaf2-swp2, node: leaf2, name: swp2 }
+    - { id: server1-eth0, node: server1, name: eth0 }
+    - { id: server1-eth1, node: server1, name: eth1 }
+
+  links:
+    - { id: link-leaf1-server1, endpoints: [leaf1-swp1, server1-eth0], link_speed: 10G }
+    - { id: link-leaf2-server1, endpoints: [leaf2-swp1, server1-eth1], link_speed: 10G }
+    - { id: link-leaf1-leaf2,   endpoints: [leaf1-swp2, leaf2-swp2], link_speed: 10G }
+
+  lags:
+    - { id: lag-leaf1-server1, node: leaf1, name: bond1, members: [leaf1-swp1], lacp: {mode: active} }
+    - { id: lag-leaf2-server1, node: leaf2, name: bond1, members: [leaf2-swp1], lacp: {mode: active} }
+
+  ethernet_segments:
+    - id: es-server1
+      members:
+        - { lag: lag-leaf1-server1 }
+        - { lag: lag-leaf2-server1 }
+
+layer2:
+  vlans:
+    - { id: vlan-100, vlan_id: 100, trunk_ports: [{ ethernet_segment: es-server1 }] }
+
+  vteps:
+    - { id: vtep-leaf1-leaf2, sources: [leaf1-lo, leaf2-lo], address: 10.0.100.12/32 }
+
+  # ↓ 改名後 (案 b): `vnis` (エントリの中身は VNI。`vteps` と並ぶ)
+  vnis:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100              # ← 書き心地: `vnis[].vni` は語の重複が目立つ (「vnis[].vni」)。
+                              #    `vxlans[].vni` だと重複は VXLAN と VNI の関係で理解されやすい。
+      vlans: [vlan-100]
+      vteps: [vtep-leaf1-leaf2]
+
+layer3:
+  interfaces:
+    - { id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32 }
+    - { id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32 }
+    - { id: leaf1-swp2-l3, node: leaf1, name: swp2, attaches_to: {interface: leaf1-swp2}, ip: 10.1.0.0/31 }
+    - { id: leaf2-swp2-l3, node: leaf2, name: swp2, attaches_to: {interface: leaf2-swp2}, ip: 10.1.0.1/31 }
+
+control_plane:
+  isis:
+    - id: isis-core
+      nodes: [{ node: leaf1 }, { node: leaf2 }]
+
+  routing_neighbors:
+    - id: isis-adj-leaf1-leaf2
+      type: isis
+      instance: isis-core
+      from: { node: leaf1, interface: leaf1-swp2 }
+      to:   { node: leaf2, interface: leaf2-swp2 }
+      # ↓ 改名後 (案 b): `level_1_2` (CLI の慣用 "Level 1-2" を下線に)
+      # ── Level 1-2 の想定: このノードは Level 1 と Level 2 の両方を喋る境界ルータ。
+      #    P4a (`level_2`) とは意味が違う (隣接が L2 のみ vs. ノードが L1 と L2 の両方)。
+      level: level_1_2

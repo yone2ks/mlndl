@@ -1,0 +1,52 @@
+# 場面 P1: `ndl_version` を引用符なしで `1.0` と書いた
+#
+# 利用者の視点:
+#   - 「`ndl_version` は書くけれど、YAML のクォートのルールに疎い」人。
+#   - 数値のように見えるものはついクォートなしで書いてしまう (`port: 22` と同じ流儀)。
+#
+# 今の mlndl (1.0) で読むとどうなるか (評価メモで統合担当が確かめた):
+#   - YAML が `1.0` を **float として** 読み、pydantic に `float(1.0)` が渡る。
+#   - `ndl_version: str` なので、
+#         Input should be a valid string [input_value=1.1]
+#     の pydantic メッセージで error (混乱する — 書いたのは `1.0` なのに表示は `1.1`、
+#     これは `1.10` を書いたときに `1.1` と読まれるのと同じ現象)。
+#   - version 比較のバリデータ (`check_version`) は `str(data.get(...))` で文字列化しているので
+#     `"1.0"` として通るが、pydantic の型検査のほうで引っかかって error になる (順序)。
+#
+# 利用者向けの約束 (ADR-0027 Pass C の案) で、この場面がどう救われるか:
+#   - D5 の規則「`ndl_version` は文字列、書式 `^\d+\.\d+$`、数値で書いたら『引用符で囲む』専用の
+#     error」が働く。利用者のメッセージは次のような 1 行:
+#
+#         > ndl_version はクォートで囲んだ文字列で書いてください (例: ndl_version: "1.0")。
+#         > YAML は 1.0 を数値として読むため、引用符がないとバージョンとして扱えません。
+#
+#   - このメッセージは pydantic の既定の `input_value=1.1` よりも原因と直し方が明確。
+#     特に `1.10` と `1.1` の違い (0 の脱落) を気にする利用者には重要。
+#
+# 利用者向けの短い説明に書くべきこと (この場面から):
+#   - 「`ndl_version` はダブルクォートで囲む。数値ではなく文字列です」を見本のすぐ横に添える。
+#   - P1 の感触: 「書き忘れ」よりも「クォート忘れ」のほうが起きやすいので、
+#     説明は「必須」よりも「クォート付きで書く」を主に書いたほうが実用的。
+#
+# この場面で確かめたいこと:
+#   - D5 の専用 error の文面案 (「ndl_version: "1.0" のようにクォートで囲む」) が 1.10/1.1 問題を
+#     含めて分かりやすいか。
+#   - P1 の 1 本の例が、利用者向けの約束の章 (「YAML の書き方」) の冒頭の見本として使えるか。
+
+ndl_version: 1.0            # ← クォートなし。YAML は float(1.0) として読む。
+                            # 期待: 専用の error 1 本 (「"1.0" のようにクォートで囲んでください」)
+
+meta:
+  name: p1-ndl-version-unquoted
+
+layer1:
+  nodes:
+    - { id: leaf1, name: Leaf-1, implementation: vm, role: leaf, device_type: cumulus_linux }
+    - { id: leaf2, name: Leaf-2, implementation: vm, role: leaf, device_type: cumulus_linux }
+
+  interfaces:
+    - { id: leaf1-swp1, node: leaf1, name: swp1 }
+    - { id: leaf2-swp1, node: leaf2, name: swp1 }
+
+  links:
+    - { id: link-leaf1-leaf2, endpoints: [leaf1-swp1, leaf2-swp1], link_speed: 10G }

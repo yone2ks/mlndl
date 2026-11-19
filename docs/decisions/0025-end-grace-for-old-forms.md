@@ -133,6 +133,8 @@ ADR-0014 D4 (移行) はこの ADR の D1 で置き換える。
 - **OSPF / IS-IS の食い違いだけ warning のまま残す**: 同じ「食い違い」の語が BGP と OSPF で別の重さになる (mlndl-linguist)。誤検知もない (D2)
 - **`lo_ip` を役割から選び直して残す** (VTEP の source → update_source の順など): 推定であることは変わらない。選び方はビューワの表示の判断で、言語の出力にしない
 
+> **確認 ([ADR-0027](0027-compatibility-promise.md) D7, 2026-11-18)**: 1.0 の後も「読み替えて warning」は既定にしない。移動先を示す error は 2.0 まで残す。
+
 ## References
 
 - 試し書き: 旧形式と新形式の対 5 組と、OSPF の通り道が食い違う例 (mlndl-example-author。今の挙動で旧形式は warning、新形式は通ることを確かめた)

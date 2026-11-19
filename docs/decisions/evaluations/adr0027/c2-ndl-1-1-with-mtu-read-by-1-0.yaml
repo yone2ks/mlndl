@@ -1,0 +1,67 @@
+# 場面 C2: 1.1 で `layer3.interfaces[].mtu` が足された想定の YAML を、1.0 の mlndl で読む
+#
+# 想定: ADR-0027 の後、1.1 で L3 IF に任意フィールド `mtu` (整数) を加算した。
+#       利用者は 1.1 対応の mlndl で書いた YAML を、まだ更新していない 1.0 の mlndl に食わせてしまった。
+#
+# 今の mlndl (1.0) で読むとどうなるか:
+#   - L3Interface は `extra="forbid"` (`layer3.py` の `ConfigDict`)。
+#   - `mtu` は「決められたキーにない」ので pydantic が「Extra inputs are not permitted」で拒む。
+#   - `ndl_version: "1.1"` は `check_version` の主番号チェック (1.x) を通るので、版違いの手がかりは
+#     mlndl からは出ない。利用者から見ると「1.1 と書いた覚えのあるキーが拒まれた。版が合ってない?」が
+#     自力で気付かないと分からない (棚卸し §1 の第 2 項目)。
+#
+# 利用者としてほしいこと:
+#   - 「あなたの mlndl は 1.0 までしか読めません。この YAML は 1.1 です。mlndl を上げるか、1.1 のキーを
+#      外してください」という、原因と直し方が同じ 1 行に書かれた error。
+#
+# 約束の案ごとに「どうあるべきか」:
+#   (a) 前方互換を error のまま: 今と同じ。`mtu` が未知のキーとして error になる。
+#       「このパッケージが古い」というメタ情報は出ない。利用者は綴り誤りと誤認しがち。
+#   (b) 新しい版だと知らせて止める: 読み込みの最初に `ndl_version` のマイナー番号を
+#       パッケージが宣言するマイナー番号と比べ、宣言より新しければ 1 本の error でそれだけを言う
+#       (個々のキーの未知エラーは出さない)。例:
+#         「この YAML は 1.1 として書かれていますが、このパッケージは 1.0 までです。
+#          mlndl を 1.1 以降に上げてください」
+#       → 原因と直し方が利用者の視点で一致する。
+#   (c) 未知のキーを warning にして読み進める: `mtu` を未知フィールドとして握りつぶし、残りの
+#       検査は通す。1.1 のセマンティクスが「`mtu < path MTU` で検査」のような**検査の追加**なら、
+#       それは 1.0 で見過ごされる。読み込みは通るが意味が落ちる。
+#
+# example-author の推奨: (b)。(a) に対して「版の違い」を一箇所でまとめて説明するので、利用者の
+# 当惑が少ない。(c) は、同じキー名で意味を広げる変更 (1.x で許す) と、未知キーの握りつぶしが
+# 区別できなくなるので、採らない方がよい。
+# ただし「版が新しい」を error にしても、どの新キーが何なのかの情報は失う。(b) に (a) の
+# 「未知キー一覧」も重ねて出すのが親切。
+
+ndl_version: "1.1"
+
+meta:
+  name: ndl-1-1-with-mtu
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+  links:
+    - id: link-spine1-leaf1
+      endpoints: [spine1-swp1, leaf1-swp51]
+      link_speed: 10G
+      link_role: underlay
+
+layer3:
+  interfaces:
+    - id: spine1-swp1-l3
+      node: spine1
+      name: swp1
+      attaches_to: { interface: spine1-swp1 }
+      ip: 10.1.0.0/31
+      mtu: 9000              # 1.1 で加算した想定の任意フィールド。1.0 の mlndl では未知のキー
+    - id: leaf1-swp51-l3
+      node: leaf1
+      name: swp51
+      attaches_to: { interface: leaf1-swp51 }
+      ip: 10.1.0.1/31
+      mtu: 9000

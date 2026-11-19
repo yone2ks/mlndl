@@ -1,0 +1,122 @@
+# 小さな 2 拠点の企業網 (L1〜L3 + OSPF)
+#
+# 書いたもの:
+#   - tokyo: rtr-a (border) + sw-a1 (access) + host-a1 (server)
+#   - osaka: rtr-b (border) + sw-b1 (access) + host-b1 (server)
+#   - 拠点間は専用線 1 本 (rtr-a ↔ rtr-b)。拠点の中はトランク 1 本
+#   - 各拠点のユーザー VLAN (100 / 200) と、ルーター上の SVI
+#   - 拠点間で OSPF (area 0)
+#
+# この例は docs/reference/ の中だけを見て書いたもの。初めて MLNDL を触るつもりで
+# どこまで読めば書けるかを試した。書きにくかった点は release-1.0-stocktake.md へ。
+ndl_version: "1.0"
+
+meta:
+  name: small-2sites-ospf
+  description: Two-office enterprise WAN with OSPF across a leased line
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    # ── tokyo ───────────────────────────────────────────────────────────
+    - {id: rtr-a,   name: RTR-A,   role: border, implementation: physical, device_type: cisco_isr4321, labels: {site: tokyo}}
+    - {id: sw-a1,   name: SW-A1,   role: access, implementation: physical, device_type: cisco_catalyst_9300, labels: {site: tokyo}}
+    - {id: host-a1, name: Host-A1, role: server, implementation: physical, labels: {site: tokyo}}
+    # ── osaka ───────────────────────────────────────────────────────────
+    - {id: rtr-b,   name: RTR-B,   role: border, implementation: physical, device_type: cisco_isr4321, labels: {site: osaka}}
+    - {id: sw-b1,   name: SW-B1,   role: access, implementation: physical, device_type: cisco_catalyst_9300, labels: {site: osaka}}
+    - {id: host-b1, name: Host-B1, role: server, implementation: physical, labels: {site: osaka}}
+
+  interfaces:
+    # rtr-a
+    - {id: rtr-a-ge0-0, node: rtr-a, name: Ge0/0}   # → WAN
+    - {id: rtr-a-ge0-1, node: rtr-a, name: Ge0/1}   # → sw-a1 (trunk)
+    # sw-a1
+    - {id: sw-a1-gi0-1,  node: sw-a1, name: Gi0/1}   # → rtr-a (trunk)
+    - {id: sw-a1-gi0-10, node: sw-a1, name: Gi0/10}  # → host-a1 (access)
+    # rtr-b
+    - {id: rtr-b-ge0-0, node: rtr-b, name: Ge0/0}   # → WAN
+    - {id: rtr-b-ge0-1, node: rtr-b, name: Ge0/1}   # → sw-b1 (trunk)
+    # sw-b1
+    - {id: sw-b1-gi0-1,  node: sw-b1, name: Gi0/1}   # → rtr-b (trunk)
+    - {id: sw-b1-gi0-10, node: sw-b1, name: Gi0/10}  # → host-b1 (access)
+    # hosts
+    - {id: host-a1-eth0, node: host-a1, name: eth0}
+    - {id: host-b1-eth0, node: host-b1, name: eth0}
+
+  links:
+    # 拠点間の専用線
+    - id: link-rtr-a-rtr-b
+      endpoints: [rtr-a-ge0-0, rtr-b-ge0-0]
+      link_speed: 100M
+      description: NTT leased line, circuit NT-00001, 100 Mbps guaranteed
+    # 拠点の中
+    - {id: link-rtr-a-sw-a1, endpoints: [rtr-a-ge0-1, sw-a1-gi0-1], link_speed: 1G, link_role: trunk}
+    - {id: link-sw-a1-host,  endpoints: [sw-a1-gi0-10, host-a1-eth0], link_speed: 1G, link_role: access}
+    - {id: link-rtr-b-sw-b1, endpoints: [rtr-b-ge0-1, sw-b1-gi0-1], link_speed: 1G, link_role: trunk}
+    - {id: link-sw-b1-host,  endpoints: [sw-b1-gi0-10, host-b1-eth0], link_speed: 1G, link_role: access}
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: users-tokyo
+      trunk_ports:
+        - {interface: rtr-a-ge0-1}
+        - {interface: sw-a1-gi0-1}
+      access_ports:
+        - {interface: sw-a1-gi0-10}
+    - id: vlan-200
+      vlan_id: 200
+      name: users-osaka
+      trunk_ports:
+        - {interface: rtr-b-ge0-1}
+        - {interface: sw-b1-gi0-1}
+      access_ports:
+        - {interface: sw-b1-gi0-10}
+
+layer3:
+  vrfs:
+    - {id: vrf-default}
+
+  interfaces:
+    # ── ループバック (OSPF の router-id / update-source) ───────────────
+    - {id: rtr-a-lo, node: rtr-a, name: Loopback0, ip: 10.255.0.1/32, vrf: vrf-default}
+    - {id: rtr-b-lo, node: rtr-b, name: Loopback0, ip: 10.255.0.2/32, vrf: vrf-default}
+
+    # ── 拠点間の P2P /30 ──────────────────────────────────────────────
+    - {id: rtr-a-ge0-0-l3, node: rtr-a, name: Ge0/0, ip: 10.0.0.1/30, vrf: vrf-default, attaches_to: {interface: rtr-a-ge0-0}}
+    - {id: rtr-b-ge0-0-l3, node: rtr-b, name: Ge0/0, ip: 10.0.0.2/30, vrf: vrf-default, attaches_to: {interface: rtr-b-ge0-0}}
+
+    # ── SVI (各拠点のユーザー VLAN のゲートウェイ) ───────────────────
+    - id: rtr-a-vlan-100
+      node: rtr-a
+      name: Vlan100
+      attaches_to: {vlan: vlan-100}
+      ip: 192.168.100.1/24
+      vrf: vrf-default
+    - id: rtr-b-vlan-200
+      node: rtr-b
+      name: Vlan200
+      attaches_to: {vlan: vlan-200}
+      ip: 192.168.200.1/24
+      vrf: vrf-default
+
+    # ── ホストの IP (VLAN の端点として、validator が照合する) ────────
+    - {id: host-a1-eth0-l3, node: host-a1, name: eth0, ip: 192.168.100.10/24, attaches_to: {interface: host-a1-eth0}}
+    - {id: host-b1-eth0-l3, node: host-b1, name: eth0, ip: 192.168.200.10/24, attaches_to: {interface: host-b1-eth0}}
+
+control_plane:
+  ospf:
+    - id: ospf-wan
+      nodes:
+        - {node: rtr-a}
+        - {node: rtr-b}
+
+  routing_neighbors:
+    # 拠点間の OSPF (直結の /30 の上)
+    - id: ospf-adj-rtr-a-rtr-b
+      type: ospf
+      from: {node: rtr-a, interface: rtr-a-ge0-0-l3}
+      to:   {node: rtr-b, interface: rtr-b-ge0-0-l3}
+      area: "0.0.0.0"

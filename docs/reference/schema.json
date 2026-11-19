@@ -2205,7 +2205,6 @@
   "additionalProperties": false,
   "properties": {
     "ndl_version": {
-      "default": "1.0",
       "title": "Ndl Version",
       "type": "string"
     },
@@ -2265,5 +2264,8 @@
       "default": null
     }
   },
+  "required": [
+    "ndl_version"
+  ],
   "type": "object"
 }

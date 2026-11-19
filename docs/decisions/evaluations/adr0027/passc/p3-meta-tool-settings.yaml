@@ -1,0 +1,83 @@
+# 場面 P3: `meta` に下流のツールの設定を書きたい
+#
+# 利用者の視点:
+#   - ndl-viz や eve-lab-builder にツール固有の設定 (レイアウトのヒント、ラボのテンプレート選択) を
+#     渡したい。mlndl の構文には足したくないので、`meta` に書きたい。
+#   - `meta` は `extra="allow"` (`topology.py:16`) なので、未知のキーを受け付ける。
+#   - 評価メモ: 「入力の `meta.<ツール名>` はエクスポーターの出力に流れない」(D7)。
+#     → 入力側の `meta` は「書ける窓口」で、ツール側は入力 YAML から独自に読む。
+#
+# どのキー名なら「安全」か (= 1.x の間、mlndl に取り上げられる心配がない):
+#
+#   候補 A: `meta.ndl-viz`、`meta.eve-lab-builder`  (ハイフン区切り)
+#     - ADR-0002 D1 の ID 正規表現 `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` に従う。
+#     - ツール名の公式表記 (`ndl-viz`・`eve-lab-builder`) と一致。
+#     - 欠点: Python の属性アクセス (`topology.meta.ndl-viz`) で書けない。YAML / JSON のキーとしては正しい。
+#
+#   候補 B: `meta.ndl_viz`、`meta.eve_lab_builder`  (下線区切り)
+#     - IS-IS の `level_2` や `address_families` の値と形がそろう (下線区切り)。
+#     - Python の属性アクセスでも書ける。
+#     - 欠点: ツール名の公式表記 (ハイフン) と形が違う。
+#
+#   候補 C: `meta.x-ndl-viz`、`meta.x-eve-lab-builder`  (HTTP ヘッダの慣用 `X-` に倣う)
+#     - 「将来も mlndl は取り上げない」を名前で主張。
+#     - 欠点: mlndl のほかの場所に `x-` の先例がなく、1 か所だけ慣用を持ち込むのは筋が悪い。
+#
+# ADR-0027 Pass C の約束の案 (この場面から):
+#   - D1 で「規範キー」の章に、入力の `meta` も **参考** として挙げる (規範ではない。好きなキーを書ける)。
+#   - D7「`meta` だけが未知のキーを受け付ける」を明記したうえで、informative な指針として:
+#       (a) 推奨はハイフン区切りのツール名 (`meta.ndl-viz`)。ADR-0002 D1 に従う。
+#       (b) mlndl が `meta` に将来足す予約語は、**最上位のキーに単語 1 語** (例: `meta.name`、
+#           `meta.network_types`、将来の `meta.description`)。ツール名はハイフンを含むので衝突しにくい。
+#       (c) 利用者向けの約束の章に「`meta.<ハイフン区切りのツール名>` は 1.x で取り上げない」と
+#           書くと、下流のツールが安心して自分の名前空間を広げられる。
+#
+# 書いていて迷った点 (ドラフトへの feedback):
+#   - mlndl コアと ndl-viz が同じリポジトリに別パッケージであるので、`meta.ndl-viz` を
+#     mlndl 側の文書で予約するのは正直で分かりやすい (ユーザーが混乱しない)。
+#   - ただし「mlndl が 1.1 で `meta.ndl-viz` という**単語 1 語**のキーを足したくなる」ことは
+#     ほぼ起きない (ハイフンを含む予約語を mlndl は持たない)。これを D7 に明文化しておくと、
+#     ツール名をキー名にする慣用が安全だと利用者が判断できる。
+#   - ADR-0024 の「ツール向けの汎用の欄は 1.x では足さない」とも整合する。`meta.<tool>` は
+#     ノードの `overrides` に似ているが、スコープがトポロジー全体なので型は `dict[str, Any]` を
+#     許してよい (下流のツールが解釈する)。
+
+ndl_version: "1.0"
+
+meta:
+  name: p3-meta-tool-settings
+  network_types: [l1-physical]
+
+  # ─ 利用者が書いた、下流のツール向けのメタ情報。mlndl はパースしない ──────
+  # 推奨 (候補 A): ハイフン区切りのツール名を最上位のキーに。
+  ndl-viz:
+    layout: cose-bilkent
+    node_color_by: role
+    edge_bundle: true
+
+  eve-lab-builder:
+    template_overrides:
+      cumulus_linux:
+        cpu: 4
+        ram: 4096
+      arista_eos:
+        image: ceos-lab:4.32.0F
+
+  # 利用者ごとの自由なキーも書ける (ADR-0024 で外した `overrides` の代わりではなく、
+  # 「トポロジー全体のメタ情報」として)。
+  author: netops-team
+  created: "2026-11-18"
+  ticket: NET-1234
+  tags: [lab, dc, poc]
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay }

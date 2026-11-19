@@ -1,0 +1,57 @@
+# 場面 P2: `ndl_version: "1.1"` と書いたが、1.1 のキーは一つも使っていない
+#
+# 利用者の視点:
+#   - 「版は常に最新のものを書く」というルーチン (CI/CD のテンプレートに埋め込み) で、
+#     mlndl を 1.1 に上げたタイミングで YAML テンプレートの `ndl_version` も `"1.1"` に書き換えた。
+#   - YAML の中身は 1.0 の範囲の機能しか使っていない (1.1 で加算された任意フィールドを何も書いていない)。
+#
+# 今の mlndl (1.0) で読むとどうなるか:
+#   - `check_version` (`topology.py:36-49`) は major が 1 であることだけ見るので、`"1.1"` は通る。
+#   - YAML の中身に未知のキーはないので `extra="forbid"` にも引っかからず、valid になる。
+#   - ただし「1.1 で足したキーが使われているかどうか」の検査は今は何もない。
+#
+# ドラフトの D5 の規則「読むのに要る、最も古い mlndl のバージョン」の読み方で、この場面は:
+#   - 利用者は「読むのに要るのは 1.0」なのに `"1.1"` と書いた (= 必要以上に大きい版を書いた)。
+#   - 利用者向けの短い説明に書くべき定義:
+#         ndl_version は「この YAML を読むのに要る、最も古い mlndl のバージョン」。
+#         1.1 でしか読めないキーを一つも使っていないなら "1.0" で書いてよい。
+#     ──これは「書いたときの mlndl のバージョン」と**誤読される**ので、example-author は
+#     evaluation の linguist 指摘 (D5 の定義の直し) を踏襲する。
+#
+#   - ADR-0027 Pass C の約束の案: この YAML は 1.0 の mlndl でも 1.1 の mlndl でも **valid**。
+#     「1.1 と書いたが 1.0 のキーしか使っていない」ことに mlndl は何も言わない (**約束しない**)。
+#     これは加算的変更の立場からは自然 (より新しい版で書くのは利用者の自由)。
+#
+# 1.0 の mlndl で読むとどうなるか (後方互換ではなく「未来の YAML」):
+#   - D5: `"1.1"` > `LANGUAGE_VERSION == "1.0"` なので、版の違いの error で止める。
+#         > この YAML は ndl_version 1.1 で書かれていますが、この mlndl が読めるのは 1.0 までです。
+#         > mlndl を更新するか、1.1 のキーを使っていないなら ndl_version を "1.0" に下げてください。
+#   - **「下げてください」を error の末尾に添える案** — 評価メモの「採らなかった指摘」ではなく、
+#     D5 の文面に書き込む価値がある (P2 が実例)。利用者が機械的にバージョンを上げている場面を救う。
+#
+# 書いていて迷った点 (ドラフトへの feedback):
+#   - D5 の定義「読むのに要る最も古いバージョン」は厳密だが、普段は「今の mlndl の版を書く」
+#     人が多い。CLI か文書に「`mlndl validate --suggest-ndl-version` で下限を調べる」案内があると
+#     親切だが、1.0 の作業で足すのは重すぎる。利用者向けの説明に **「1.0 で書いていい」**
+#     の 1 行を入れるだけでよい。
+#   - 「必要以上に大きい版を書いた」を info で知らせるかは、Pass C の範囲外。上の「約束しない」で
+#     充分 (D4 の warning 以下を足すのは 1.x で許すので、要るなら 1.1 で加算)。
+
+ndl_version: "1.1"           # ← 1.0 の mlndl では「版が合わない」error、1.1 以降の mlndl では valid
+
+meta:
+  name: p2-only-1-0-keys
+
+layer1:
+  nodes:
+    - { id: spine1, name: Spine-1, implementation: vm, role: spine, device_type: cumulus_linux }
+    - { id: leaf1,  name: Leaf-1,  implementation: vm, role: leaf,  device_type: cumulus_linux }
+
+  interfaces:
+    - { id: spine1-swp1, node: spine1, name: swp1 }
+    - { id: leaf1-swp51, node: leaf1,  name: swp51 }
+
+  links:
+    - { id: link-spine1-leaf1, endpoints: [spine1-swp1, leaf1-swp51], link_speed: 10G, link_role: underlay }
+
+# ↑ 1.1 で足した任意フィールド (mtu など) は一つも書いていない。中身は 1.0 の範囲。
