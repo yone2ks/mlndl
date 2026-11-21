@@ -1,4 +1,4 @@
-# mlndl
+# mlndl(Multi-Layer Network Description Language)
 
 [![CI](https://github.com/yone2ks/mlndl/actions/workflows/ci.yml/badge.svg)](https://github.com/yone2ks/mlndl/actions/workflows/ci.yml)
 
