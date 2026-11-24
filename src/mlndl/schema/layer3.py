@@ -35,6 +35,20 @@ def _reject_ipv6_in_ip(value: Any) -> Any:
     return value
 
 
+def _reject_unquoted_rd_rt(value: Any, what: str) -> Any:
+    """引用符なしの RD / RT を YAML 1.1 が 60 進数の数として読んだものに、書き方を示すエラーを返す
+
+    `65001:10` のように `:` のあとが 59 以下だと数 (3900070) になり、60 以上なら文字列のまま読まれる。
+    元の値は数から戻せないので、例は一般的なものを示す
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        raise ValueError(
+            f'{what} は文字列です。"65001:10" のように引用符で囲んで書いてください。'
+            f"引用符がないと、YAML は 65001:10 を 60 進数の数 3900070 と読みます (いま読んだ値: {value!r})"
+        )
+    return value
+
+
 class RouteTargets(BaseModel):
     """BGP Route Target (import/export)"""
 
@@ -42,6 +56,16 @@ class RouteTargets(BaseModel):
 
     import_: list[str] = Field(default=[], alias="import")  # Python 予約語回避
     export: list[str] = []
+
+    @field_validator("import_", "export", mode="before")
+    @classmethod
+    def reject_unquoted(cls, v: Any, info: Any) -> Any:
+        """引用符なしの RT に、引用符で囲むよう示すエラーを返す"""
+        if isinstance(v, list):
+            name = "import" if info.field_name == "import_" else info.field_name
+            for item in v:
+                _reject_unquoted_rd_rt(item, f"route_targets.{name} の Route Target")
+        return v
 
 
 class VRF(BaseModel):
@@ -54,6 +78,12 @@ class VRF(BaseModel):
     l3vni: Annotated[str | None, Ref("layer2.vxlans", where=("type", "l3vni"))] = None
     route_targets: RouteTargets | None = None
     description: str | None = None
+
+    @field_validator("rd", mode="before")
+    @classmethod
+    def reject_unquoted_rd(cls, v: Any) -> Any:
+        """引用符なしの RD に、引用符で囲むよう示すエラーを返す"""
+        return _reject_unquoted_rd_rt(v, "rd (Route Distinguisher)")
 
 
 # ---------------------------------------------------------------------------
