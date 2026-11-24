@@ -291,13 +291,21 @@ layer3:
       vrf: vrf-default
       attaches_to: {interface: leaf2-swp52}
 
-    # SVI
-    - id: leaf1-vlan100
+    # SVI。MLAG の 2 台で同じ IP の anycast gateway (ADR-0011 D4)
+    - id: leaf1-vlan-100
       node: leaf1
-      name: vlan-100
+      name: Vlan100
       attaches_to: {vlan: vlan-100}
       ip: 192.168.100.1/24
       vrf: vrf-tenant-a
+      gateway_redundancy: [{mode: anycast_gateway}]
+    - id: leaf2-vlan-100
+      node: leaf2
+      name: Vlan100
+      attaches_to: {vlan: vlan-100}
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy: [{mode: anycast_gateway}]
 
 control_plane:
   # 全 eBGP: spine は AS65000、leaf はそれぞれの AS。underlay は直結の /31 どうし、

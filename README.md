@@ -60,14 +60,16 @@ layer3:
     - {id: leaf1-swp51-l3, node: leaf1, name: swp51, ip: 10.1.0.1/31, attaches_to: {interface: leaf1-swp51}}
 ```
 
-もっと大きな例は `examples/` (EVPN の Spine-Leaf、マルチサイトの WAN など) にあります。
+はじめての方は [はじめの一歩](docs/getting-started.ja.md) から。もっと大きな例は `examples/` にあり、一覧と中身は [見本](docs/README.ja.md#見本) にまとめています。
 
 ## ドキュメント
 
 一覧は [docs/README.md](docs/README.ja.md) にあります。
 
+- [はじめの一歩](docs/getting-started.ja.md) — 小さなトポロジーを書いて、検査して、図にするまで
 - [MLNDL の考え方](docs/concepts.ja.md) — MLNDL が何を書く言語で、どういう考え方で作られているか
 - [MLNDL 言語リファレンス](docs/reference/README.ja.md) — 書けるキーと規則、検査の一覧
+- [書き方の推奨](docs/style-guide.ja.md) — id の付け方、引用符が要る値、書く順番
 - [ADR](docs/decisions/README.md) — 言語の設計決定と、なぜそう決めたか
 - [Cytoscape.js 出力](docs/exporter-cytoscape.md) — mlndl のエクスポーターが出す形
 

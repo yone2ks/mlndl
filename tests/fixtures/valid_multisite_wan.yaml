@@ -341,63 +341,63 @@ layer3:
     - { id: dc-border2-swp52-l3, node: dc-border2, name: swp52, ip: 10.1.0.15/31, vrf: vrf-default, attaches_to: {interface: dc-border2-swp52} }
 
     # ── DC SVI (anycast GW for VLAN100) ────────────────────────────────
-    - id: dc-leaf1-vlan100
+    - id: dc-leaf1-vlan-100
       node: dc-leaf1
-      name: vlan-100
+      name: Vlan100
       attaches_to: {vlan: vlan-100}
       ip: 192.168.100.1/24
       vrf: vrf-tenant-a
-    - id: dc-leaf2-vlan100
+    - id: dc-leaf2-vlan-100
       node: dc-leaf2
-      name: vlan-100
+      name: Vlan100
       attaches_to: {vlan: vlan-100}
       ip: 192.168.100.2/24
       vrf: vrf-tenant-a
 
     # ── Campus SVI on Core (VLAN10/20/30 を Core で終端、VRRP) ─────────
-    - id: cm-core1-vlan10
+    - id: cm-core1-vlan-10
       node: cm-core1
-      name: vlan-10
+      name: Vlan10
       attaches_to: {vlan: vlan-10}
       ip: 172.16.10.2/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
-    - id: cm-core2-vlan10
+    - id: cm-core2-vlan-10
       node: cm-core2
-      name: vlan-10
+      name: Vlan10
       attaches_to: {vlan: vlan-10}
       ip: 172.16.10.3/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 90}
-    - id: cm-core1-vlan20
+    - id: cm-core1-vlan-20
       node: cm-core1
-      name: vlan-20
+      name: Vlan20
       attaches_to: {vlan: vlan-20}
       ip: 172.16.20.2/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 110}
-    - id: cm-core2-vlan20
+    - id: cm-core2-vlan-20
       node: cm-core2
-      name: vlan-20
+      name: Vlan20
       attaches_to: {vlan: vlan-20}
       ip: 172.16.20.3/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 90}
-    - id: cm-core1-vlan30
+    - id: cm-core1-vlan-30
       node: cm-core1
-      name: vlan-30
+      name: Vlan30
       attaches_to: {vlan: vlan-30}
       ip: 172.16.30.2/24
       vrf: vrf-default
       gateway_redundancy:
         - {mode: vrrp, group_id: 30, vip: 172.16.30.1, priority: 110}
-    - id: cm-core2-vlan30
+    - id: cm-core2-vlan-30
       node: cm-core2
-      name: vlan-30
+      name: Vlan30
       attaches_to: {vlan: vlan-30}
       ip: 172.16.30.3/24
       vrf: vrf-default
@@ -464,14 +464,14 @@ control_plane:
 
   routing_neighbors:
     # DC の underlay (OSPF)
-    - {id: ospf-adj-dc-spine1-leaf1, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp1-l3}, to: {node: dc-leaf1, interface: dc-leaf1-swp51-l3}, area: 0, bfd: true}
-    - {id: ospf-adj-dc-spine1-leaf2, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp2-l3}, to: {node: dc-leaf2, interface: dc-leaf2-swp51-l3}, area: 0, bfd: true}
-    - {id: ospf-adj-dc-spine1-border1, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp3-l3}, to: {node: dc-border1, interface: dc-border1-swp51-l3}, area: 0, bfd: true}
-    - {id: ospf-adj-dc-spine1-border2, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp4-l3}, to: {node: dc-border2, interface: dc-border2-swp51-l3}, area: 0, bfd: true}
-    - {id: ospf-adj-dc-spine2-leaf1, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp1-l3}, to: {node: dc-leaf1, interface: dc-leaf1-swp52-l3}, area: 0, bfd: true}
-    - {id: ospf-adj-dc-spine2-leaf2, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp2-l3}, to: {node: dc-leaf2, interface: dc-leaf2-swp52-l3}, area: 0, bfd: true}
-    - {id: ospf-adj-dc-spine2-border1, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp3-l3}, to: {node: dc-border1, interface: dc-border1-swp52-l3}, area: 0, bfd: true}
-    - {id: ospf-adj-dc-spine2-border2, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp4-l3}, to: {node: dc-border2, interface: dc-border2-swp52-l3}, area: 0, bfd: true}
+    - {id: ospf-adj-dc-spine1-leaf1, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp1-l3}, to: {node: dc-leaf1, interface: dc-leaf1-swp51-l3}, area: "0.0.0.0", bfd: true}
+    - {id: ospf-adj-dc-spine1-leaf2, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp2-l3}, to: {node: dc-leaf2, interface: dc-leaf2-swp51-l3}, area: "0.0.0.0", bfd: true}
+    - {id: ospf-adj-dc-spine1-border1, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp3-l3}, to: {node: dc-border1, interface: dc-border1-swp51-l3}, area: "0.0.0.0", bfd: true}
+    - {id: ospf-adj-dc-spine1-border2, type: ospf, from: {node: dc-spine1, interface: dc-spine1-swp4-l3}, to: {node: dc-border2, interface: dc-border2-swp51-l3}, area: "0.0.0.0", bfd: true}
+    - {id: ospf-adj-dc-spine2-leaf1, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp1-l3}, to: {node: dc-leaf1, interface: dc-leaf1-swp52-l3}, area: "0.0.0.0", bfd: true}
+    - {id: ospf-adj-dc-spine2-leaf2, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp2-l3}, to: {node: dc-leaf2, interface: dc-leaf2-swp52-l3}, area: "0.0.0.0", bfd: true}
+    - {id: ospf-adj-dc-spine2-border1, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp3-l3}, to: {node: dc-border1, interface: dc-border1-swp52-l3}, area: "0.0.0.0", bfd: true}
+    - {id: ospf-adj-dc-spine2-border2, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp4-l3}, to: {node: dc-border2, interface: dc-border2-swp52-l3}, area: "0.0.0.0", bfd: true}
 
     # DC の EVPN (iBGP。spine が RR、相手はクライアント)
     - {id: bgp-peer-dc-spine1-leaf1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf1, update_source: dc-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}

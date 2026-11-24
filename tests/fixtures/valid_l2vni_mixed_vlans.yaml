@@ -127,28 +127,28 @@ layer3:
     - {id: leaf4-swp51-l3, node: leaf4,  name: swp51, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: leaf4-swp51}}
 
     # anycast gateway の SVI — 4 機器とも同じ IP。D6 で L2VNI 単位にまとめて比べる
-    - id: leaf1-vlan20
+    - id: leaf1-vlan-20
       node: leaf1
       name: Vlan20
       attaches_to: {vlan: vlan-20}
       ip: 192.168.20.1/24
       vrf: vrf-tenant-a
       gateway_redundancy: [{mode: anycast_gateway}]
-    - id: leaf2-vlan20
+    - id: leaf2-vlan-20
       node: leaf2
       name: Vlan20
       attaches_to: {vlan: vlan-20}
       ip: 192.168.20.1/24
       vrf: vrf-tenant-a
       gateway_redundancy: [{mode: anycast_gateway}]
-    - id: leaf3-vlan30
+    - id: leaf3-vlan-30
       node: leaf3
       name: Vlan30
       attaches_to: {vlan: vlan-30}
       ip: 192.168.20.1/24                     # ★ 番号は 30 だが、同じブロードキャストドメインなのでアドレスはそろえる (D6)
       vrf: vrf-tenant-a
       gateway_redundancy: [{mode: anycast_gateway}]
-    - id: leaf4-vlan20
+    - id: leaf4-vlan-20
       node: leaf4
       name: Vlan20
       attaches_to: {vlan: vlan-20}

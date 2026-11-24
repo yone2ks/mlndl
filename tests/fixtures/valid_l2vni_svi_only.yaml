@@ -107,10 +107,10 @@ layer3:
     - {id: border1-swp51-l3, node: border1, name: swp51, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: border1-swp51}}
 
     # anycast gateway の SVI (4 機器)。L2VNI 10020 全体でアドレスをそろえる (D6)
-    - {id: leaf1-vlan20,   node: leaf1,   name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
-    - {id: leaf2-vlan20,   node: leaf2,   name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
-    - {id: leaf3-vlan30,   node: leaf3,   name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
-    - {id: border1-vlan31, node: border1, name: Vlan31, attaches_to: {vlan: vlan-31}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf1-vlan-20,   node: leaf1,   name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf2-vlan-20,   node: leaf2,   name: Vlan20, attaches_to: {vlan: vlan-20}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: leaf3-vlan-30,   node: leaf3,   name: Vlan30, attaches_to: {vlan: vlan-30}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: border1-vlan-31, node: border1, name: Vlan31, attaches_to: {vlan: vlan-31}, ip: 192.168.20.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
 
 control_plane:
   bgp:
