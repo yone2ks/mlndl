@@ -93,5 +93,9 @@ layer1:
       members: [spine1-eth1-2-a, spine1-eth1-2-b]
       lacp: {mode: active}
       min_links: 1
-      # NOTE: leaf3 側にも対向 LAG が必要なはずだが、ここでは spine1 側のみ記述。
-      # 現行スキーマでは「対向 LAG への参照」フィールドが無い。
+    # 対向の LAG も機器ごとに書く。どの LAG とつながるかはメンバーの L1 リンクから導くので、互いを指すフィールドは要らない (ADR-0023 D1)
+    - id: lag-leaf3-to-spine1
+      node: leaf3
+      members: [leaf3-eth1, leaf3-eth2]
+      lacp: {mode: active}
+      min_links: 1

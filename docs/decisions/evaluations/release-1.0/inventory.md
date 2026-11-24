@@ -44,6 +44,9 @@
 
 ## 1.0 の前にやること (破壊的ではないが、利用者が最初に見る見本)
 
+→ 2026-11-25 に済ませた (リリースの作業を除く)。SVI の id と `name` を `<機器>-vlan-<番号>` / `Vlan<番号>` にそろえ、`valid_full_dc.yaml` に leaf2 の SVI、`valid_twinport_transceiver.yaml` に leaf3 の LAG を足し、OSPF の `area` を `"0.0.0.0"` に。
+`examples/two-sites-ospf.yaml` (試し書きの 2 拠点の企業網を直したもの)、`docs/getting-started.ja.md`、`docs/style-guide.ja.md`、`docs/README.ja.md` の見本の一覧、リファレンスの補足 (共有する VTEP の `address`、端点のインターフェースの層)。`vrf-default` の定義は前から書いてあった。
+
 - examples と fixture の不統一
   - ~~anycast gateway なのに `gateway_redundancy` がない: `examples/eveng-evpn-lab.yaml:209-243`、`tests/fixtures/valid_full_dc.yaml:287-293`、`valid_multisite_wan.yaml:338-349`~~ —
     2026-11-18 に確かめたところ誤り。同じ IP を共有する SVI は、examples と valid の fixtures でみな `gateway_redundancy` を書いている (ADR-0027 Pass C で example-author が指摘)

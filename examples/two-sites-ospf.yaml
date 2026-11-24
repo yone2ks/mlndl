@@ -1,0 +1,103 @@
+# 2 拠点の小さな企業網 (L1〜L3 と OSPF)。はじめの一歩 (docs/getting-started.ja.md) で使う例
+#
+#   tokyo: rtr-a (ルーター) ─ sw-a1 (スイッチ) ─ host-a1 (サーバー)
+#   osaka: rtr-b (ルーター) ─ sw-b1 (スイッチ) ─ host-b1 (サーバー)
+#   拠点間は専用線 1 本 (rtr-a ↔ rtr-b)。拠点の中はトランク 1 本
+#
+# 書いてあるもの:
+#   layer1         機器・インターフェース・ケーブル。サイトは labels.site
+#   layer2         各拠点のユーザー VLAN (100 / 200)
+#   layer3         拠点間の /30、ループバック、VLAN のゲートウェイ (SVI)、サーバーの IP
+#   control_plane  拠点間の OSPF の隣接
+#
+# vrf は書いていない (書かなければ default VRF)
+
+ndl_version: "1.0"
+
+meta:
+  name: two-sites-ospf
+  description: Two-office enterprise network with OSPF across a leased line
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    # ── tokyo ───────────────────────────────────────────────────────────
+    - {id: rtr-a,   name: RTR-A,   role: border, implementation: physical, device_type: cisco_isr4321, labels: {site: tokyo}}
+    - {id: sw-a1,   name: SW-A1,   role: access, implementation: physical, device_type: cisco_catalyst_9300, labels: {site: tokyo}}
+    - {id: host-a1, name: Host-A1, role: server, implementation: physical, labels: {site: tokyo}}
+    # ── osaka ───────────────────────────────────────────────────────────
+    - {id: rtr-b,   name: RTR-B,   role: border, implementation: physical, device_type: cisco_isr4321, labels: {site: osaka}}
+    - {id: sw-b1,   name: SW-B1,   role: access, implementation: physical, device_type: cisco_catalyst_9300, labels: {site: osaka}}
+    - {id: host-b1, name: Host-B1, role: server, implementation: physical, labels: {site: osaka}}
+
+  # インターフェースの id は <機器の id>-<機器上の名前>。name には機器上の名前をそのまま書く
+  interfaces:
+    - {id: rtr-a-ge0-0,  node: rtr-a,   name: Ge0/0}    # → 専用線
+    - {id: rtr-a-ge0-1,  node: rtr-a,   name: Ge0/1}    # → sw-a1 (トランク)
+    - {id: sw-a1-gi0-1,  node: sw-a1,   name: Gi0/1}    # → rtr-a (トランク)
+    - {id: sw-a1-gi0-10, node: sw-a1,   name: Gi0/10}   # → host-a1 (アクセス)
+    - {id: rtr-b-ge0-0,  node: rtr-b,   name: Ge0/0}
+    - {id: rtr-b-ge0-1,  node: rtr-b,   name: Ge0/1}
+    - {id: sw-b1-gi0-1,  node: sw-b1,   name: Gi0/1}
+    - {id: sw-b1-gi0-10, node: sw-b1,   name: Gi0/10}
+    - {id: host-a1-eth0, node: host-a1, name: eth0}
+    - {id: host-b1-eth0, node: host-b1, name: eth0}
+
+  links:
+    # 拠点間の専用線。回線 ID や契約帯域は description に書く (書式は決めない)
+    - id: link-rtr-a-rtr-b
+      endpoints: [rtr-a-ge0-0, rtr-b-ge0-0]     # 両端に向きはない
+      link_speed: 100M
+      description: Leased line from carrier A, circuit LL-0001, 100 Mbps guaranteed
+    # 拠点の中
+    - {id: link-rtr-a-sw-a1,   endpoints: [rtr-a-ge0-1, sw-a1-gi0-1],   link_speed: 1G, link_role: trunk}
+    - {id: link-sw-a1-host-a1, endpoints: [sw-a1-gi0-10, host-a1-eth0], link_speed: 1G, link_role: access}
+    - {id: link-rtr-b-sw-b1,   endpoints: [rtr-b-ge0-1, sw-b1-gi0-1],   link_speed: 1G, link_role: trunk}
+    - {id: link-sw-b1-host-b1, endpoints: [sw-b1-gi0-10, host-b1-eth0], link_speed: 1G, link_role: access}
+
+layer2:
+  vlans:
+    # ポートは L1 インターフェースの id で指す。タグを付けて流すのは trunk_ports、付けないのは access_ports
+    - id: vlan-100
+      vlan_id: 100
+      name: users-tokyo
+      trunk_ports:  [{interface: rtr-a-ge0-1}, {interface: sw-a1-gi0-1}]
+      access_ports: [{interface: sw-a1-gi0-10}]
+    - id: vlan-200
+      vlan_id: 200
+      name: users-osaka
+      trunk_ports:  [{interface: rtr-b-ge0-1}, {interface: sw-b1-gi0-1}]
+      access_ports: [{interface: sw-b1-gi0-10}]
+
+layer3:
+  # L3 インターフェースは、どの L1 IF / VLAN の上にあるかを attaches_to で指す
+  interfaces:
+    # ループバック (attaches_to を持たない)
+    - {id: rtr-a-lo, node: rtr-a, name: Loopback0, ip: 10.255.0.1/32}
+    - {id: rtr-b-lo, node: rtr-b, name: Loopback0, ip: 10.255.0.2/32}
+
+    # 拠点間の /30。id は <L1 IF の id>-l3
+    - {id: rtr-a-ge0-0-l3, node: rtr-a, name: Ge0/0, ip: 10.0.0.1/30, attaches_to: {interface: rtr-a-ge0-0}}
+    - {id: rtr-b-ge0-0-l3, node: rtr-b, name: Ge0/0, ip: 10.0.0.2/30, attaches_to: {interface: rtr-b-ge0-0}}
+
+    # VLAN のゲートウェイ (SVI)。id は <機器の id>-vlan-<番号>、name は機器上の名前
+    - {id: rtr-a-vlan-100, node: rtr-a, name: Vlan100, ip: 192.168.100.1/24, attaches_to: {vlan: vlan-100}}
+    - {id: rtr-b-vlan-200, node: rtr-b, name: Vlan200, ip: 192.168.200.1/24, attaches_to: {vlan: vlan-200}}
+
+    # サーバーの IP。validator は VLAN のポートからケーブルをたどって、SVI のサブネットに入っているかを確かめる
+    - {id: host-a1-eth0-l3, node: host-a1, name: eth0, ip: 192.168.100.10/24, attaches_to: {interface: host-a1-eth0}}
+    - {id: host-b1-eth0-l3, node: host-b1, name: eth0, ip: 192.168.200.10/24, attaches_to: {interface: host-b1-eth0}}
+
+control_plane:
+  # OSPF のインスタンス (参加する機器)
+  ospf:
+    - id: ospf-wan
+      nodes: [{node: rtr-a}, {node: rtr-b}]
+
+  # 1 エントリが 1 つの隣接。OSPF は両端の L3 IF を interface に書く。通り道 (専用線) は L3 IF から導く
+  routing_neighbors:
+    - id: ospf-adj-rtr-a-rtr-b
+      type: ospf
+      from: {node: rtr-a, interface: rtr-a-ge0-0-l3}
+      to:   {node: rtr-b, interface: rtr-b-ge0-0-l3}
+      area: "0.0.0.0"

@@ -73,6 +73,16 @@ BFD のタイマー。BFD を張るかどうかはセッションの `bfd` で�
 
 セッション。1 エントリが 1 つのセッション (BGP のピア、OSPF / IS-IS の隣接) です。`type` で書くキーが変わります。
 
+端点に書くインターフェースは、プロトコルによって層が違います。
+
+| `type` | 端点のキー | 指すもの | 理由 |
+|---|---|---|---|
+| `bgp` | `update_source` | L3 IF かトンネル IF | TCP のセッションの送信元のアドレス |
+| `ospf` | `interface` | L3 IF かトンネル IF | OSPF は IP の上で hello を送る |
+| `isis` | `interface` | L1 IF | IS-IS は L2 の上で hello を送る (IP を使わない) |
+
+OSPF と IS-IS は同じ `interface` というキーですが、書く id の種類が違います。別の種類の id を書くと、validator が何の id かを添えて誤りを示します。
+
 ### type: bgp
 
 ```yaml

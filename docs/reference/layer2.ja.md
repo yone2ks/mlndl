@@ -100,6 +100,10 @@ vteps:
 | `address_v6` | IPv6 プレフィックス付きアドレス | | | |
 | `description` | 文字列 | | | |
 
+複数の機器で共有する VTEP (MLAG / vPC のペアなど) の `address` は、たいてい各機器のループバックの `ip` とは別の値です
+(Cumulus の `clagd-vxlan-anycast-ip`、NX-OS の NVE の secondary IP など)。`sources` の L3 IF の `ip` から決まるわけではないので、共有するときは必ず書きます。
+同じ値を 2 つの VTEP に書くと error です。
+
 ## vxlans
 
 VNI。`type` で L2VNI と L3VNI を分けます。L2VNI と L3VNI を通して `vni` は重複できません。

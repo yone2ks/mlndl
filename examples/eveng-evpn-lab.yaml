@@ -1,7 +1,7 @@
 ndl_version: "1.0"
 
 # EVE-NG で学ぶ Spine-Leaf EVPN + VXLAN 学習ラボ（Lab B4 完了時点）
-# 出典: ~/Documents/Sandbox/eveng/PLAN.md, design/addressing.md, configs/b1〜b4, configs/mgmt
+# 出典: 手元で組んだ学習ラボの計画・アドレス設計・機器の設定 (B1〜B4 と管理網)
 
 meta:
   name: eveng-evpn-vxlan-lab
