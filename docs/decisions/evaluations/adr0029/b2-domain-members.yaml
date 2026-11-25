@@ -1,0 +1,133 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass B / b2 — 書く場所 A2: ドメイン側が VTEP のメンバーを並べる
+#
+# 推奨モデル (Pass A の summary):
+#   - ドメイン = 「中でフルメッシュにトンネルを張る VTEP の集合」
+#   - 1 つの VTEP は 1 つのドメイン (ドメイン間で重複しないこと = 検査で確かめる)
+#   - サイト間 (DCI) も 1 つのドメイン
+#   - BGW は 2 つのドメインに VTEP を 1 つずつ持つ
+#
+# 書き方:
+#   - `layer2.overlay_domains` にドメインの一覧 (id と members = VTEP の id の列)
+#   - 各 VTEP には何も書き足さない (VTEP は今まで通り)
+#   - L2VNI の `vteps` は今と同じ平らなリスト
+#   - ADR-0018 の `bridges` (ポートを並べる箱) と同じ流儀
+#
+# この YAML は仮の構文。今の mlndl では通らない。layer1 / layer3 / control_plane は a1 と同じ。
+#
+# 直した所 (summary の付記):
+#   - BGP の `vrf: vrf-default` を外した (= default VRF)
+#   - L3 IF の `vrf: vrf-default` を外した
+#   - labels キー `fabric_role` → `fabric-role`
+# ============================================================================
+
+meta:
+  name: evpn-multisite-b2-domain-members
+  description: 2-site EVPN Multi-Site with layer2.overlay_domains listing VTEP members (Pass B A2)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ─────────────────────────────────────────────────────────────────────────
+# layer1 は a1-current-syntax.yaml と同じ。省略。
+# ─────────────────────────────────────────────────────────────────────────
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a-webtier
+      access_ports:
+        - {ethernet_segment: es-a-server1}
+        - {ethernet_segment: es-b-server1}
+
+  # ★ ドメインの一覧側が VTEP のメンバーを並べる (ADR-0018 の bridges と同形)
+  overlay_domains:
+    - id: od-site-a
+      description: Site A intra-fabric
+      members:
+        - vtep-a-leaf1
+        - vtep-a-leaf2
+        - vtep-a-bgw-vip
+    - id: od-site-b
+      description: Site B intra-fabric
+      members:
+        - vtep-b-leaf1
+        - vtep-b-leaf2
+        - vtep-b-bgw-vip
+    - id: od-dci
+      description: Multi-Site DCI
+      members:
+        - vtep-a-bgw-msvip
+        - vtep-b-bgw-msvip
+
+  vteps:
+    # VTEP 自体は a1 と同じ。domain は書かない (方式中立 / ADR-0014 D1 を保つ)
+    - {id: vtep-a-leaf1,     sources: [a-leaf1-lo]}
+    - {id: vtep-a-leaf2,     sources: [a-leaf2-lo]}
+    - {id: vtep-a-bgw-vip,   sources: [a-bgw1-lo1, a-bgw2-lo1], address: 10.0.100.1/32}
+    - {id: vtep-a-bgw-msvip, sources: [a-bgw1-lo2, a-bgw2-lo2], address: 10.0.200.1/32}
+    - {id: vtep-b-leaf1,     sources: [b-leaf1-lo]}
+    - {id: vtep-b-leaf2,     sources: [b-leaf2-lo]}
+    - {id: vtep-b-bgw-vip,   sources: [b-bgw1-lo1, b-bgw2-lo1], address: 10.0.100.2/32}
+    - {id: vtep-b-bgw-msvip, sources: [b-bgw1-lo2, b-bgw2-lo2], address: 10.0.200.2/32}
+
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      # L2VNI は今と同じ平らな `vteps`。domains は書かない (案 a) / 書く (案 b)
+      # 案 a (推奨): domains を書かない。VTEP の属するドメインから導く
+      #   → 参加ドメイン = {od-site-a, od-site-b, od-dci} (各 VTEP が属するドメインの集合)
+      #   利点: L2VNI の記述が今と変わらない (加算的変更が最小)
+      #   欠点: この L2VNI が流れる範囲が YAML 上では一見して分からない
+      # 案 b: domains を L2VNI に書く
+      #   → L2VNI の vteps と、各 VTEP の属するドメインが domains にちゃんと含まれるかを検査
+      #   利点: 読みやすい (L2VNI の 1 行で参加ドメインが並ぶ)
+      #   欠点: vteps と domains の整合をユーザーが両方書くことになる (冗長 / 食い違いの余地)
+      #        言語の規則が「書くなら参加ドメインの集合と一致する」を検査するか、
+      #        「domains を書くと vteps 側は domains のメンバーの和集合として導出」にするかが
+      #        別の決定を呼ぶ
+      # この b2 では案 a で書く。案 b を使うとしても冗長なだけで誤りにくさは変わらないため。
+      vteps:
+        - vtep-a-leaf1
+        - vtep-a-leaf2
+        - vtep-a-bgw-vip
+        - vtep-a-bgw-msvip
+        - vtep-b-leaf1
+        - vtep-b-leaf2
+        - vtep-b-bgw-vip
+        - vtep-b-bgw-msvip
+      # 検査 (案):
+      #   - 参加ドメインが 2 つ以上あるのに、両ドメインに同じ機器がいない → error
+      #   - overlay_domains 側: 同じ VTEP が 2 つの domain の members に入っている → error
+      #   - overlay_domains 側: どのドメインにも入っていない VTEP がある → warning か error
+      #     (「1 ドメインしかない構成」なら書かずに済む加算性と、書いたら全部埋める約束との
+      #      あいだで Pass B で決める)
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+# ─────────────────────────────────────────────────────────────────────────
+# layer3 は a1 と同じ。省略 (vrf-default の宣言と vrf: vrf-default は外した)
+# control_plane も a1 と同じ。省略 (BGP の vrf: vrf-default は書かない)
+# ─────────────────────────────────────────────────────────────────────────
+
+# ============================================================================
+# A2 (domain members) の所感
+# ----------------------------------------------------------------------------
+# - ドメインごとに VTEP が並ぶので、1 つのドメインの中身が 1 か所で見える。
+#   ADR-0018 の bridges の ports と同じ流儀なので、言語内の一貫性は保てる。
+# - 誤りやすさ: 「1 VTEP = 1 ドメイン」は型で決まらない。同じ VTEP を 2 つの
+#   ドメインの members に書いても YAML としては通る (検査で弾くことになる)。
+#   「どのドメインにも入れ忘れる」もありうる (どちらの案でも起こる)。
+# - 記述量: ドメインごとに members のリストが 1 つ増える。VTEP の数と同じだけの
+#   id を、VTEP のエントリとは別の場所に繰り返して書くことになる。VTEP の
+#   `sources`・`address` と、ドメインの `members` を 2 か所で保守する。
+# - ドメインを増やす (3 サイト目) と、新しい overlay_domains エントリに
+#   members を列挙する必要がある。既存ドメインは変わらない。
+# ============================================================================

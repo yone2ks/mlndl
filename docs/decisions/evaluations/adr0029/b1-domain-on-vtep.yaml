@@ -1,0 +1,127 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass B / b1 — 書く場所 A1: ドメインを VTEP の属性に書く
+#
+# 推奨モデル (Pass A の summary):
+#   - ドメイン = 「中でフルメッシュにトンネルを張る VTEP の集合」
+#   - 1 つの VTEP は 1 つのドメイン (型で保証)
+#   - サイト間 (DCI) も 1 つのドメイン
+#   - BGW は 2 つのドメインに VTEP を 1 つずつ持つ
+#   - トンネルの対は「同じ L2VNI に参加し、同じドメインに属する VTEP どうし」
+#
+# 書き方:
+#   - `layer2.overlay_domains` にドメインの一覧 (id と description) を書く
+#   - 各 VTEP に `domain: <id>` を書く
+#   - L2VNI の `vteps` は今と同じ平らなリスト。参加ドメインは参照先の VTEP の domain から導く
+#   (ADR-0005 D6 の「node は参照先から導く」と同じ流儀)
+#
+# この YAML は仮の構文。今の mlndl では通らない (スキーマに `overlay_domains` と
+# `VxlanVtep.domain` を足す必要がある)。layer1 / layer3 / control_plane は a1 と同じ。
+#
+# 直した所 (summary の付記):
+#   - BGP の `vrf: vrf-default` を外した (= default VRF)
+#   - L3 IF の `vrf: vrf-default` を外した
+#   - labels キー `fabric_role` → `fabric-role` (下線は不可。ADR-0002 D1)
+# ============================================================================
+
+meta:
+  name: evpn-multisite-b1-domain-on-vtep
+  description: 2-site EVPN Multi-Site with layer2.overlay_domains and VTEP.domain (Pass B A1)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ─────────────────────────────────────────────────────────────────────────
+# layer1 は a1-current-syntax.yaml と同じ。省略。
+# ─────────────────────────────────────────────────────────────────────────
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a-webtier
+      access_ports:
+        - {ethernet_segment: es-a-server1}
+        - {ethernet_segment: es-b-server1}
+
+  # ★ 新しいコレクション: トンネルのドメイン
+  # ドメインの中はフルメッシュで、ドメインをまたぐ VTEP 対のあいだにはトンネルは張らない
+  # 推奨プレフィックス `od-` (仮)
+  overlay_domains:
+    - {id: od-site-a, description: Site A intra-fabric}
+    - {id: od-site-b, description: Site B intra-fabric}
+    - {id: od-dci,    description: Multi-Site DCI}
+
+  vteps:
+    # ★ 各 VTEP に domain を 1 つ書く。1 VTEP = 1 ドメイン (型で保証)
+    # サイト A の leaves と BGW の VIP は od-site-a (サイト内のフルメッシュ)
+    - {id: vtep-a-leaf1,     sources: [a-leaf1-lo],                    domain: od-site-a}
+    - {id: vtep-a-leaf2,     sources: [a-leaf2-lo],                    domain: od-site-a}
+    - {id: vtep-a-bgw-vip,   sources: [a-bgw1-lo1, a-bgw2-lo1], address: 10.0.100.1/32, domain: od-site-a}
+    # a-bgw の MS-VIP は od-dci (DCI 側のフルメッシュ)
+    - {id: vtep-a-bgw-msvip, sources: [a-bgw1-lo2, a-bgw2-lo2], address: 10.0.200.1/32, domain: od-dci}
+    # サイト B
+    - {id: vtep-b-leaf1,     sources: [b-leaf1-lo],                    domain: od-site-b}
+    - {id: vtep-b-leaf2,     sources: [b-leaf2-lo],                    domain: od-site-b}
+    - {id: vtep-b-bgw-vip,   sources: [b-bgw1-lo1, b-bgw2-lo1], address: 10.0.100.2/32, domain: od-site-b}
+    - {id: vtep-b-bgw-msvip, sources: [b-bgw1-lo2, b-bgw2-lo2], address: 10.0.200.2/32, domain: od-dci}
+
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      # vteps の書き方は今まで通り。参加ドメインは VTEP の domain から導く
+      # 導出: 参加ドメイン = {od-site-a, od-site-b, od-dci}
+      #       同じ L2VNI で同じドメインの VTEP どうしがトンネルの対
+      #       → od-site-a 内: leaf1/leaf2/bgw-vip で 3 つの対
+      #       → od-site-b 内: leaf1/leaf2/bgw-vip で 3 つの対
+      #       → od-dci  内: a-bgw-msvip <-> b-bgw-msvip の 1 対
+      vteps:
+        - vtep-a-leaf1
+        - vtep-a-leaf2
+        - vtep-a-bgw-vip
+        - vtep-a-bgw-msvip
+        - vtep-b-leaf1
+        - vtep-b-leaf2
+        - vtep-b-bgw-vip
+        - vtep-b-bgw-msvip
+      # 検査 (案):
+      #   - 2 つ以上のドメインの VTEP が参加しているのに、両ドメインに同じ機器が
+      #     いない (= stitching する BGW がいない) → error
+      #     → ここでは a-bgw が od-site-a と od-dci の両方に VTEP を持つので満たす
+      #   - 参加ドメインに VTEP が 1 つしかない → warning (運用上 stitching できない対になる)
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+      # L3VNI は vteps を持たない (ADR-0014 D3)。参加ドメインは、この VRF の L3 IF を
+      # 持つ機器がどのドメインに属するか (= その機器がどの VTEP を終端しているか) から導く。
+      # Pass B の「確かめること 5」に該当。この b1 では L3VNI 側に domain を書かない
+
+# ─────────────────────────────────────────────────────────────────────────
+# layer3 は a1 と同じ。省略。
+# ただし次の 2 点だけ a1 と違う (summary の付記への対応):
+#   - vrfs から `- id: vrf-default` を外した
+#   - layer3.interfaces の `vrf: vrf-default` をすべて外した (= 既定で default VRF)
+# ─────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────
+# control_plane は a1 と同じ。省略。
+# ただし bgp の `vrf: vrf-default` は書かない (= default VRF)
+# ─────────────────────────────────────────────────────────────────────────
+
+# ============================================================================
+# A1 (domain on VTEP) の所感
+# ----------------------------------------------------------------------------
+# - 各 VTEP の行に domain を 1 つ書くだけ。1 VTEP = 1 ドメインが型で決まるので、
+#   「2 つのドメインに入れてしまう」ことが起きない (型エラーで弾ける)。
+# - 一方で「どのドメインにも入れ忘れる」 (domain を書き忘れる) は起こりうる。
+#   必須にすれば検査で弾ける。任意にしてフォールバックするなら「ドメインなし =
+#   既存の L2VNI.vteps の平らなリストと同じ振る舞い」。Pass B で決める所。
+# - overlay_domains の一覧エントリ側は id と description だけで、参照 (members)
+#   を持たない。「ドメインのメンバーを列挙しない」のが特徴。
+# - ドメインを増やす (3 サイト目) と、エントリは od-site-* を 1 つ増やすだけ。
+#   既存の VTEP の記述には触らない (新しい VTEP に domain を書くだけ)。
+# ============================================================================

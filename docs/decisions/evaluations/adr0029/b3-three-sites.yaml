@@ -1,0 +1,131 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass B / b3 — 3 サイトに拡張 (b1 の書き方: domain on VTEP)
+#
+# 変形:
+#   - サイト C (BGW 2 台、leaves と server は省略で a1 と同形と仮定)
+#   - DCI は A の BGW と C の BGW を 1 本、B の BGW と C の BGW を 1 本
+#     (A と B の DCI は a1 から引き継ぎ)
+#   - 3 サイトの DCI の形はよく「フルメッシュ」になるので、ここでは DCI を
+#     1 つのドメインにまとめる (3 つの BGW VTEP がフルメッシュ)
+#
+# この YAML は layer2 と DCI の部分だけ書く (layer1 / layer3 / control_plane は
+# a1 からサイト C 分を増やしたもの、で省略)。
+# ============================================================================
+
+meta:
+  name: evpn-multisite-b3-three-sites
+  description: 3-site EVPN Multi-Site in b1 style
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a-webtier
+      access_ports:
+        - {ethernet_segment: es-a-server1}
+        - {ethernet_segment: es-b-server1}
+        - {ethernet_segment: es-c-server1}
+
+  overlay_domains:
+    - {id: od-site-a, description: Site A intra-fabric}
+    - {id: od-site-b, description: Site B intra-fabric}
+    - {id: od-site-c, description: Site C intra-fabric}    # ★ 増えた 1 行
+    - {id: od-dci,    description: Multi-Site DCI (full-mesh of BGW MS-VIPs)}
+
+  vteps:
+    # ── サイト A ────────────────────────────────────────────────────────
+    - {id: vtep-a-leaf1,     sources: [a-leaf1-lo],                    domain: od-site-a}
+    - {id: vtep-a-leaf2,     sources: [a-leaf2-lo],                    domain: od-site-a}
+    - {id: vtep-a-bgw-vip,   sources: [a-bgw1-lo1, a-bgw2-lo1], address: 10.0.100.1/32, domain: od-site-a}
+    - {id: vtep-a-bgw-msvip, sources: [a-bgw1-lo2, a-bgw2-lo2], address: 10.0.200.1/32, domain: od-dci}
+    # ── サイト B ────────────────────────────────────────────────────────
+    - {id: vtep-b-leaf1,     sources: [b-leaf1-lo],                    domain: od-site-b}
+    - {id: vtep-b-leaf2,     sources: [b-leaf2-lo],                    domain: od-site-b}
+    - {id: vtep-b-bgw-vip,   sources: [b-bgw1-lo1, b-bgw2-lo1], address: 10.0.100.2/32, domain: od-site-b}
+    - {id: vtep-b-bgw-msvip, sources: [b-bgw1-lo2, b-bgw2-lo2], address: 10.0.200.2/32, domain: od-dci}
+    # ── サイト C ★ 増えた 4 行 ────────────────────────────────────────
+    - {id: vtep-c-leaf1,     sources: [c-leaf1-lo],                    domain: od-site-c}
+    - {id: vtep-c-leaf2,     sources: [c-leaf2-lo],                    domain: od-site-c}
+    - {id: vtep-c-bgw-vip,   sources: [c-bgw1-lo1, c-bgw2-lo1], address: 10.0.100.3/32, domain: od-site-c}
+    - {id: vtep-c-bgw-msvip, sources: [c-bgw1-lo2, c-bgw2-lo2], address: 10.0.200.3/32, domain: od-dci}
+
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps:
+        # サイト A
+        - vtep-a-leaf1
+        - vtep-a-leaf2
+        - vtep-a-bgw-vip
+        - vtep-a-bgw-msvip
+        # サイト B
+        - vtep-b-leaf1
+        - vtep-b-leaf2
+        - vtep-b-bgw-vip
+        - vtep-b-bgw-msvip
+        # サイト C ★ 増えた 4 行
+        - vtep-c-leaf1
+        - vtep-c-leaf2
+        - vtep-c-bgw-vip
+        - vtep-c-bgw-msvip
+      # 導出:
+      #   - 参加ドメイン = {od-site-a, od-site-b, od-site-c, od-dci}
+      #   - od-site-a 内で leaf1/leaf2/bgw-vip の 3 対
+      #   - od-site-b 内で leaf1/leaf2/bgw-vip の 3 対
+      #   - od-site-c 内で leaf1/leaf2/bgw-vip の 3 対
+      #   - od-dci 内で a-msvip <-> b-msvip, a <-> c, b <-> c の 3 対 (フルメッシュ)
+      # a1 と比べて増える DCI トンネルの対が 3C2 - 2C2 = 3 - 1 = 2 本
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+
+# ─────────────────────────────────────────────────────────────────────────
+# DCI の BGP セッション (control_plane.routing_neighbors) の追加分だけ
+# a1 から足される分だけを抜粋 (A<->B は a1 と同じ):
+# ─────────────────────────────────────────────────────────────────────────
+#
+# control_plane:
+#   routing_neighbors:
+#     # ── DCI eBGP multihop EVPN (A<->C) ────────────────────────────────
+#     - {id: bgp-peer-a-bgw1-c-bgw1-evpn, type: bgp,
+#        from: {node: a-bgw1, update_source: a-bgw1-lo},
+#        to:   {node: c-bgw1, update_source: c-bgw1-lo},
+#        address_families: [l2vpn_evpn]}
+#     - {id: bgp-peer-a-bgw2-c-bgw2-evpn, type: bgp,
+#        from: {node: a-bgw2, update_source: a-bgw2-lo},
+#        to:   {node: c-bgw2, update_source: c-bgw2-lo},
+#        address_families: [l2vpn_evpn]}
+#     # ── DCI eBGP multihop EVPN (B<->C) ────────────────────────────────
+#     - {id: bgp-peer-b-bgw1-c-bgw1-evpn, type: bgp, ... }
+#     - {id: bgp-peer-b-bgw2-c-bgw2-evpn, type: bgp, ... }
+#
+# → DCI の BGP セッションは A<->B 2 本 + A<->C 2 本 + B<->C 2 本 = 6 本
+#    (route server を建てれば 6 サイトでも BGW ごとに 1 本で済むが、今回は直結とする)
+
+# ============================================================================
+# b3 (3 サイト、b1 書き方) の所感
+# ----------------------------------------------------------------------------
+# - サイト C のドメインを 1 行、VTEP を 4 行、L2VNI の vteps に 4 行足した。
+#   DCI を「3 BGW VTEP のフルメッシュのドメイン」として 1 つにまとめられるので、
+#   DCI ドメイン自体のエントリは増えない。ここが b1 の「ドメイン = フルメッシュ」
+#   定義の見返り。サイト間 (A<->B, A<->C, B<->C) ごとにドメインを分ける書き方は
+#   不自然 (フルメッシュを分断する)。
+# - BGP の DCI セッションは A<->C と B<->C で 4 本増える (direct peering モデル)。
+#   この分はトンネルのドメインとは別軸 (制御プレーンのセッションは AS 境界で立つ)
+#   なので、ドメインのモデルがサイトを増やしても壊れない。
+# - 「DCI をフルメッシュのドメイン 1 つにまとめる」のが読者に不自然に見える場合、
+#   DCI も「AS ごとのペア」に分ける書き方 (od-dci-ab / od-dci-ac / od-dci-bc) に
+#   できる。ただしフルメッシュを 3 個の 2 要素ドメインに分割するので、同じ
+#   機器の MS-VIP が 2 ドメイン (A の MS-VIP が od-dci-ab と od-dci-ac) に入り、
+#   「1 VTEP = 1 ドメイン」の約束が崩れる。b1 (domain on VTEP) ではこの変形は
+#   そのままでは書けない。DCI がフルメッシュから崩れる (hub-and-spoke など)
+#   構成は別の決定を呼ぶ (Pass B の宿題)。
+# ============================================================================

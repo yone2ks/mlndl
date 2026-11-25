@@ -40,8 +40,8 @@ layer1:
     # FEEDBACK (1): role に 'border-gateway' / 'bgw' が推奨語彙 (ADR-0003 の 9 語) にない。
     #   自由文字列なので書けるが、下流ツール (ndl-viz) に BGW の既定スタイルがない。
     #   deferred.md の L2 の行 (BGW の warning を抑える方法) とも関係する。
-    - {id: a-bgw1,   name: A-BGW-1,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-east, fabric_role: bgw}}
-    - {id: a-bgw2,   name: A-BGW-2,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-east, fabric_role: bgw}}
+    - {id: a-bgw1,   name: A-BGW-1,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-east, fabric-role: bgw}}
+    - {id: a-bgw2,   name: A-BGW-2,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-east, fabric-role: bgw}}
     - {id: a-server1, name: A-Server-1, implementation: physical, role: server,                     labels: {site: us-east}}
 
     # ── Site B ───────────────────────────────────────────────────────────
@@ -49,8 +49,8 @@ layer1:
     - {id: b-spine2, name: B-Spine-2, implementation: vm, role: spine,  device_type: cumulus_linux, labels: {site: us-west}}
     - {id: b-leaf1,  name: B-Leaf-1,  implementation: vm, role: leaf,   device_type: cumulus_linux, labels: {site: us-west}}
     - {id: b-leaf2,  name: B-Leaf-2,  implementation: vm, role: leaf,   device_type: cumulus_linux, labels: {site: us-west}}
-    - {id: b-bgw1,   name: B-BGW-1,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-west, fabric_role: bgw}}
-    - {id: b-bgw2,   name: B-BGW-2,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-west, fabric_role: bgw}}
+    - {id: b-bgw1,   name: B-BGW-1,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-west, fabric-role: bgw}}
+    - {id: b-bgw2,   name: B-BGW-2,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-west, fabric-role: bgw}}
     - {id: b-server1, name: B-Server-1, implementation: physical, role: server,                     labels: {site: us-west}}
 
   interfaces:
@@ -235,7 +235,7 @@ layer2:
 
 layer3:
   vrfs:
-    - id: vrf-default
+    # default VRF は書かない (ADR-0028 D4。書くと l2vpn_evpn の warning が出る)
     - id: vrf-tenant-a
       rd: "65001:100"
       l3vni: vni-10900
@@ -283,46 +283,46 @@ layer3:
 
     # ── Site A underlay P2P (/31) ─────────────────────────────────────────
     # 省スペースのためペアでまとめて書く
-    - {id: a-spine1-swp1-l3,  node: a-spine1, name: swp1,  ip: 10.1.0.0/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp1}}
-    - {id: a-leaf1-swp51-l3,  node: a-leaf1,  name: swp51, ip: 10.1.0.1/31,  vrf: vrf-default, attaches_to: {interface: a-leaf1-swp51}}
-    - {id: a-spine1-swp2-l3,  node: a-spine1, name: swp2,  ip: 10.1.0.2/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp2}}
-    - {id: a-leaf2-swp51-l3,  node: a-leaf2,  name: swp51, ip: 10.1.0.3/31,  vrf: vrf-default, attaches_to: {interface: a-leaf2-swp51}}
-    - {id: a-spine1-swp3-l3,  node: a-spine1, name: swp3,  ip: 10.1.0.4/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp3}}
-    - {id: a-bgw1-e1-1-l3,    node: a-bgw1,   name: Ethernet1/1, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: a-bgw1-e1-1}}
-    - {id: a-spine1-swp4-l3,  node: a-spine1, name: swp4,  ip: 10.1.0.6/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp4}}
-    - {id: a-bgw2-e1-1-l3,    node: a-bgw2,   name: Ethernet1/1, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: a-bgw2-e1-1}}
-    - {id: a-spine2-swp1-l3,  node: a-spine2, name: swp1,  ip: 10.1.0.8/31,  vrf: vrf-default, attaches_to: {interface: a-spine2-swp1}}
-    - {id: a-leaf1-swp52-l3,  node: a-leaf1,  name: swp52, ip: 10.1.0.9/31,  vrf: vrf-default, attaches_to: {interface: a-leaf1-swp52}}
-    - {id: a-spine2-swp2-l3,  node: a-spine2, name: swp2,  ip: 10.1.0.10/31, vrf: vrf-default, attaches_to: {interface: a-spine2-swp2}}
-    - {id: a-leaf2-swp52-l3,  node: a-leaf2,  name: swp52, ip: 10.1.0.11/31, vrf: vrf-default, attaches_to: {interface: a-leaf2-swp52}}
-    - {id: a-spine2-swp3-l3,  node: a-spine2, name: swp3,  ip: 10.1.0.12/31, vrf: vrf-default, attaches_to: {interface: a-spine2-swp3}}
-    - {id: a-bgw1-e1-2-l3,    node: a-bgw1,   name: Ethernet1/2, ip: 10.1.0.13/31, vrf: vrf-default, attaches_to: {interface: a-bgw1-e1-2}}
-    - {id: a-spine2-swp4-l3,  node: a-spine2, name: swp4,  ip: 10.1.0.14/31, vrf: vrf-default, attaches_to: {interface: a-spine2-swp4}}
-    - {id: a-bgw2-e1-2-l3,    node: a-bgw2,   name: Ethernet1/2, ip: 10.1.0.15/31, vrf: vrf-default, attaches_to: {interface: a-bgw2-e1-2}}
+    - {id: a-spine1-swp1-l3,  node: a-spine1, name: swp1,  ip: 10.1.0.0/31,  attaches_to: {interface: a-spine1-swp1}}
+    - {id: a-leaf1-swp51-l3,  node: a-leaf1,  name: swp51, ip: 10.1.0.1/31,  attaches_to: {interface: a-leaf1-swp51}}
+    - {id: a-spine1-swp2-l3,  node: a-spine1, name: swp2,  ip: 10.1.0.2/31,  attaches_to: {interface: a-spine1-swp2}}
+    - {id: a-leaf2-swp51-l3,  node: a-leaf2,  name: swp51, ip: 10.1.0.3/31,  attaches_to: {interface: a-leaf2-swp51}}
+    - {id: a-spine1-swp3-l3,  node: a-spine1, name: swp3,  ip: 10.1.0.4/31,  attaches_to: {interface: a-spine1-swp3}}
+    - {id: a-bgw1-e1-1-l3,    node: a-bgw1,   name: Ethernet1/1, ip: 10.1.0.5/31, attaches_to: {interface: a-bgw1-e1-1}}
+    - {id: a-spine1-swp4-l3,  node: a-spine1, name: swp4,  ip: 10.1.0.6/31,  attaches_to: {interface: a-spine1-swp4}}
+    - {id: a-bgw2-e1-1-l3,    node: a-bgw2,   name: Ethernet1/1, ip: 10.1.0.7/31, attaches_to: {interface: a-bgw2-e1-1}}
+    - {id: a-spine2-swp1-l3,  node: a-spine2, name: swp1,  ip: 10.1.0.8/31,  attaches_to: {interface: a-spine2-swp1}}
+    - {id: a-leaf1-swp52-l3,  node: a-leaf1,  name: swp52, ip: 10.1.0.9/31,  attaches_to: {interface: a-leaf1-swp52}}
+    - {id: a-spine2-swp2-l3,  node: a-spine2, name: swp2,  ip: 10.1.0.10/31, attaches_to: {interface: a-spine2-swp2}}
+    - {id: a-leaf2-swp52-l3,  node: a-leaf2,  name: swp52, ip: 10.1.0.11/31, attaches_to: {interface: a-leaf2-swp52}}
+    - {id: a-spine2-swp3-l3,  node: a-spine2, name: swp3,  ip: 10.1.0.12/31, attaches_to: {interface: a-spine2-swp3}}
+    - {id: a-bgw1-e1-2-l3,    node: a-bgw1,   name: Ethernet1/2, ip: 10.1.0.13/31, attaches_to: {interface: a-bgw1-e1-2}}
+    - {id: a-spine2-swp4-l3,  node: a-spine2, name: swp4,  ip: 10.1.0.14/31, attaches_to: {interface: a-spine2-swp4}}
+    - {id: a-bgw2-e1-2-l3,    node: a-bgw2,   name: Ethernet1/2, ip: 10.1.0.15/31, attaches_to: {interface: a-bgw2-e1-2}}
 
     # ── Site B underlay P2P ──────────────────────────────────────────────
-    - {id: b-spine1-swp1-l3,  node: b-spine1, name: swp1,  ip: 10.2.0.0/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp1}}
-    - {id: b-leaf1-swp51-l3,  node: b-leaf1,  name: swp51, ip: 10.2.0.1/31,  vrf: vrf-default, attaches_to: {interface: b-leaf1-swp51}}
-    - {id: b-spine1-swp2-l3,  node: b-spine1, name: swp2,  ip: 10.2.0.2/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp2}}
-    - {id: b-leaf2-swp51-l3,  node: b-leaf2,  name: swp51, ip: 10.2.0.3/31,  vrf: vrf-default, attaches_to: {interface: b-leaf2-swp51}}
-    - {id: b-spine1-swp3-l3,  node: b-spine1, name: swp3,  ip: 10.2.0.4/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp3}}
-    - {id: b-bgw1-e1-1-l3,    node: b-bgw1,   name: Ethernet1/1, ip: 10.2.0.5/31, vrf: vrf-default, attaches_to: {interface: b-bgw1-e1-1}}
-    - {id: b-spine1-swp4-l3,  node: b-spine1, name: swp4,  ip: 10.2.0.6/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp4}}
-    - {id: b-bgw2-e1-1-l3,    node: b-bgw2,   name: Ethernet1/1, ip: 10.2.0.7/31, vrf: vrf-default, attaches_to: {interface: b-bgw2-e1-1}}
-    - {id: b-spine2-swp1-l3,  node: b-spine2, name: swp1,  ip: 10.2.0.8/31,  vrf: vrf-default, attaches_to: {interface: b-spine2-swp1}}
-    - {id: b-leaf1-swp52-l3,  node: b-leaf1,  name: swp52, ip: 10.2.0.9/31,  vrf: vrf-default, attaches_to: {interface: b-leaf1-swp52}}
-    - {id: b-spine2-swp2-l3,  node: b-spine2, name: swp2,  ip: 10.2.0.10/31, vrf: vrf-default, attaches_to: {interface: b-spine2-swp2}}
-    - {id: b-leaf2-swp52-l3,  node: b-leaf2,  name: swp52, ip: 10.2.0.11/31, vrf: vrf-default, attaches_to: {interface: b-leaf2-swp52}}
-    - {id: b-spine2-swp3-l3,  node: b-spine2, name: swp3,  ip: 10.2.0.12/31, vrf: vrf-default, attaches_to: {interface: b-spine2-swp3}}
-    - {id: b-bgw1-e1-2-l3,    node: b-bgw1,   name: Ethernet1/2, ip: 10.2.0.13/31, vrf: vrf-default, attaches_to: {interface: b-bgw1-e1-2}}
-    - {id: b-spine2-swp4-l3,  node: b-spine2, name: swp4,  ip: 10.2.0.14/31, vrf: vrf-default, attaches_to: {interface: b-spine2-swp4}}
-    - {id: b-bgw2-e1-2-l3,    node: b-bgw2,   name: Ethernet1/2, ip: 10.2.0.15/31, vrf: vrf-default, attaches_to: {interface: b-bgw2-e1-2}}
+    - {id: b-spine1-swp1-l3,  node: b-spine1, name: swp1,  ip: 10.2.0.0/31,  attaches_to: {interface: b-spine1-swp1}}
+    - {id: b-leaf1-swp51-l3,  node: b-leaf1,  name: swp51, ip: 10.2.0.1/31,  attaches_to: {interface: b-leaf1-swp51}}
+    - {id: b-spine1-swp2-l3,  node: b-spine1, name: swp2,  ip: 10.2.0.2/31,  attaches_to: {interface: b-spine1-swp2}}
+    - {id: b-leaf2-swp51-l3,  node: b-leaf2,  name: swp51, ip: 10.2.0.3/31,  attaches_to: {interface: b-leaf2-swp51}}
+    - {id: b-spine1-swp3-l3,  node: b-spine1, name: swp3,  ip: 10.2.0.4/31,  attaches_to: {interface: b-spine1-swp3}}
+    - {id: b-bgw1-e1-1-l3,    node: b-bgw1,   name: Ethernet1/1, ip: 10.2.0.5/31, attaches_to: {interface: b-bgw1-e1-1}}
+    - {id: b-spine1-swp4-l3,  node: b-spine1, name: swp4,  ip: 10.2.0.6/31,  attaches_to: {interface: b-spine1-swp4}}
+    - {id: b-bgw2-e1-1-l3,    node: b-bgw2,   name: Ethernet1/1, ip: 10.2.0.7/31, attaches_to: {interface: b-bgw2-e1-1}}
+    - {id: b-spine2-swp1-l3,  node: b-spine2, name: swp1,  ip: 10.2.0.8/31,  attaches_to: {interface: b-spine2-swp1}}
+    - {id: b-leaf1-swp52-l3,  node: b-leaf1,  name: swp52, ip: 10.2.0.9/31,  attaches_to: {interface: b-leaf1-swp52}}
+    - {id: b-spine2-swp2-l3,  node: b-spine2, name: swp2,  ip: 10.2.0.10/31, attaches_to: {interface: b-spine2-swp2}}
+    - {id: b-leaf2-swp52-l3,  node: b-leaf2,  name: swp52, ip: 10.2.0.11/31, attaches_to: {interface: b-leaf2-swp52}}
+    - {id: b-spine2-swp3-l3,  node: b-spine2, name: swp3,  ip: 10.2.0.12/31, attaches_to: {interface: b-spine2-swp3}}
+    - {id: b-bgw1-e1-2-l3,    node: b-bgw1,   name: Ethernet1/2, ip: 10.2.0.13/31, attaches_to: {interface: b-bgw1-e1-2}}
+    - {id: b-spine2-swp4-l3,  node: b-spine2, name: swp4,  ip: 10.2.0.14/31, attaches_to: {interface: b-spine2-swp4}}
+    - {id: b-bgw2-e1-2-l3,    node: b-bgw2,   name: Ethernet1/2, ip: 10.2.0.15/31, attaches_to: {interface: b-bgw2-e1-2}}
 
     # ── DCI P2P (eBGP underlay) ──────────────────────────────────────────
-    - {id: a-bgw1-e1-3-l3, node: a-bgw1, name: Ethernet1/3, ip: 10.3.0.0/31, vrf: vrf-default, attaches_to: {interface: a-bgw1-e1-3}}
-    - {id: b-bgw1-e1-3-l3, node: b-bgw1, name: Ethernet1/3, ip: 10.3.0.1/31, vrf: vrf-default, attaches_to: {interface: b-bgw1-e1-3}}
-    - {id: a-bgw2-e1-3-l3, node: a-bgw2, name: Ethernet1/3, ip: 10.3.0.2/31, vrf: vrf-default, attaches_to: {interface: a-bgw2-e1-3}}
-    - {id: b-bgw2-e1-3-l3, node: b-bgw2, name: Ethernet1/3, ip: 10.3.0.3/31, vrf: vrf-default, attaches_to: {interface: b-bgw2-e1-3}}
+    - {id: a-bgw1-e1-3-l3, node: a-bgw1, name: Ethernet1/3, ip: 10.3.0.0/31, attaches_to: {interface: a-bgw1-e1-3}}
+    - {id: b-bgw1-e1-3-l3, node: b-bgw1, name: Ethernet1/3, ip: 10.3.0.1/31, attaches_to: {interface: b-bgw1-e1-3}}
+    - {id: a-bgw2-e1-3-l3, node: a-bgw2, name: Ethernet1/3, ip: 10.3.0.2/31, attaches_to: {interface: a-bgw2-e1-3}}
+    - {id: b-bgw2-e1-3-l3, node: b-bgw2, name: Ethernet1/3, ip: 10.3.0.3/31, attaches_to: {interface: b-bgw2-e1-3}}
 
     # ── SVI (anycast GW on leaves in both sites) ──────────────────────────
     # 両サイトで同じ VNI・同じ VLAN・同じ anycast GW アドレス。D6 の一致検査は L2VNI 単位
@@ -342,7 +342,7 @@ layer3:
 control_plane:
   bgp:
     - id: bgp-default
-      vrf: vrf-default
+      # vrf は書かない = default VRF (ADR-0028 D4)。書くと l2vpn_evpn のセッションに warning が出る
       nodes:
         # Site A: AS 65001 (iBGP で揃える)
         - {node: a-spine1, local_as: 65001}
