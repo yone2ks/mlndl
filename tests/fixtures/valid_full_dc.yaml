@@ -2,7 +2,7 @@ ndl_version: "1.0"
 
 meta:
   name: spine-leaf-mlag-evpn
-  description: 2 Spine / 2 Leaf (MLAG ペア) / Server1 — EVPN/VXLAN 構成
+  description: 2 Spine / 3 Leaf (leaf1・leaf2 は MLAG ペア) / Server 2 台 — EVPN/VXLAN 構成
   network_types: [l1-physical, l2-network, l3-unicast]
 
 layer1:
@@ -187,6 +187,7 @@ layer1:
     # Server1 側 LACP bond（MLAG 対向）
     - id: lag-server1-bond0
       node: server1
+      name: bond0
       members: [server1-eth0, server1-eth1]
       lacp: {mode: active}
       min_links: 1
@@ -194,6 +195,7 @@ layer1:
     # Leaf3 → Server2 LACP bond（単一ノード、2本）
     - id: lag-leaf3-server2
       node: leaf3
+      name: bond1
       members: [leaf3-swp1, leaf3-swp2]
       lacp: {mode: active}
       min_links: 1
@@ -201,6 +203,7 @@ layer1:
     # Server2 側 LACP bond
     - id: lag-server2-bond0
       node: server2
+      name: bond0
       members: [server2-eth0, server2-eth1]
       lacp: {mode: active}
       min_links: 1
@@ -215,21 +218,25 @@ layer2:
     - id: vlan-100
       vlan_id: 100
       name: tenant-a
-      trunk_ports:
+      # サーバーは bond0 にタグなしで IP を持つので access。leaf3 の Server2 も同じ VLAN (L2VNI で leaf をまたぐ)
+      access_ports:
         - {ethernet_segment: es-server1}   # 1 エントリで leaf1 / leaf2 の両方 (ADR-0023 D5)
+        - {lag: lag-leaf3-server2}
 
   vteps:
     # MLAG ペア leaf1 / leaf2 が共有する VTEP (ADR-0014)。各 lo は固有 IP、共有するアドレスは address
     - id: vtep-leaf1-leaf2
       sources: [leaf1-lo, leaf2-lo]
       address: 10.0.100.12/32
+    - id: vtep-leaf3                   # sources が 1 つなのでアドレスは leaf3-lo の ip
+      sources: [leaf3-lo]
 
   vxlans:
     - id: vni-10100
       type: l2vni
       vni: 10100
       vlans: [vlan-100]
-      vteps: [vtep-leaf1-leaf2]
+      vteps: [vtep-leaf1-leaf2, vtep-leaf3]
 
     - id: vni-10900
       type: l3vni
@@ -254,12 +261,15 @@ layer3:
     - { id: spine2-lo, node: spine2, name: lo, ip: 10.0.0.2/32 }
     - { id: leaf1-lo,  node: leaf1,  name: lo, ip: 10.0.0.11/32 }
     - { id: leaf2-lo,  node: leaf2,  name: lo, ip: 10.0.0.12/32 }
+    - { id: leaf3-lo,  node: leaf3,  name: lo, ip: 10.0.0.13/32 }
 
     # Spine ↔ Leaf P2P (spine 側)
     - { id: spine1-swp1-l3, node: spine1, name: swp1, ip: 10.1.0.0/31, vrf: vrf-default, attaches_to: {interface: spine1-swp1} }
     - { id: spine1-swp2-l3, node: spine1, name: swp2, ip: 10.1.0.2/31, vrf: vrf-default, attaches_to: {interface: spine1-swp2} }
     - { id: spine2-swp1-l3, node: spine2, name: swp1, ip: 10.1.0.4/31, vrf: vrf-default, attaches_to: {interface: spine2-swp1} }
     - { id: spine2-swp2-l3, node: spine2, name: swp2, ip: 10.1.0.6/31, vrf: vrf-default, attaches_to: {interface: spine2-swp2} }
+    - { id: spine1-swp3-l3, node: spine1, name: swp3, ip: 10.1.0.8/31, vrf: vrf-default, attaches_to: {interface: spine1-swp3} }
+    - { id: spine2-swp3-l3, node: spine2, name: swp3, ip: 10.1.0.10/31, vrf: vrf-default, attaches_to: {interface: spine2-swp3} }
 
     # Spine1 ↔ Leaf P2P
     - id: leaf1-swp51-l3
@@ -291,6 +301,10 @@ layer3:
       vrf: vrf-default
       attaches_to: {interface: leaf2-swp52}
 
+    # Spine ↔ Leaf3 P2P (leaf3 側)
+    - { id: leaf3-swp51-l3, node: leaf3, name: swp51, ip: 10.1.0.9/31,  vrf: vrf-default, attaches_to: {interface: leaf3-swp51} }
+    - { id: leaf3-swp52-l3, node: leaf3, name: swp52, ip: 10.1.0.11/31, vrf: vrf-default, attaches_to: {interface: leaf3-swp52} }
+
     # SVI。MLAG の 2 台で同じ IP の anycast gateway (ADR-0011 D4)
     - id: leaf1-vlan-100
       node: leaf1
@@ -306,6 +320,17 @@ layer3:
       ip: 192.168.100.1/24
       vrf: vrf-tenant-a
       gateway_redundancy: [{mode: anycast_gateway}]
+    - id: leaf3-vlan-100
+      node: leaf3
+      name: Vlan100
+      attaches_to: {vlan: vlan-100}
+      ip: 192.168.100.1/24
+      vrf: vrf-tenant-a
+      gateway_redundancy: [{mode: anycast_gateway}]
+
+    # サーバー。bond0 に IP を持つ (ゲートウェイは leaf の anycast gateway 192.168.100.1)
+    - { id: server1-bond0-l3, node: server1, name: bond0, ip: 192.168.100.10/24, attaches_to: {lag: lag-server1-bond0} }
+    - { id: server2-bond0-l3, node: server2, name: bond0, ip: 192.168.100.20/24, attaches_to: {lag: lag-server2-bond0} }
 
 control_plane:
   # 全 eBGP: spine は AS65000、leaf はそれぞれの AS。underlay は直結の /31 どうし、
@@ -317,13 +342,14 @@ control_plane:
         - {node: spine2, local_as: 65000}
         - {node: leaf1,  local_as: 65001}
         - {node: leaf2,  local_as: 65002}
+        - {node: leaf3,  local_as: 65003}
 
   bfd:
     - id: bfd-global
       min_tx: 300
       min_rx: 300
       multiplier: 3
-      nodes: [spine1, spine2, leaf1, leaf2]
+      nodes: [spine1, spine2, leaf1, leaf2, leaf3]
 
   routing_neighbors:
     # underlay: 直結の /31 どうし (通り道は update_source の L3 IF から導く)
@@ -331,8 +357,12 @@ control_plane:
     - {id: bgp-peer-spine1-leaf2, type: bgp, from: {node: spine1, update_source: spine1-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp51-l3}, address_families: [ipv4_unicast], bfd: true}
     - {id: bgp-peer-spine2-leaf1, type: bgp, from: {node: spine2, update_source: spine2-swp1-l3}, to: {node: leaf1, update_source: leaf1-swp52-l3}, address_families: [ipv4_unicast], bfd: true}
     - {id: bgp-peer-spine2-leaf2, type: bgp, from: {node: spine2, update_source: spine2-swp2-l3}, to: {node: leaf2, update_source: leaf2-swp52-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-spine1-leaf3, type: bgp, from: {node: spine1, update_source: spine1-swp3-l3}, to: {node: leaf3, update_source: leaf3-swp51-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-spine2-leaf3, type: bgp, from: {node: spine2, update_source: spine2-swp3-l3}, to: {node: leaf3, update_source: leaf3-swp52-l3}, address_families: [ipv4_unicast], bfd: true}
     # overlay: ループバックどうし (multihop)
     - {id: bgp-peer-spine1-leaf1-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf1, update_source: leaf1-lo}, address_families: [l2vpn_evpn]}
     - {id: bgp-peer-spine1-leaf2-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf2, update_source: leaf2-lo}, address_families: [l2vpn_evpn]}
     - {id: bgp-peer-spine2-leaf1-overlay, type: bgp, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf1, update_source: leaf1-lo}, address_families: [l2vpn_evpn]}
     - {id: bgp-peer-spine2-leaf2-overlay, type: bgp, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf2, update_source: leaf2-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine1-leaf3-overlay, type: bgp, from: {node: spine1, update_source: spine1-lo}, to: {node: leaf3, update_source: leaf3-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-spine2-leaf3-overlay, type: bgp, from: {node: spine2, update_source: spine2-lo}, to: {node: leaf3, update_source: leaf3-lo}, address_families: [l2vpn_evpn]}
