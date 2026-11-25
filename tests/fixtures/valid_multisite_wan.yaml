@@ -6,7 +6,8 @@ ndl_version: "1.0"
 #         EVPN/VXLAN, L2VNI/L3VNI, anycast GW
 #   - Campus: Core x2 (inter-core LACP, SVI 終端) / Agg x2 / Dist x2 / Host x2
 #             tag VLAN x3 トランク全通し, Dist-Host access
-#   - WAN: DC-Border <-> Campus-Core を eBGP
+#   - WAN: DC-Border <-> Campus-Core を eBGP。default VRF は直結の /31、tenant-a は
+#          サブ IF (.100) の VRF-lite で渡す。DC-Border は border leaf (VTEP で L3VNI を終端)
 #
 # 注: 現行 mlndl にサイト概念は無いため、サイトの区別は role / id prefix /
 #     meta.description で表現するに留まる。下記 feedback 参照。
@@ -14,7 +15,7 @@ ndl_version: "1.0"
 
 meta:
   name: multisite-wan
-  description: DC (EVPN/VXLAN/MLAG) + Campus (3-tier, SVI on Core) joined by WAN eBGP
+  description: DC (EVPN/VXLAN/MLAG, border leaf) + Campus (3-tier, SVI on Core) joined by WAN eBGP (VRF-lite for tenant-a)
   network_types: [l1-physical, l2-network, l3-unicast]
 
 layer1:
@@ -287,6 +288,9 @@ layer2:
     - id: vtep-dc-leaf1-leaf2
       sources: [dc-leaf1-lo, dc-leaf2-lo]
       address: 10.0.100.12/32
+    # border leaf。L2VNI には入らず、L3VNI (tenant-a) だけを終端する
+    - {id: vtep-dc-border1, sources: [dc-border1-lo]}
+    - {id: vtep-dc-border2, sources: [dc-border2-lo]}
 
   vxlans:
     - id: vni-10100
@@ -300,6 +304,13 @@ layer2:
       vni: 10900
       vrf: vrf-tenant-a
       irb_mode: symmetric
+
+  subinterfaces:
+    # WAN のリンクに tenant-a 用のサブ IF (VRF-lite)。default VRF はタグなしの /31 のまま
+    - {id: subif-dc-border1-swp1-100, attaches_to: {interface: dc-border1-swp1}, vlan_id: 100, name: swp1.100}
+    - {id: subif-cm-core1-te1-1-100,  attaches_to: {interface: cm-core1-te1-1},  vlan_id: 100, name: Te1/1.100}
+    - {id: subif-dc-border2-swp1-100, attaches_to: {interface: dc-border2-swp1}, vlan_id: 100, name: swp1.100}
+    - {id: subif-cm-core2-te1-1-100,  attaches_to: {interface: cm-core2-te1-1},  vlan_id: 100, name: Te1/1.100}
 
 layer3:
   vrfs:
@@ -362,7 +373,7 @@ layer3:
       name: Vlan10
       attaches_to: {vlan: vlan-10}
       ip: 172.16.10.2/24
-      vrf: vrf-default
+      vrf: vrf-tenant-a
       gateway_redundancy:
         - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 110}
     - id: cm-core2-vlan-10
@@ -370,7 +381,7 @@ layer3:
       name: Vlan10
       attaches_to: {vlan: vlan-10}
       ip: 172.16.10.3/24
-      vrf: vrf-default
+      vrf: vrf-tenant-a
       gateway_redundancy:
         - {mode: vrrp, group_id: 10, vip: 172.16.10.1, priority: 90}
     - id: cm-core1-vlan-20
@@ -378,7 +389,7 @@ layer3:
       name: Vlan20
       attaches_to: {vlan: vlan-20}
       ip: 172.16.20.2/24
-      vrf: vrf-default
+      vrf: vrf-tenant-a
       gateway_redundancy:
         - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 110}
     - id: cm-core2-vlan-20
@@ -386,7 +397,7 @@ layer3:
       name: Vlan20
       attaches_to: {vlan: vlan-20}
       ip: 172.16.20.3/24
-      vrf: vrf-default
+      vrf: vrf-tenant-a
       gateway_redundancy:
         - {mode: vrrp, group_id: 20, vip: 172.16.20.1, priority: 90}
     - id: cm-core1-vlan-30
@@ -439,6 +450,12 @@ layer3:
       vrf: vrf-default
       attaches_to: {interface: cm-core2-te1-1}
 
+    # ── WAN の tenant-a (VRF-lite。サブ IF の上の /31) ──────────────────
+    - {id: dc-border1-swp1-100-l3, node: dc-border1, name: swp1.100,  ip: 10.255.1.1/31, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-dc-border1-swp1-100}}
+    - {id: cm-core1-te1-1-100-l3,  node: cm-core1,   name: Te1/1.100, ip: 10.255.1.0/31, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-cm-core1-te1-1-100}}
+    - {id: dc-border2-swp1-100-l3, node: dc-border2, name: swp1.100,  ip: 10.255.1.3/31, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-dc-border2-swp1-100}}
+    - {id: cm-core2-te1-1-100-l3,  node: cm-core2,   name: Te1/1.100, ip: 10.255.1.2/31, vrf: vrf-tenant-a, attaches_to: {subinterface: subif-cm-core2-te1-1-100}}
+
 control_plane:
   # DC: underlay は OSPF、EVPN は iBGP (spine が RR) — ADR-0010 の EVPN の書き方の 3 つ目。
   # DC と Campus は eBGP (直結の /31)。Campus の core はトポロジー外の ISP とも eBGP で張る
@@ -447,6 +464,16 @@ control_plane:
       nodes:
         - {node: dc-spine1,  local_as: 65000}
         - {node: dc-spine2,  local_as: 65000}
+        - {node: dc-leaf1,   local_as: 65000}
+        - {node: dc-leaf2,   local_as: 65000}
+        - {node: dc-border1, local_as: 65000}
+        - {node: dc-border2, local_as: 65000}
+        - {node: cm-core1,   local_as: 65100}
+        - {node: cm-core2,   local_as: 65100}
+    # tenant-a の BGP。DC の leaf / border は L3VNI (EVPN) で、border と campus の core は VRF-lite の eBGP で経路を渡す
+    - id: bgp-tenant-a
+      vrf: vrf-tenant-a
+      nodes:
         - {node: dc-leaf1,   local_as: 65000}
         - {node: dc-leaf2,   local_as: 65000}
         - {node: dc-border1, local_as: 65000}
@@ -483,18 +510,22 @@ control_plane:
     - {id: ospf-adj-dc-spine2-border2, type: ospf, from: {node: dc-spine2, interface: dc-spine2-swp4-l3}, to: {node: dc-border2, interface: dc-border2-swp52-l3}, area: "0.0.0.0", bfd: true}
 
     # DC の EVPN (iBGP。spine が RR、相手はクライアント)
-    - {id: bgp-peer-dc-spine1-leaf1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf1, update_source: dc-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
-    - {id: bgp-peer-dc-spine1-leaf2, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf2, update_source: dc-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
-    - {id: bgp-peer-dc-spine1-border1, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border1, update_source: dc-border1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
-    - {id: bgp-peer-dc-spine1-border2, type: bgp, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border2, update_source: dc-border2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
-    - {id: bgp-peer-dc-spine2-leaf1, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf1, update_source: dc-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
-    - {id: bgp-peer-dc-spine2-leaf2, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf2, update_source: dc-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
-    - {id: bgp-peer-dc-spine2-border1, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border1, update_source: dc-border1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
-    - {id: bgp-peer-dc-spine2-border2, type: bgp, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border2, update_source: dc-border2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine1-leaf1, type: bgp, instance: bgp-default, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf1, update_source: dc-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine1-leaf2, type: bgp, instance: bgp-default, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-leaf2, update_source: dc-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine1-border1, type: bgp, instance: bgp-default, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border1, update_source: dc-border1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine1-border2, type: bgp, instance: bgp-default, from: {node: dc-spine1, update_source: dc-spine1-lo}, to: {node: dc-border2, update_source: dc-border2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-leaf1, type: bgp, instance: bgp-default, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf1, update_source: dc-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-leaf2, type: bgp, instance: bgp-default, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-leaf2, update_source: dc-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-border1, type: bgp, instance: bgp-default, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border1, update_source: dc-border1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-dc-spine2-border2, type: bgp, instance: bgp-default, from: {node: dc-spine2, update_source: dc-spine2-lo}, to: {node: dc-border2, update_source: dc-border2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
 
     # DC ↔ Campus (eBGP、直結の /31)
-    - {id: bgp-peer-dc-border1-cm-core1, type: bgp, from: {node: dc-border1, update_source: dc-border1-swp1-l3}, to: {node: cm-core1, update_source: cm-core1-te1-1-l3}, address_families: [ipv4_unicast], bfd: true}
-    - {id: bgp-peer-dc-border2-cm-core2, type: bgp, from: {node: dc-border2, update_source: dc-border2-swp1-l3}, to: {node: cm-core2, update_source: cm-core2-te1-1-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-dc-border1-cm-core1, type: bgp, instance: bgp-default, from: {node: dc-border1, update_source: dc-border1-swp1-l3}, to: {node: cm-core1, update_source: cm-core1-te1-1-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-dc-border2-cm-core2, type: bgp, instance: bgp-default, from: {node: dc-border2, update_source: dc-border2-swp1-l3}, to: {node: cm-core2, update_source: cm-core2-te1-1-l3}, address_families: [ipv4_unicast], bfd: true}
+
+    # DC ↔ Campus の tenant-a (VRF-lite。サブ IF の /31 どうしの eBGP)
+    - {id: bgp-peer-dc-border1-cm-core1-tenant-a, type: bgp, instance: bgp-tenant-a, from: {node: dc-border1, update_source: dc-border1-swp1-100-l3}, to: {node: cm-core1, update_source: cm-core1-te1-1-100-l3}, address_families: [ipv4_unicast], bfd: true}
+    - {id: bgp-peer-dc-border2-cm-core2-tenant-a, type: bgp, instance: bgp-tenant-a, from: {node: dc-border2, update_source: dc-border2-swp1-100-l3}, to: {node: cm-core2, update_source: cm-core2-te1-1-100-l3}, address_families: [ipv4_unicast], bfd: true}
 
     # トポロジー外の ISP (IP と AS しか分からない相手)
-    - {id: bgp-peer-cm-core1-isp, type: bgp, from: {node: cm-core1, update_source: cm-core1-lo}, to: {address: 203.0.113.1, local_as: 64500}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-cm-core1-isp, type: bgp, instance: bgp-default, from: {node: cm-core1, update_source: cm-core1-lo}, to: {address: 203.0.113.1, local_as: 64500}, address_families: [ipv4_unicast]}
