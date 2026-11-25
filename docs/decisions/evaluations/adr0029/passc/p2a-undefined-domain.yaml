@@ -1,0 +1,44 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass C / p2a — 未定義のドメインを指す VTEP
+#
+# 期待する結果: error (確定。ADR-0015 の Ref による参照整合性の検査が捕まえる)
+#   メッセージの例: "VTEP 'vtep-leaf1' の overlay_domain 'od-fabric-x' が
+#                    layer2.overlay_domains に見つかりません"
+#
+# 確かめること:
+#   VTEP の `overlay_domain:` は overlay_domains のエントリ id を指す参照。
+#   スキーマに `Annotated[str, Ref("layer2.overlay_domains")]` を書けば、汎用の
+#   検査で自動で error になる (ADR-0015。新しい検査ロジックは要らない)。
+# ============================================================================
+
+meta:
+  name: p2a-undefined-domain
+
+layer1:
+  nodes:
+    - {id: leaf1, implementation: vm, role: leaf, device_type: cumulus_linux}
+    - {id: leaf2, implementation: vm, role: leaf, device_type: cumulus_linux}
+  interfaces: []
+  links: []
+
+layer2:
+  overlay_domains:
+    - {id: od-main}
+
+  vteps:
+    # ★ od-fabric-x は overlay_domains にない → error
+    - {id: vtep-leaf1, sources: [leaf1-lo], overlay_domain: od-fabric-x}
+    - {id: vtep-leaf2, sources: [leaf2-lo], overlay_domain: od-main}
+
+  vxlans:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-leaf1, vtep-leaf2]}
+
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}

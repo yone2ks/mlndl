@@ -1,0 +1,60 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass C / p2b — L2VNI がドメインをまたぐのに、両ドメインに VTEP を
+#                         持つ機器 (BGW) が 1 台もない
+#
+# 期待する結果: error (確定。Pass B summary「一致した所」6 — 核心の検査)
+#   メッセージの例: "L2VNI 'vni-10100' の参加 VTEP が複数の overlay_domain
+#                    ({od-site-a, od-site-b}) に属していますが、両ドメインに
+#                    VTEP を持つ機器がありません。サイト間を stitching する
+#                    BGW を置くか、両サイトで同じドメインに揃えてください。"
+#
+# 構成:
+#   2 サイトの leaf だけ。BGW がない。
+#   同じ L2VNI 10100 に両サイトの leaf VTEP を並べているが、ドメインが切れている。
+#   実機では lo の到達性がないかぎりトンネルが上がらない。構文の意味からは
+#   「同じブロードキャストドメイン」と読めるが、ドメインがつながらないので
+#   読者の意図と構文が食い違う。
+# ============================================================================
+
+meta:
+  name: p2b-no-bgw-across-domains
+
+layer1:
+  nodes:
+    - {id: a-leaf1, implementation: vm, role: leaf, device_type: cumulus_linux, labels: {site: east}}
+    - {id: a-leaf2, implementation: vm, role: leaf, device_type: cumulus_linux, labels: {site: east}}
+    - {id: b-leaf1, implementation: vm, role: leaf, device_type: cumulus_linux, labels: {site: west}}
+    - {id: b-leaf2, implementation: vm, role: leaf, device_type: cumulus_linux, labels: {site: west}}
+  interfaces: []
+  links: []
+
+layer2:
+  overlay_domains:
+    - {id: od-site-a}
+    - {id: od-site-b}
+
+  vteps:
+    - {id: vtep-a-leaf1, sources: [a-leaf1-lo], overlay_domain: od-site-a}
+    - {id: vtep-a-leaf2, sources: [a-leaf2-lo], overlay_domain: od-site-a}
+    - {id: vtep-b-leaf1, sources: [b-leaf1-lo], overlay_domain: od-site-b}
+    - {id: vtep-b-leaf2, sources: [b-leaf2-lo], overlay_domain: od-site-b}
+
+  vxlans:
+    # ★ 参加ドメイン = {od-site-a, od-site-b} の 2 つ。両方に VTEP を持つ機器が 1 台もない → error
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-a-leaf1, vtep-a-leaf2, vtep-b-leaf1, vtep-b-leaf2]
+
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+layer3:
+  interfaces:
+    - {id: a-leaf1-lo, node: a-leaf1, name: lo, ip: 10.0.0.11/32}
+    - {id: a-leaf2-lo, node: a-leaf2, name: lo, ip: 10.0.0.12/32}
+    - {id: b-leaf1-lo, node: b-leaf1, name: lo, ip: 10.0.1.11/32}
+    - {id: b-leaf2-lo, node: b-leaf2, name: lo, ip: 10.0.1.12/32}
