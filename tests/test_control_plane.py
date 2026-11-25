@@ -291,7 +291,7 @@ class TestFixturesAndExport:
     def test_one_edge_per_session(self):
         out = self._cy("valid_full_dc.yaml")
         edges = [e["data"] for e in out["edges"] if e["data"]["type"] == "routing_neighbor"]
-        assert len(edges) == 8
+        assert len(edges) == 12
         assert not [e for e in out["edges"] if e["data"]["type"] in ("bgp_session", "routing_adjacency")]
         underlay = next(e for e in edges if e["id"] == "bgp-peer-spine1-leaf1")
         assert underlay["bgp_type"] == "ebgp" and underlay["transport_link"] == {"link": "link-spine1-leaf1"}

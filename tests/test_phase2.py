@@ -64,7 +64,7 @@ class TestFullDCParse:
         t = parse_file(FIXTURES / "valid_full_dc.yaml")
         cp = t.control_plane
         assert [b.id for b in cp.bgp] == ["bgp-default"]
-        assert len(cp.routing_neighbors) == 8   # underlay 4 + overlay 4
+        assert len(cp.routing_neighbors) == 12   # underlay 6 + overlay 6
         assert cp.bfd[0].min_tx == 300 and "spine1" in cp.bfd[0].nodes
 
 

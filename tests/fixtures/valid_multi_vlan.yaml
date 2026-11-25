@@ -109,13 +109,12 @@ layer2:
     - id: vlan-100
       vlan_id: 100
       name: tenant-a-web
+      # ポートはスイッチ側だけを書く。サーバーの VLAN はトランクにタグなし (native) で流す
       trunk_ports:
-        - { interface: leaf1-swp1 }
+        - { interface: leaf1-swp1, native: true }   # → Server1 (eth0 にタグなしで IP)
         - { interface: leaf2-swp1 }
         - { interface: leaf1-swp2 }
         - { interface: leaf2-swp2 }
-      access_ports:
-        - { interface: server1-eth0 }
 
     - id: vlan-200
       vlan_id: 200
@@ -130,18 +129,14 @@ layer2:
       vlan_id: 300
       name: tenant-b-web
       trunk_ports:
-        - { interface: leaf2-swp1 }
+        - { interface: leaf2-swp1, native: true }   # → Server2
         - { interface: leaf3-swp1 }
-      access_ports:
-        - { interface: server2-eth0 }
 
     - id: vlan-400
       vlan_id: 400
       name: storage
       trunk_ports:
-        - { interface: leaf3-swp1 }
-      access_ports:
-        - { interface: server3-eth0 }
+        - { interface: leaf3-swp1, native: true }   # → Server3
 
     - id: vlan-900
       vlan_id: 900
@@ -257,6 +252,11 @@ layer3:
       attaches_to: {vlan: vlan-400}
       ip: 172.16.40.1/24
       vrf: vrf-default
+
+    # サーバー。access の VLAN の SVI と同じサブネット
+    - { id: server1-eth0-l3, node: server1, name: eth0, ip: 192.168.100.10/24, attaches_to: {interface: server1-eth0} }
+    - { id: server2-eth0-l3, node: server2, name: eth0, ip: 172.16.30.10/24, attaches_to: {interface: server2-eth0} }
+    - { id: server3-eth0-l3, node: server3, name: eth0, ip: 172.16.40.10/24, attaches_to: {interface: server3-eth0} }
 
 control_plane:
   # 全 eBGP の unnumbered。1 本のセッションで ipv4_unicast と l2vpn_evpn を運ぶ (ADR-0010 の EVPN の書き方の 1 つ目)。
