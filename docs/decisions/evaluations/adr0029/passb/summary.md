@@ -75,3 +75,14 @@ BGW は普通 VRF の L3 IF を持たない (L3VNI の SVI を持つ構成もあ
 - BGP のインスタンスに `vrf: vrf-default` と書くと「vrf-default のセッションが l2vpn_evpn を運んでいます。これらの経路は default VRF のセッションで…」と自己矛盾に見える warning が出る
 - fixture の多くが L3 IF に `vrf: vrf-default` と書いている (書き方の推奨は「default VRF なら書かない」)
 - labels のキーに下線が書けないこと (`fabric_role`) が分かりにくい
+
+## ユーザーの判断 (2026-11-26)
+
+| 論点 | 判断 |
+|---|---|
+| 書く場所 | A1 (VTEP に `overlay_domain:`) |
+| 名前 | `overlay_domains` / `overlay_domain:`、プレフィックス `od-` |
+| 1 本のループバックで 2 つのドメインを終端する構成 | 今回は扱わない (先送り。今の「同じ L3 IF を 2 つの VTEP に書かない」検査はそのまま) |
+| `role: border-gateway` | role-vocabulary.md の informative の節に足す (推奨の 9 語は変えない。validator は読まない) |
+
+hub-and-spoke の DCI は推奨どおり範囲外とし、先送りに記録する。検査の細部 (分かれた所の 5) と L3VNI の導き方 (6) は Pass C で決める。
