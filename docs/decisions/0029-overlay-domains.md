@@ -1,6 +1,6 @@
 # ADR-0029: オーバーレイのドメイン — EVPN Multi-Site のトンネルの範囲を書く (`overlay_domains`)
 
-- **Status**: Accepted (2026-11-26 に Pass C で確定。実装はこれから)
+- **Status**: Accepted (2026-11-26 に Pass C で確定し、同日に実装。スキーマ・derive・validator・エクスポーター・fixture・docs。ndl-viz の対応はこれから)
 - **Date**: 2026-11-26
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、ユーザー (書く場所は VTEP の属性、名前は `overlay_domains` / `overlay_domain:` / `od-`、1 本のループバックで 2 つのドメインを終端する構成は先送り、`role: border-gateway` は informative)
 - **Pass**: C ([Pass B のまとめ](evaluations/adr0029/passb/summary.md) を入力に再設計)
@@ -197,7 +197,7 @@ Pass C では、5 つのエージェントが Pass A の報告を読まず、[Pa
 
 試し書き [passc/p1](evaluations/adr0029/passc/p1-evpn-multisite.yaml) (2 サイトの EVPN Multi-Site) は、`overlay_domains` と `overlay_domain:` を消すと今の validator を通る。残るのは BGW の 4 つの warning (ADR-0026 D5 の 10) だけで、D6 で消える。
 
-## 実装するときに足す改訂の注記
+## 改訂の注記 (実装で足した)
 
 - ADR-0014 D2 の末尾: 「**改訂 ([ADR-0029](0029-overlay-domains.md))**: VTEP に任意のフィールド `overlay_domain` を足した。EVPN Multi-Site などで、トンネルを張る範囲 (中でフルメッシュに張る VTEP の集合) を書き分けるときに使う。書かなければ全 VTEP が 1 つの暗黙のドメインに属する」
 - ADR-0026 D5 の 10 の末尾: 「**改訂 ([ADR-0029](0029-overlay-domains.md) D6)**: 2 つ以上のオーバーレイのドメインに VTEP を持つ機器 (BGW など) は、その L2VNI についてこの warning の対象から外す」

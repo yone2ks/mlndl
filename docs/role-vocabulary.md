@@ -127,6 +127,15 @@ ADR-0009 と drafts/0008 (Draft) で、クラウド・オンプレの「箱」�
 
 ---
 
+## informative 慣用語彙: EVPN Multi-Site の境界
+
+EVPN Multi-Site で、サイトの中とサイトのあいだ (DCI) の 2 つのオーバーレイのドメインで VXLAN を終端する機器を指す語。
+推奨語彙 (CANONICAL_ROLES) には含めない (ADR-0003 C2 のオープン語彙の方針) が、慣用の語として推奨する。mlndl のコアは `role` の値を読まない。
+
+| 語彙 | 意味 | 備考 |
+|---|---|---|
+| `border-gateway` | EVPN Multi-Site の境界に置き、サイト側と DCI 側の両方で VXLAN を終端する機器 (境界ゲートウェイ、BGW) | NX-OS の Multi-Site BGW など。BGW かどうかは `overlay_domains` の構造 (2 つのドメインに VTEP を持つ機器) から導くので、`role` の値に頼らない ([ADR-0029](decisions/0029-overlay-domains.md) D9)。BGP と紛らわしいので `bgw` は値に使わない |
+
 ## 将来の拡張
 
 `role` は open-form (ADR-0003 D1) のため、上記リストにない語彙を使っても mlndl コアは error を出しません。

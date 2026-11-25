@@ -63,6 +63,9 @@ layer2:
   偶然 ip が一致しただけのものを共有と読むことがない
 - フィールド名は `address` (ユーザー判断)。`ip` にすると、`sources` が指す L3 IF の `ip` (ノード固有) と同じ語が 2 層に並ぶ
 
+**改訂 ([ADR-0029](0029-overlay-domains.md), 2026-11-26)**: VTEP に任意のフィールド `overlay_domain` を足した。EVPN Multi-Site などで、トンネルを張る範囲 (中でフルメッシュに張る VTEP の集合) を書き分けるときに使う。
+書かなければ全 VTEP が 1 つの暗黙のドメインに属する。D6 の表の「Multi-Site BGW の anycast」(サイトの中の VTEP と Multi-Site の VIP を別のエントリ) は、各エントリに `overlay_domain` を書く
+
 ### D3. VNI は `vteps` で VTEP を指す
 
 ```yaml

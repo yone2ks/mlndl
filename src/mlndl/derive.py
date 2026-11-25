@@ -276,6 +276,130 @@ def vlan_l2vnis(topology: MLNDLTopology) -> dict[str, list[str]]:
     return out
 
 
+# ── オーバーレイのドメイン (ADR-0029) ─────────────────────────────────────────
+
+IMPLICIT_DOMAIN = ""
+"""どの VTEP にも overlay_domain を書かないときの暗黙のドメイン (ADR-0029 D3)。id の文法に合わないので YAML の id と衝突しない"""
+
+
+def vtep_overlay_domains(topology: MLNDLTopology) -> dict[str, str]:
+    """VTEP の id → 属するオーバーレイのドメインの id。書いていなければ IMPLICIT_DOMAIN (ADR-0029 D3)"""
+    if not topology.layer2:
+        return {}
+    return {v.id: v.overlay_domain or IMPLICIT_DOMAIN for v in topology.layer2.vteps}
+
+
+def vtep_nodes(topology: MLNDLTopology) -> dict[str, set[str]]:
+    """VTEP の id → 終端する機器 (sources の L3 IF の node。ADR-0014)"""
+    if not topology.layer2:
+        return {}
+    l3_node = {i.id: i.node for i in topology.layer3.interfaces} if topology.layer3 else {}
+    return {v.id: {l3_node[s] for s in v.sources if s in l3_node} for v in topology.layer2.vteps}
+
+
+def _l2vnis(topology: MLNDLTopology) -> list:
+    return [vx for vx in topology.layer2.vxlans if vx.type == "l2vni"] if topology.layer2 else []
+
+
+def l2vni_overlay_domains(topology: MLNDLTopology) -> dict[str, list[str]]:
+    """L2VNI の id → その vteps の VTEP が属するドメイン (vteps の順に初めて出た順。ADR-0029 D4)"""
+    domain_of = vtep_overlay_domains(topology)
+    out: dict[str, list[str]] = {}
+    for vx in _l2vnis(topology):
+        doms: list[str] = []
+        for t in vx.vteps:
+            d = domain_of.get(t)
+            if d is not None and d not in doms:
+                doms.append(d)
+        out[vx.id] = doms
+    return out
+
+
+def l2vni_tunnel_pairs(topology: MLNDLTopology) -> dict[str, list[tuple[str, str, str]]]:
+    """L2VNI の id → トンネルの対 (VTEP, VTEP, ドメイン) (ADR-0029 D4)
+
+    同じ L2VNI の vteps にあり、同じドメインに属する VTEP どうしの順不同の対。ドメインをまたぐ対は出さない。
+    暗黙のドメインの対も返す (ドメインは IMPLICIT_DOMAIN)。並びは vteps の順
+    """
+    domain_of = vtep_overlay_domains(topology)
+    out: dict[str, list[tuple[str, str, str]]] = {}
+    for vx in _l2vnis(topology):
+        vteps = [t for t in dict.fromkeys(vx.vteps) if t in domain_of]
+        out[vx.id] = [
+            (a, b, domain_of[a])
+            for i, a in enumerate(vteps) for b in vteps[i + 1:]
+            if domain_of[a] == domain_of[b]
+        ]
+    return out
+
+
+def l2vni_domain_gateways(topology: MLNDLTopology) -> dict[str, set[str]]:
+    """L2VNI の id → その L2VNI の 2 つ以上のドメインに VTEP を持つ機器 (= BGW。ADR-0029 D4)
+
+    L2VNI のドメインが 1 つ (暗黙のドメインだけを含む) なら空
+    """
+    domain_of = vtep_overlay_domains(topology)
+    nodes_of = vtep_nodes(topology)
+    out: dict[str, set[str]] = {}
+    for vx in _l2vnis(topology):
+        node_domains: dict[str, set[str]] = defaultdict(set)
+        for t in vx.vteps:
+            if t in domain_of:
+                for n in nodes_of.get(t, set()):
+                    node_domains[n].add(domain_of[t])
+        out[vx.id] = {n for n, ds in node_domains.items() if len(ds) >= 2}
+    return out
+
+
+def vrf_l2vnis(topology: MLNDLTopology) -> dict[str, list[str]]:
+    """VRF の id → その VRF の L2VNI (vlans のどれかの SVI がその VRF にある L2VNI。ADR-0029 D4)"""
+    out: dict[str, list[str]] = defaultdict(list)
+    if not topology.layer3:
+        return out
+    svi_vrfs: dict[str, set[str]] = defaultdict(set)      # VLAN の id → その VLAN の SVI の vrf
+    for iface in topology.layer3.interfaces:
+        if iface.attaches_to is not None and iface.attaches_to.kind == "vlan" and iface.vrf is not None:
+            svi_vrfs[iface.attaches_to.target].add(iface.vrf)
+    for vx in _l2vnis(topology):
+        for vrf in sorted(set().union(*(svi_vrfs.get(v, set()) for v in vx.vlans))):
+            out[vrf].append(vx.id)
+    return out
+
+
+def l3vni_overlay_domains(topology: MLNDLTopology) -> dict[str, list[str]]:
+    """L3VNI の id → ドメイン。同じ VRF の L2VNI のドメインの和集合 (ADR-0029 D4)"""
+    by_vrf = vrf_l2vnis(topology)
+    l2_domains = l2vni_overlay_domains(topology)
+    out: dict[str, list[str]] = {}
+    if topology.layer2:
+        for vx in topology.layer2.vxlans:
+            if vx.type == "l3vni":
+                doms: list[str] = []
+                for l2 in by_vrf.get(vx.vrf, []):
+                    doms += [d for d in l2_domains.get(l2, []) if d not in doms]
+                out[vx.id] = doms
+    return out
+
+
+def l3vni_tunnel_pairs(topology: MLNDLTopology) -> dict[str, list[tuple[str, str, str]]]:
+    """L3VNI の id → トンネルの対。同じ VRF の L2VNI のトンネルの対の和集合 (ADR-0029 D4)"""
+    by_vrf = vrf_l2vnis(topology)
+    l2_pairs = l2vni_tunnel_pairs(topology)
+    out: dict[str, list[tuple[str, str, str]]] = {}
+    if topology.layer2:
+        for vx in topology.layer2.vxlans:
+            if vx.type == "l3vni":
+                pairs: list[tuple[str, str, str]] = []
+                seen: set[frozenset[str]] = set()
+                for l2 in by_vrf.get(vx.vrf, []):
+                    for a, b, d in l2_pairs.get(l2, []):
+                        if frozenset((a, b)) not in seen:
+                            seen.add(frozenset((a, b)))
+                            pairs.append((a, b, d))
+                out[vx.id] = pairs
+    return out
+
+
 def outside_svi_subnet(endpoint: VlanEndpoint, svi_nets: dict[str, list[IPv4Network | IPv6Network]]) -> list[str]:
     """端点の IP のうち、その VLAN の同じアドレスファミリーの SVI のどのサブネットにも入らないもの (ADR-0013 D7 検査)"""
     if endpoint.resolution not in ("direct", "tag_match"):

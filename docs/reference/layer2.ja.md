@@ -6,6 +6,7 @@ L2 の構成: VLAN・bridge・VTEP・VXLAN・サブ IF。[リファレンスの�
 |---|---|---|
 | `vlans` | [[VLAN](#vlans)] | 番号を持つ L2 セグメント |
 | `bridges` | [[bridge](#bridges)] | 番号を持たない L2 セグメント (事業者網の箱の中の転送) |
+| `overlay_domains` | [[オーバーレイのドメイン](#overlay_domains)] | 中でフルメッシュにトンネルを張る VTEP の集合 (EVPN Multi-Site など)。任意 |
 | `vteps` | [[VTEP](#vteps)] | VXLAN のトンネル端点 |
 | `vxlans` | [[VNI](#vxlans)] | L2VNI と L3VNI |
 | `subinterfaces` | [[サブ IF](#subinterfaces)] | 802.1Q の routed サブ IF |
@@ -79,6 +80,40 @@ bridges:
 
 方式名 (E-LINE、VPLS など) は書きません。両端のルーターの L1 リンクの対向が同じ bridge のポートなら、そのあいだのセッションの通り道は `{bridge: <id>}` になります ([control-plane.md](control-plane.ja.md#通り道))。
 
+## overlay_domains
+
+オーバーレイのドメイン (`overlay_domains`) は、中でフルメッシュに VXLAN のトンネルを張る VTEP の集合です ([ADR-0029](../decisions/0029-overlay-domains.md))。
+EVPN Multi-Site のサイトの中とサイトのあいだ (DCI) のように、同じ L2VNI でもトンネルを張る範囲を分けるときに書きます。
+方式名 (Multi-Site、anycast BGW、stretched など) は書きません。
+
+```yaml
+overlay_domains:
+  - {id: od-east, description: East site fabric}
+  - {id: od-west, description: West site fabric}
+  - {id: od-dci,  description: Inter-site (DCI)}
+vteps:
+  - {id: vtep-a-leaf1,     sources: [a-leaf1-lo], overlay_domain: od-east}
+  - {id: vtep-a-bgw-vip,   sources: [a-bgw1-lo1, a-bgw2-lo1], address: 10.0.100.1/32, overlay_domain: od-east}   # BGW のサイトの中向け
+  - {id: vtep-a-bgw-msvip, sources: [a-bgw1-lo2, a-bgw2-lo2], address: 10.0.200.1/32, overlay_domain: od-dci}    # BGW のサイトのあいだ向け
+  # west も同じ形
+```
+
+| キー | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `id` | id | ○ | 推奨プレフィックス `od-` |
+| `name` | 文字列 | | 表示名 |
+| `description` | 文字列 | | |
+
+- ドメインのエントリは VTEP を並べません。各 VTEP が [`overlay_domain`](#vteps) で 1 つのドメインを指します
+- 同じ L2VNI でも、トンネルは**同じドメインの VTEP どうし**にだけ張ります。ドメインをまたぐ VTEP の対にはトンネルを張りません
+- 2 つのドメインのあいだは、両方のドメインに VTEP を持つ機器 (境界ゲートウェイ、BGW) がつなぎます。BGW であることは書かず、
+  同じ機器の L3 IF が 2 つのドメインの VTEP の `sources` に出ることから導きます。BGW はサイトの中向けの VTEP と、サイトのあいだ向けの VTEP を別のエントリで書きます
+- `overlay_domains` は任意です。どの VTEP にも `overlay_domain` を書かなければ、全 VTEP が 1 つの暗黙のドメインに属し、
+  同じ L2VNI の VTEP どうしがフルメッシュです (今までどおり)。stretched fabric や 1 つの DC はこの形で書きます
+- 書くなら、すべての VTEP に書きます。一部の VTEP にだけ書くと error です
+- L3VNI のドメインとトンネルの対は、同じ VRF の L2VNI (`vlans` のどれかの SVI がその VRF にあるもの) から導きます
+- `labels.site` (拠点) とは別の軸です。stretched fabric では 2 つの拠点が 1 つのドメインに、BGW は拠点のドメインと DCI のドメインの両方に面します
+
 ## vteps
 
 VXLAN のトンネル端点 ([ADR-0014](../decisions/0014-vteps.md))。方式名 (anycast VTEP、vPC など) は書きません。
@@ -98,6 +133,7 @@ vteps:
 | `sources` | [id] | ○ | `layer3.interfaces` | この VTEP を終端する機器の L3 IF。1 台につき 1 つ。`node` は書かない |
 | `address` | IPv4 プレフィックス付きアドレス | | | VTEP のアドレス。`sources` が複数なら必須 |
 | `address_v6` | IPv6 プレフィックス付きアドレス | | | |
+| `overlay_domain` | id | | `layer2.overlay_domains` | この VTEP が属する[オーバーレイのドメイン](#overlay_domains)。書くなら全 VTEP に書く |
 | `description` | 文字列 | | | |
 
 複数の機器で共有する VTEP (MLAG / vPC のペアなど) の `address` は、たいてい各機器のループバックの `ip` とは別の値です

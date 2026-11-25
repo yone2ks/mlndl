@@ -70,9 +70,11 @@ MLNDL のファイルが正しいかどうかの検査と、その重さ (severi
 | **bridge**: ポートが 1 つ。ポートの対向も同じ bridge のポート (ルーターのポートを書いた疑い)。ポートが VLAN のポートにもある。LAG のメンバーだけ・ES の脚の一部だけを書いている | warning |
 | **VTEP**: 同じ L3 IF を 2 つの VTEP に・1 つの VTEP に 2 回書いていない。1 つの VTEP に同じ機器の L3 IF を 2 つ書いていない。`sources` が複数なら `address` がある。アドレスが決まり、VTEP の間で重複しない | error |
 | **VTEP**: `sources` が 1 つで、`address` がその L3 IF の `ip` と食い違う。ES の脚の機器の一部だけが VTEP を終端している (どの VTEP も終端していない機器がある) | warning |
+| **オーバーレイのドメイン**: `overlay_domain` を書いた VTEP と書かない VTEP が混ざっていない (書くなら全 VTEP に)。L2VNI の VTEP が 2 つ以上のドメインにまたがるなら、その L2VNI の 2 つ以上のドメインに VTEP を持つ機器 (BGW) がある ([ADR-0029](../decisions/0029-overlay-domains.md) D5) | error |
+| **オーバーレイのドメイン**: どの VTEP も属さないドメインがある | warning |
 | **VNI**: L2VNI と L3VNI を通して `vni` が重複しない | error |
 | **L2VNI の VLAN**: 1 つの VLAN が 2 つ以上の L2VNI の `vlans` に入っていない。1 台の機器に同じ L2VNI の VLAN が 2 つ以上ない (機器はポートと SVI から導く)。Ethernet Segment の脚の機器で、同じ L2VNI の VLAN の番号が同じ。同じ L2VNI の VLAN を指す SVI の `vrf` が一致する ([ADR-0026](../decisions/0026-l2vni-vlans.md) D5) | error |
-| **L2VNI の VLAN**: 同じ L2VNI の `vlans` に同じ `vlan_id` の VLAN が 2 つある (1 つのエントリにまとめる)。L2VNI に参加する機器 (VTEP から導く) に、`vlans` のどの VLAN のポートも SVI もない (VNI を中継するだけの機器ならそのままでよい) ([ADR-0026](../decisions/0026-l2vni-vlans.md) D5) | warning |
+| **L2VNI の VLAN**: 同じ L2VNI の `vlans` に同じ `vlan_id` の VLAN が 2 つある (1 つのエントリにまとめる)。L2VNI に参加する機器 (VTEP から導く) に、`vlans` のどの VLAN のポートも SVI もない (VNI を中継するだけの機器ならそのままでよい。2 つ以上のオーバーレイのドメインに VTEP を持つ機器 (BGW) には出さない。[ADR-0029](../decisions/0029-overlay-domains.md) D6) ([ADR-0026](../decisions/0026-l2vni-vlans.md) D5) | warning |
 | **VRF と L3VNI**: VRF の `l3vni` が定義されている。VRF の `l3vni` と L3VNI の `vrf` が互いに一致する | error |
 | **サブ IF**: `vlan_id` が 1〜4094。同じ基盤の上でタグが重複しない。`attaches_to` が `{interface:}` か `{lag:}`。タグと `layer2.vlans` の照合は**しない** | error |
 

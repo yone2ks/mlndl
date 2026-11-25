@@ -27,6 +27,7 @@ id: Leaf1_swp51         # error: 大文字と _ は書けない
 | `layer1.ethernet_segments` | `es-` | `es-server1` |
 | `layer2.vlans` | `vlan-` | `vlan-100` |
 | `layer2.bridges` | `bridge-` | `bridge-wideether` |
+| `layer2.overlay_domains` | `od-` | `od-dci` |
 | `layer2.vteps` | `vtep-` | `vtep-leaf1-leaf2` |
 | `layer2.vxlans` | `vni-` | `vni-10100` |
 | `layer2.subinterfaces` | `subif-` | `subif-border1-swp5-200` |

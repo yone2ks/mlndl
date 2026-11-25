@@ -13,7 +13,8 @@ import json
 from collections import defaultdict
 
 from ..derive import (BgpSessionView, SessionEnd, bgp_session_views, ethernet_segments, igp_adjacency_views,
-                      l2vni_node_vlans, l3_and_tunnels, l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints,
+                      l2vni_node_vlans, IMPLICIT_DOMAIN, l2vni_tunnel_pairs, l3vni_overlay_domains,
+                      l3vni_tunnel_pairs, vtep_overlay_domains, l3_and_tunnels, l3_attachments, l3_roles, outside_svi_subnet, vlan_endpoints,
                       vlan_svi_networks)
 from ..schema.control_plane import BgpSession
 from ..schema.layer2 import L2VxLAN, L3VxLAN
@@ -186,11 +187,14 @@ def _export_nodes(topology: MLNDLTopology, elements: dict) -> None:
 
     # 終端する VTEP をノードに埋め込む。共有 VTEP (sources が複数) は各ノードに載り、
     # shared_with に相手のノードが入る (ADR-0014)
+    vtep_domain = vtep_overlay_domains(topology)
     for vid, v in _vtep_info(topology).items():
         for nid in v["nodes"]:
             entry = {"id": vid, "source": v["sources"][nid].name}
             if "address" in v:    entry["address"]    = v["address"]
             if "address_v6" in v: entry["address_v6"] = v["address_v6"]
+            if vtep_domain.get(vid, IMPLICIT_DOMAIN) != IMPLICIT_DOMAIN:
+                entry["overlay_domain"] = vtep_domain[vid]      # ADR-0029 D7
             others = [n for n in v["nodes"] if n != nid]
             if others:            entry["shared_with"] = others
             node_vteps[nid].append(entry)
@@ -457,9 +461,26 @@ def _export_l2_overlay(topology, if_to_name, elements):
                 data_e["endpoints"] = endpoints[(vlan.id, node_id)]
             elements["edges"].append({"data": data_e})
 
+    # オーバーレイのドメインのノード (ADR-0029 D7)。書いたものだけ (暗黙のドメインは出さない)
+    vtep_domain = vtep_overlay_domains(topology)
+    for od in topology.layer2.overlay_domains:
+        od_data: dict = {"id": od.id, "label": od.name or od.id, "layer": "layer2", "type": "overlay_domain",
+                         "vteps": [vid for vid, d in vtep_domain.items() if d == od.id]}
+        if od.description:
+            od_data["description"] = od.description
+        elements["nodes"].append({"data": od_data})
+
+    def _pairs(pairs: list[tuple[str, str, str]]) -> list[dict]:
+        return [{"endpoints": [a, b], "overlay_domain": d} for a, b, d in pairs]
+
     # VxLAN ノード。vteps は L2VNI なら書かれたもの、L3VNI なら VRF から導いたもの
     vteps = _vtep_info(topology)
     node_vlans = l2vni_node_vlans(topology)
+    # トンネルの対はドメインを書いたときだけ出す。書かなければ今までどおり vteps のフルメッシュと読む (ADR-0029 D7)
+    has_domains = any(d != IMPLICIT_DOMAIN for d in vtep_domain.values())
+    l2_pairs = l2vni_tunnel_pairs(topology) if has_domains else {}
+    l3_pairs = l3vni_tunnel_pairs(topology) if has_domains else {}
+    l3_domains = l3vni_overlay_domains(topology) if has_domains else {}
     for vx in topology.layer2.vxlans:
         data: dict = {"layer": "layer2", "vni": vx.vni}
         if isinstance(vx, L2VxLAN):
@@ -471,12 +492,23 @@ def _export_l2_overlay(topology, if_to_name, elements):
             if pairs:
                 # 参加機器とその機器の VLAN (ADR-0026 D4)。導いた値で、YAML には書けない
                 data["node_vlans"] = [{"node": n, "vlan": v} for n, v in pairs]
+            if vx.id in l2_pairs:
+                data["tunnel_pairs"] = _pairs(l2_pairs[vx.id])      # ADR-0029 D7
         elif isinstance(vx, L3VxLAN):
             data.update({"id": vx.id, "label": f"L3VNI {vx.vni}", "type": "l3vni",
                          "vrf": vx.vrf})
             derived = _l3vni_vteps(topology, vx, vteps)
             if derived:
                 data["vteps"] = derived              # ADR-0014 D3
+            if l3_domains.get(vx.id):
+                data["overlay_domains"] = l3_domains[vx.id]        # ADR-0029 D7
+            if vx.id in l3_pairs:
+                data["tunnel_pairs"] = _pairs(l3_pairs[vx.id])
+                # ドメインを書いたときは、トンネルの対に出る VTEP (BGW など VRF の L3 IF を書かない機器) も vteps に足す
+                in_pairs = [t for a, b, _ in l3_pairs[vx.id] for t in (a, b)]
+                merged = list(dict.fromkeys([*data.get("vteps", []), *in_pairs]))
+                if merged:
+                    data["vteps"] = merged
         if vx.description:
             data["description"] = vx.description
         elements["nodes"].append({"data": data})

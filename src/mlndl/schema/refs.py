@@ -59,6 +59,7 @@ COLLECTION_LABELS = {
     "layer1.ethernet_segments": "Ethernet Segment",
     "layer2.vlans": "VLAN",
     "layer2.bridges": "bridge",
+    "layer2.overlay_domains": "オーバーレイのドメイン",
     "layer2.vteps": "VTEP",
     "layer2.vxlans": "VNI",
     "layer2.subinterfaces": "サブインターフェース",

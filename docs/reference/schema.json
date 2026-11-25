@@ -1120,6 +1120,14 @@
           "title": "Bridges",
           "type": "array"
         },
+        "overlay_domains": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OverlayDomain"
+          },
+          "title": "Overlay Domains",
+          "type": "array"
+        },
         "vteps": {
           "default": [],
           "items": {
@@ -1693,6 +1701,45 @@
       "title": "OspfInstanceNode",
       "type": "object"
     },
+    "OverlayDomain": {
+      "additionalProperties": false,
+      "description": "オーバーレイのドメイン — 中でフルメッシュに VXLAN のトンネルを張る VTEP の集合 (ADR-0029)\n\nEVPN Multi-Site のサイトの中と、サイトのあいだ (DCI) のように、同じ L2VNI でもトンネルを張る範囲を分けるときに書く。\n- VTEP を並べない。VTEP が overlay_domain で 1 つのドメインを指す (ADR-0029 D2)\n- 方式名 (Multi-Site / anycast / stretched) は持たない (ADR-0029 D1)",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "OverlayDomain",
+      "type": "object"
+    },
     "PortRef": {
       "additionalProperties": false,
       "description": "VLAN が載るポートへの参照（trunk_ports / access_ports 用。ADR-0013）\n\ninterface / lag: PortTarget。lag のときの VLAN の設定は port-channel / bond 側にあり、メンバーはそれを継承する\nnative:    trunk 上でこの VLAN を untagged(native VLAN)として流す場合 True。\n           access_ports では常に untagged のため通常は未指定。\nnode は書かない。ノードは参照先から導く (ADR-0013 D2)。書くと移動先を示すエラー (ADR-0025 D1)",
@@ -2190,7 +2237,7 @@
     },
     "Vtep": {
       "additionalProperties": false,
-      "description": "VXLAN トンネル端点 (ADR-0014)\n\n1 つ以上のノードが終端するトンネル端点アドレスとして表す。冗長化の方式名\n(anycast / vPC / virtual VTEP / BGW など) は構文に入れない (ADR-0014 D1)。\n\n- sources: この VTEP を終端するノードの L3 IF (ループバック) の id。ノードは各 L3 IF から決まる\n- address / address_v6: VTEP のアドレス。sources が 1 つなら省略でき、その L3 IF の ip / ipv6 になる。\n  sources が複数 (複数ノードで共有) なら必須",
+      "description": "VXLAN トンネル端点 (ADR-0014)\n\n1 つ以上のノードが終端するトンネル端点アドレスとして表す。冗長化の方式名\n(anycast / vPC / virtual VTEP / BGW など) は構文に入れない (ADR-0014 D1)。\n\n- sources: この VTEP を終端するノードの L3 IF (ループバック) の id。ノードは各 L3 IF から決まる\n- address / address_v6: VTEP のアドレス。sources が 1 つなら省略でき、その L3 IF の ip / ipv6 になる。\n  sources が複数 (複数ノードで共有) なら必須\n- overlay_domain: この VTEP が属するオーバーレイのドメイン (ADR-0029)。書かなければ全 VTEP が 1 つの暗黙のドメイン",
       "properties": {
         "id": {
           "title": "Id",
@@ -2229,6 +2276,18 @@
           ],
           "default": null,
           "title": "Address V6"
+        },
+        "overlay_domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overlay Domain"
         },
         "description": {
           "anyOf": [
