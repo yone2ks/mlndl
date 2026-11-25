@@ -1,0 +1,455 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass A / a1 — EVPN Multi-Site を今の構文だけで書く
+#
+# トポロジ:
+#   サイト A (us-east) / サイト B (us-west) の 2 ファブリック
+#     各サイト: spine x2, leaf x2, bgw x2 (anycast BGW), server x1
+#     server1 は leaf1 / leaf2 の ESI-LAG (ethernet_segments) で両ホーム
+#   DCI: 直結の /31 を 2 本 (a-bgw1<->b-bgw1、a-bgw2<->b-bgw2)
+#   L2VNI 10100 (vlan-100、両サイトをまたぐ)、L3VNI 10900 (vrf-tenant-a)
+#   underlay: 各サイトで OSPF area 0
+#   overlay:
+#     - サイト内 EVPN: iBGP、spine が RR、leaf / bgw がクライアント
+#       (サイト A は AS 65001、サイト B は AS 65002)
+#     - サイト間 EVPN (Multi-Site DCI): BGW どうしで eBGP multihop
+#       (lo0 の PIP どうしで張る)
+#
+# anycast BGW のアドレス (NX-OS Multi-Site 風):
+#   - lo0 = PIP (機器固有、BGP 用)
+#   - lo1 = VIP (サイト内の VTEP アドレス、サイト内の 2 BGW で共有)
+#   - lo2 = MS VIP (サイト間 VTEP アドレス、サイト内の 2 BGW で共有)
+#
+# 目的: 今の構文で「何が書けないか」「どこで読者が誤読するか」を洗う。
+#       FEEDBACK を本文中にインラインで残す。
+# ============================================================================
+
+meta:
+  name: evpn-multisite-a1-current
+  description: 2-site EVPN Multi-Site in current syntax (feedback 用。VNI stitching はなし、両サイトで同じ VNI 10100)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+layer1:
+  nodes:
+    # ── Site A ───────────────────────────────────────────────────────────
+    - {id: a-spine1, name: A-Spine-1, implementation: vm, role: spine,  device_type: cumulus_linux, labels: {site: us-east}}
+    - {id: a-spine2, name: A-Spine-2, implementation: vm, role: spine,  device_type: cumulus_linux, labels: {site: us-east}}
+    - {id: a-leaf1,  name: A-Leaf-1,  implementation: vm, role: leaf,   device_type: cumulus_linux, labels: {site: us-east}}
+    - {id: a-leaf2,  name: A-Leaf-2,  implementation: vm, role: leaf,   device_type: cumulus_linux, labels: {site: us-east}}
+    # FEEDBACK (1): role に 'border-gateway' / 'bgw' が推奨語彙 (ADR-0003 の 9 語) にない。
+    #   自由文字列なので書けるが、下流ツール (ndl-viz) に BGW の既定スタイルがない。
+    #   deferred.md の L2 の行 (BGW の warning を抑える方法) とも関係する。
+    - {id: a-bgw1,   name: A-BGW-1,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-east, fabric_role: bgw}}
+    - {id: a-bgw2,   name: A-BGW-2,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-east, fabric_role: bgw}}
+    - {id: a-server1, name: A-Server-1, implementation: physical, role: server,                     labels: {site: us-east}}
+
+    # ── Site B ───────────────────────────────────────────────────────────
+    - {id: b-spine1, name: B-Spine-1, implementation: vm, role: spine,  device_type: cumulus_linux, labels: {site: us-west}}
+    - {id: b-spine2, name: B-Spine-2, implementation: vm, role: spine,  device_type: cumulus_linux, labels: {site: us-west}}
+    - {id: b-leaf1,  name: B-Leaf-1,  implementation: vm, role: leaf,   device_type: cumulus_linux, labels: {site: us-west}}
+    - {id: b-leaf2,  name: B-Leaf-2,  implementation: vm, role: leaf,   device_type: cumulus_linux, labels: {site: us-west}}
+    - {id: b-bgw1,   name: B-BGW-1,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-west, fabric_role: bgw}}
+    - {id: b-bgw2,   name: B-BGW-2,   implementation: vm, role: border, device_type: nxos,          labels: {site: us-west, fabric_role: bgw}}
+    - {id: b-server1, name: B-Server-1, implementation: physical, role: server,                     labels: {site: us-west}}
+
+  interfaces:
+    # ── Site A spines ─────────────────────────────────────────────────────
+    - {id: a-spine1-swp1, node: a-spine1, name: swp1}   # -> a-leaf1
+    - {id: a-spine1-swp2, node: a-spine1, name: swp2}   # -> a-leaf2
+    - {id: a-spine1-swp3, node: a-spine1, name: swp3}   # -> a-bgw1
+    - {id: a-spine1-swp4, node: a-spine1, name: swp4}   # -> a-bgw2
+    - {id: a-spine2-swp1, node: a-spine2, name: swp1}
+    - {id: a-spine2-swp2, node: a-spine2, name: swp2}
+    - {id: a-spine2-swp3, node: a-spine2, name: swp3}
+    - {id: a-spine2-swp4, node: a-spine2, name: swp4}
+
+    # ── Site A leaves ─────────────────────────────────────────────────────
+    - {id: a-leaf1-swp51, node: a-leaf1, name: swp51}   # -> a-spine1
+    - {id: a-leaf1-swp52, node: a-leaf1, name: swp52}   # -> a-spine2
+    - {id: a-leaf1-swp1,  node: a-leaf1, name: swp1}    # -> a-server1 (ES all-active)
+    - {id: a-leaf2-swp51, node: a-leaf2, name: swp51}
+    - {id: a-leaf2-swp52, node: a-leaf2, name: swp52}
+    - {id: a-leaf2-swp1,  node: a-leaf2, name: swp1}
+
+    # ── Site A BGWs ───────────────────────────────────────────────────────
+    - {id: a-bgw1-e1-1, node: a-bgw1, name: Ethernet1/1}   # -> a-spine1
+    - {id: a-bgw1-e1-2, node: a-bgw1, name: Ethernet1/2}   # -> a-spine2
+    - {id: a-bgw1-e1-3, node: a-bgw1, name: Ethernet1/3}   # DCI -> b-bgw1
+    - {id: a-bgw2-e1-1, node: a-bgw2, name: Ethernet1/1}
+    - {id: a-bgw2-e1-2, node: a-bgw2, name: Ethernet1/2}
+    - {id: a-bgw2-e1-3, node: a-bgw2, name: Ethernet1/3}   # DCI -> b-bgw2
+
+    # ── Site A server ─────────────────────────────────────────────────────
+    - {id: a-server1-eth0, node: a-server1, name: eth0}
+    - {id: a-server1-eth1, node: a-server1, name: eth1}
+
+    # ── Site B spines ─────────────────────────────────────────────────────
+    - {id: b-spine1-swp1, node: b-spine1, name: swp1}
+    - {id: b-spine1-swp2, node: b-spine1, name: swp2}
+    - {id: b-spine1-swp3, node: b-spine1, name: swp3}
+    - {id: b-spine1-swp4, node: b-spine1, name: swp4}
+    - {id: b-spine2-swp1, node: b-spine2, name: swp1}
+    - {id: b-spine2-swp2, node: b-spine2, name: swp2}
+    - {id: b-spine2-swp3, node: b-spine2, name: swp3}
+    - {id: b-spine2-swp4, node: b-spine2, name: swp4}
+
+    # ── Site B leaves ─────────────────────────────────────────────────────
+    - {id: b-leaf1-swp51, node: b-leaf1, name: swp51}
+    - {id: b-leaf1-swp52, node: b-leaf1, name: swp52}
+    - {id: b-leaf1-swp1,  node: b-leaf1, name: swp1}
+    - {id: b-leaf2-swp51, node: b-leaf2, name: swp51}
+    - {id: b-leaf2-swp52, node: b-leaf2, name: swp52}
+    - {id: b-leaf2-swp1,  node: b-leaf2, name: swp1}
+
+    # ── Site B BGWs ───────────────────────────────────────────────────────
+    - {id: b-bgw1-e1-1, node: b-bgw1, name: Ethernet1/1}
+    - {id: b-bgw1-e1-2, node: b-bgw1, name: Ethernet1/2}
+    - {id: b-bgw1-e1-3, node: b-bgw1, name: Ethernet1/3}   # DCI -> a-bgw1
+    - {id: b-bgw2-e1-1, node: b-bgw2, name: Ethernet1/1}
+    - {id: b-bgw2-e1-2, node: b-bgw2, name: Ethernet1/2}
+    - {id: b-bgw2-e1-3, node: b-bgw2, name: Ethernet1/3}   # DCI -> a-bgw2
+
+    # ── Site B server ─────────────────────────────────────────────────────
+    - {id: b-server1-eth0, node: b-server1, name: eth0}
+    - {id: b-server1-eth1, node: b-server1, name: eth1}
+
+  links:
+    # ── Site A underlay (spine <-> leaf, spine <-> bgw) ───────────────────
+    - {id: link-a-spine1-leaf1,  endpoints: [a-spine1-swp1, a-leaf1-swp51],  link_speed: 10G, link_role: underlay}
+    - {id: link-a-spine1-leaf2,  endpoints: [a-spine1-swp2, a-leaf2-swp51],  link_speed: 10G, link_role: underlay}
+    - {id: link-a-spine1-bgw1,   endpoints: [a-spine1-swp3, a-bgw1-e1-1],    link_speed: 10G, link_role: underlay}
+    - {id: link-a-spine1-bgw2,   endpoints: [a-spine1-swp4, a-bgw2-e1-1],    link_speed: 10G, link_role: underlay}
+    - {id: link-a-spine2-leaf1,  endpoints: [a-spine2-swp1, a-leaf1-swp52],  link_speed: 10G, link_role: underlay}
+    - {id: link-a-spine2-leaf2,  endpoints: [a-spine2-swp2, a-leaf2-swp52],  link_speed: 10G, link_role: underlay}
+    - {id: link-a-spine2-bgw1,   endpoints: [a-spine2-swp3, a-bgw1-e1-2],    link_speed: 10G, link_role: underlay}
+    - {id: link-a-spine2-bgw2,   endpoints: [a-spine2-swp4, a-bgw2-e1-2],    link_speed: 10G, link_role: underlay}
+
+    # ── Site A leaves -> server (ES all-active) ───────────────────────────
+    - {id: link-a-leaf1-server1, endpoints: [a-leaf1-swp1, a-server1-eth0], link_speed: 10G, link_role: access}
+    - {id: link-a-leaf2-server1, endpoints: [a-leaf2-swp1, a-server1-eth1], link_speed: 10G, link_role: access}
+
+    # ── Site B underlay ───────────────────────────────────────────────────
+    - {id: link-b-spine1-leaf1,  endpoints: [b-spine1-swp1, b-leaf1-swp51],  link_speed: 10G, link_role: underlay}
+    - {id: link-b-spine1-leaf2,  endpoints: [b-spine1-swp2, b-leaf2-swp51],  link_speed: 10G, link_role: underlay}
+    - {id: link-b-spine1-bgw1,   endpoints: [b-spine1-swp3, b-bgw1-e1-1],    link_speed: 10G, link_role: underlay}
+    - {id: link-b-spine1-bgw2,   endpoints: [b-spine1-swp4, b-bgw2-e1-1],    link_speed: 10G, link_role: underlay}
+    - {id: link-b-spine2-leaf1,  endpoints: [b-spine2-swp1, b-leaf1-swp52],  link_speed: 10G, link_role: underlay}
+    - {id: link-b-spine2-leaf2,  endpoints: [b-spine2-swp2, b-leaf2-swp52],  link_speed: 10G, link_role: underlay}
+    - {id: link-b-spine2-bgw1,   endpoints: [b-spine2-swp3, b-bgw1-e1-2],    link_speed: 10G, link_role: underlay}
+    - {id: link-b-spine2-bgw2,   endpoints: [b-spine2-swp4, b-bgw2-e1-2],    link_speed: 10G, link_role: underlay}
+
+    # ── Site B leaves -> server ───────────────────────────────────────────
+    - {id: link-b-leaf1-server1, endpoints: [b-leaf1-swp1, b-server1-eth0], link_speed: 10G, link_role: access}
+    - {id: link-b-leaf2-server1, endpoints: [b-leaf2-swp1, b-server1-eth1], link_speed: 10G, link_role: access}
+
+    # ── DCI (BGW <-> BGW) ────────────────────────────────────────────────
+    # FEEDBACK (2): link_role の推奨に 'dci' がない。'uplink' も非対称 (片側しか uplink でない)。
+    #   自由文字列として 'dci' を書けるが、下流ツールが特別扱いするには labels か role に
+    #   頼ることになる (ADR-0017 の「link_role に WAN の推奨値は足さない」の方針どおりなのだが、
+    #   Multi-Site DCI は構造が明らかなので候補として記録しておく)。
+    - {id: link-dci-bgw1, endpoints: [a-bgw1-e1-3, b-bgw1-e1-3], link_speed: 10G, link_role: dci}
+    - {id: link-dci-bgw2, endpoints: [a-bgw2-e1-3, b-bgw2-e1-3], link_speed: 10G, link_role: dci}
+
+  lags:
+    # ES all-active。leaf 側は各機器に 1 ポートだけの bond でも書き出す (ADR-0023)
+    - {id: lag-a-leaf1-server1, node: a-leaf1, name: bond1, members: [a-leaf1-swp1], lacp: {mode: active}}
+    - {id: lag-a-leaf2-server1, node: a-leaf2, name: bond1, members: [a-leaf2-swp1], lacp: {mode: active}}
+    - {id: lag-a-server1-bond0, node: a-server1, name: bond0, members: [a-server1-eth0, a-server1-eth1], lacp: {mode: active}}
+    - {id: lag-b-leaf1-server1, node: b-leaf1, name: bond1, members: [b-leaf1-swp1], lacp: {mode: active}}
+    - {id: lag-b-leaf2-server1, node: b-leaf2, name: bond1, members: [b-leaf2-swp1], lacp: {mode: active}}
+    - {id: lag-b-server1-bond0, node: b-server1, name: bond0, members: [b-server1-eth0, b-server1-eth1], lacp: {mode: active}}
+
+  ethernet_segments:
+    - {id: es-a-server1, members: [{lag: lag-a-leaf1-server1}, {lag: lag-a-leaf2-server1}]}
+    - {id: es-b-server1, members: [{lag: lag-b-leaf1-server1}, {lag: lag-b-leaf2-server1}]}
+
+layer2:
+  vlans:
+    # 両サイトで同じ VLAN 番号 (VNI stitching なし)。stitching 版は a2-stitching 参照
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a-webtier
+      access_ports:
+        - {ethernet_segment: es-a-server1}
+        - {ethernet_segment: es-b-server1}
+      # FEEDBACK (3): サイト A とサイト B の VLAN 100 は、構文上は 1 エントリにまとめられる
+      # (VNI 側で 1 つの L2VNI に属するので同じブロードキャストドメイン。ADR-0026 D3)。
+      # これは正しい意味だが、「サイトごとに L2 設定が別物」という読者の感覚と、
+      # 「構文上の 1 エントリ」のあいだに距離がある。サイトが labels でしか区別されないため、
+      # VLAN エントリ自体はサイトに属さない。
+
+  vteps:
+    # サイト A: leaf ごと (anycast なし) + BGW の VIP + BGW の MS-VIP
+    - {id: vtep-a-leaf1, sources: [a-leaf1-lo]}
+    - {id: vtep-a-leaf2, sources: [a-leaf2-lo]}
+    # FEEDBACK (4): anycast BGW の 2 つのアドレス (VIP / MS-VIP) を書き分けるには、
+    # BGW ごとに別のループバック (lo1, lo2) を持たせ、VTEP を 2 つ書くしかない。
+    # これは ADR-0014 D1 の方式中立の方針と合うが、「どちらが intra-site 用で、
+    # どちらが inter-site 用か」は構文に出ない。VTEP の id (vip / msvip) と
+    # L2VNI.vteps に並べる順番でしか読み取れない。
+    - {id: vtep-a-bgw-vip,   sources: [a-bgw1-lo1, a-bgw2-lo1], address: 10.0.100.1/32}   # intra-site
+    - {id: vtep-a-bgw-msvip, sources: [a-bgw1-lo2, a-bgw2-lo2], address: 10.0.200.1/32}   # inter-site (DCI)
+    # サイト B: 同様
+    - {id: vtep-b-leaf1, sources: [b-leaf1-lo]}
+    - {id: vtep-b-leaf2, sources: [b-leaf2-lo]}
+    - {id: vtep-b-bgw-vip,   sources: [b-bgw1-lo1, b-bgw2-lo1], address: 10.0.100.2/32}
+    - {id: vtep-b-bgw-msvip, sources: [b-bgw1-lo2, b-bgw2-lo2], address: 10.0.200.2/32}
+
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      # FEEDBACK (5) — ここが本質的な問題:
+      # 今の L2VNI.vteps は「この VNI を終端するすべての VTEP」の平らなリスト。
+      # 下の 8 要素を並べると、読者 (および ndl-viz などのツール) は
+      #   「どの 2 VTEP 間にもトンネルが張られる (any-to-any)」
+      # と読む。だが EVPN Multi-Site の実際の張り方は段 (tier) が分かれる:
+      #   - サイト A の leaf (vtep-a-leaf1/2) は、同じサイト内の
+      #     vtep-a-bgw-vip とだけトンネルを張る (サイト B の leaf とは直接張らない)
+      #   - vtep-a-bgw-msvip と vtep-b-bgw-msvip のあいだだけが DCI トンネル
+      #   - サイト B 側は対称
+      # 「vteps を 2 つの L2VNI に分ける」でも書けない: 同じ VNI の L2VNI は 1 エントリ
+      # (ADR-0026 の案 E 却下、ADR-0014 D5「アドレス重複は error」)。
+      # 結果として、現行構文では Multi-Site の段のある張り方を表現できない。
+      vteps:
+        - vtep-a-leaf1
+        - vtep-a-leaf2
+        - vtep-a-bgw-vip
+        - vtep-a-bgw-msvip
+        - vtep-b-leaf1
+        - vtep-b-leaf2
+        - vtep-b-bgw-vip
+        - vtep-b-bgw-msvip
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+      # FEEDBACK (6): L3VNI は vteps を持たない (ADR-0014 D3)。参加機器は VRF 経由で導出するが、
+      # L3VNI も Multi-Site BGW で stitching される (サイト A と B で同じ VNI だから
+      # この例では見た目には問題ないが、VNI stitching 時には L3VNI も付け替えが必要)。
+      # L3VNI の tier をどう書くかは、L2VNI 側で決まった後に合わせる必要がある。
+
+layer3:
+  vrfs:
+    - id: vrf-default
+    - id: vrf-tenant-a
+      rd: "65001:100"
+      l3vni: vni-10900
+      route_targets:
+        import: ["65001:100", "65002:100"]
+        export: ["65001:100"]
+      # FEEDBACK (7): Multi-Site では BGW で RT の import/export を書き換えることが多い
+      # (サイトごとに別の RT を使い、BGW で付け替える)。現行構文は VRF に 1 組の
+      # route_targets しか持てないので、「BGW はサイト A と B の RT を両方 import する」
+      # のような BGW 固有の設定は書けない。これは ADR-0017 や deferred.md 53 の
+      # 「L2VNI の Route Target」と同系統 (RT を手で書く構成の扱い)。
+
+  interfaces:
+    # ── Loopbacks ────────────────────────────────────────────────────────
+    # BGW は 3 つのループバックを持つ。lo0 = PIP (機器固有)、lo1 = VIP (サイト内共有)、
+    # lo2 = MS VIP (サイト内共有、サイト間向け)。anycast の共有は VTEP の address で表現 (ADR-0014)。
+    - {id: a-spine1-lo, node: a-spine1, name: lo, ip: 10.0.0.1/32}
+    - {id: a-spine2-lo, node: a-spine2, name: lo, ip: 10.0.0.2/32}
+    - {id: a-leaf1-lo,  node: a-leaf1,  name: lo, ip: 10.0.0.11/32}
+    - {id: a-leaf2-lo,  node: a-leaf2,  name: lo, ip: 10.0.0.12/32}
+    - {id: a-bgw1-lo,   node: a-bgw1,   name: loopback0, ip: 10.0.0.21/32}   # PIP
+    # FEEDBACK (8): BGW の lo1 (VIP) / lo2 (MS VIP) を持つループバックに、L3 IF として
+    # 「サイト内で共有する IP (anycast)」を書く。ADR-0014 では address は VTEP 側に書くので、
+    # L3 IF の ip は VTEP の address と同じでなくてよい (VTEP の address が優先)。
+    # だが、L3 IF の ip を書かないと valid_full_dc.yaml と形が違ってしまい、
+    # 「このループバックの IP は何か」が YAML 上で明示されない。
+    # 慣行として address と同じ値を書いているが、ADR-0014 の「ip は一致しなくてよい」の意味が
+    # 分かりにくい。ここでは共有の意図として address と同じ値を書く。
+    - {id: a-bgw1-lo1,  node: a-bgw1,   name: loopback1, ip: 10.0.100.1/32}  # VIP (anycast)
+    - {id: a-bgw1-lo2,  node: a-bgw1,   name: loopback2, ip: 10.0.200.1/32}  # MS VIP (anycast)
+    - {id: a-bgw2-lo,   node: a-bgw2,   name: loopback0, ip: 10.0.0.22/32}
+    - {id: a-bgw2-lo1,  node: a-bgw2,   name: loopback1, ip: 10.0.100.1/32}
+    - {id: a-bgw2-lo2,  node: a-bgw2,   name: loopback2, ip: 10.0.200.1/32}
+
+    - {id: b-spine1-lo, node: b-spine1, name: lo, ip: 10.0.1.1/32}
+    - {id: b-spine2-lo, node: b-spine2, name: lo, ip: 10.0.1.2/32}
+    - {id: b-leaf1-lo,  node: b-leaf1,  name: lo, ip: 10.0.1.11/32}
+    - {id: b-leaf2-lo,  node: b-leaf2,  name: lo, ip: 10.0.1.12/32}
+    - {id: b-bgw1-lo,   node: b-bgw1,   name: loopback0, ip: 10.0.1.21/32}
+    - {id: b-bgw1-lo1,  node: b-bgw1,   name: loopback1, ip: 10.0.100.2/32}
+    - {id: b-bgw1-lo2,  node: b-bgw1,   name: loopback2, ip: 10.0.200.2/32}
+    - {id: b-bgw2-lo,   node: b-bgw2,   name: loopback0, ip: 10.0.1.22/32}
+    - {id: b-bgw2-lo1,  node: b-bgw2,   name: loopback1, ip: 10.0.100.2/32}
+    - {id: b-bgw2-lo2,  node: b-bgw2,   name: loopback2, ip: 10.0.200.2/32}
+
+    # ── Site A underlay P2P (/31) ─────────────────────────────────────────
+    # 省スペースのためペアでまとめて書く
+    - {id: a-spine1-swp1-l3,  node: a-spine1, name: swp1,  ip: 10.1.0.0/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp1}}
+    - {id: a-leaf1-swp51-l3,  node: a-leaf1,  name: swp51, ip: 10.1.0.1/31,  vrf: vrf-default, attaches_to: {interface: a-leaf1-swp51}}
+    - {id: a-spine1-swp2-l3,  node: a-spine1, name: swp2,  ip: 10.1.0.2/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp2}}
+    - {id: a-leaf2-swp51-l3,  node: a-leaf2,  name: swp51, ip: 10.1.0.3/31,  vrf: vrf-default, attaches_to: {interface: a-leaf2-swp51}}
+    - {id: a-spine1-swp3-l3,  node: a-spine1, name: swp3,  ip: 10.1.0.4/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp3}}
+    - {id: a-bgw1-e1-1-l3,    node: a-bgw1,   name: Ethernet1/1, ip: 10.1.0.5/31, vrf: vrf-default, attaches_to: {interface: a-bgw1-e1-1}}
+    - {id: a-spine1-swp4-l3,  node: a-spine1, name: swp4,  ip: 10.1.0.6/31,  vrf: vrf-default, attaches_to: {interface: a-spine1-swp4}}
+    - {id: a-bgw2-e1-1-l3,    node: a-bgw2,   name: Ethernet1/1, ip: 10.1.0.7/31, vrf: vrf-default, attaches_to: {interface: a-bgw2-e1-1}}
+    - {id: a-spine2-swp1-l3,  node: a-spine2, name: swp1,  ip: 10.1.0.8/31,  vrf: vrf-default, attaches_to: {interface: a-spine2-swp1}}
+    - {id: a-leaf1-swp52-l3,  node: a-leaf1,  name: swp52, ip: 10.1.0.9/31,  vrf: vrf-default, attaches_to: {interface: a-leaf1-swp52}}
+    - {id: a-spine2-swp2-l3,  node: a-spine2, name: swp2,  ip: 10.1.0.10/31, vrf: vrf-default, attaches_to: {interface: a-spine2-swp2}}
+    - {id: a-leaf2-swp52-l3,  node: a-leaf2,  name: swp52, ip: 10.1.0.11/31, vrf: vrf-default, attaches_to: {interface: a-leaf2-swp52}}
+    - {id: a-spine2-swp3-l3,  node: a-spine2, name: swp3,  ip: 10.1.0.12/31, vrf: vrf-default, attaches_to: {interface: a-spine2-swp3}}
+    - {id: a-bgw1-e1-2-l3,    node: a-bgw1,   name: Ethernet1/2, ip: 10.1.0.13/31, vrf: vrf-default, attaches_to: {interface: a-bgw1-e1-2}}
+    - {id: a-spine2-swp4-l3,  node: a-spine2, name: swp4,  ip: 10.1.0.14/31, vrf: vrf-default, attaches_to: {interface: a-spine2-swp4}}
+    - {id: a-bgw2-e1-2-l3,    node: a-bgw2,   name: Ethernet1/2, ip: 10.1.0.15/31, vrf: vrf-default, attaches_to: {interface: a-bgw2-e1-2}}
+
+    # ── Site B underlay P2P ──────────────────────────────────────────────
+    - {id: b-spine1-swp1-l3,  node: b-spine1, name: swp1,  ip: 10.2.0.0/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp1}}
+    - {id: b-leaf1-swp51-l3,  node: b-leaf1,  name: swp51, ip: 10.2.0.1/31,  vrf: vrf-default, attaches_to: {interface: b-leaf1-swp51}}
+    - {id: b-spine1-swp2-l3,  node: b-spine1, name: swp2,  ip: 10.2.0.2/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp2}}
+    - {id: b-leaf2-swp51-l3,  node: b-leaf2,  name: swp51, ip: 10.2.0.3/31,  vrf: vrf-default, attaches_to: {interface: b-leaf2-swp51}}
+    - {id: b-spine1-swp3-l3,  node: b-spine1, name: swp3,  ip: 10.2.0.4/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp3}}
+    - {id: b-bgw1-e1-1-l3,    node: b-bgw1,   name: Ethernet1/1, ip: 10.2.0.5/31, vrf: vrf-default, attaches_to: {interface: b-bgw1-e1-1}}
+    - {id: b-spine1-swp4-l3,  node: b-spine1, name: swp4,  ip: 10.2.0.6/31,  vrf: vrf-default, attaches_to: {interface: b-spine1-swp4}}
+    - {id: b-bgw2-e1-1-l3,    node: b-bgw2,   name: Ethernet1/1, ip: 10.2.0.7/31, vrf: vrf-default, attaches_to: {interface: b-bgw2-e1-1}}
+    - {id: b-spine2-swp1-l3,  node: b-spine2, name: swp1,  ip: 10.2.0.8/31,  vrf: vrf-default, attaches_to: {interface: b-spine2-swp1}}
+    - {id: b-leaf1-swp52-l3,  node: b-leaf1,  name: swp52, ip: 10.2.0.9/31,  vrf: vrf-default, attaches_to: {interface: b-leaf1-swp52}}
+    - {id: b-spine2-swp2-l3,  node: b-spine2, name: swp2,  ip: 10.2.0.10/31, vrf: vrf-default, attaches_to: {interface: b-spine2-swp2}}
+    - {id: b-leaf2-swp52-l3,  node: b-leaf2,  name: swp52, ip: 10.2.0.11/31, vrf: vrf-default, attaches_to: {interface: b-leaf2-swp52}}
+    - {id: b-spine2-swp3-l3,  node: b-spine2, name: swp3,  ip: 10.2.0.12/31, vrf: vrf-default, attaches_to: {interface: b-spine2-swp3}}
+    - {id: b-bgw1-e1-2-l3,    node: b-bgw1,   name: Ethernet1/2, ip: 10.2.0.13/31, vrf: vrf-default, attaches_to: {interface: b-bgw1-e1-2}}
+    - {id: b-spine2-swp4-l3,  node: b-spine2, name: swp4,  ip: 10.2.0.14/31, vrf: vrf-default, attaches_to: {interface: b-spine2-swp4}}
+    - {id: b-bgw2-e1-2-l3,    node: b-bgw2,   name: Ethernet1/2, ip: 10.2.0.15/31, vrf: vrf-default, attaches_to: {interface: b-bgw2-e1-2}}
+
+    # ── DCI P2P (eBGP underlay) ──────────────────────────────────────────
+    - {id: a-bgw1-e1-3-l3, node: a-bgw1, name: Ethernet1/3, ip: 10.3.0.0/31, vrf: vrf-default, attaches_to: {interface: a-bgw1-e1-3}}
+    - {id: b-bgw1-e1-3-l3, node: b-bgw1, name: Ethernet1/3, ip: 10.3.0.1/31, vrf: vrf-default, attaches_to: {interface: b-bgw1-e1-3}}
+    - {id: a-bgw2-e1-3-l3, node: a-bgw2, name: Ethernet1/3, ip: 10.3.0.2/31, vrf: vrf-default, attaches_to: {interface: a-bgw2-e1-3}}
+    - {id: b-bgw2-e1-3-l3, node: b-bgw2, name: Ethernet1/3, ip: 10.3.0.3/31, vrf: vrf-default, attaches_to: {interface: b-bgw2-e1-3}}
+
+    # ── SVI (anycast GW on leaves in both sites) ──────────────────────────
+    # 両サイトで同じ VNI・同じ VLAN・同じ anycast GW アドレス。D6 の一致検査は L2VNI 単位
+    - {id: a-leaf1-vlan-100, node: a-leaf1, name: Vlan100, attaches_to: {vlan: vlan-100}, ip: 192.168.100.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: a-leaf2-vlan-100, node: a-leaf2, name: Vlan100, attaches_to: {vlan: vlan-100}, ip: 192.168.100.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: b-leaf1-vlan-100, node: b-leaf1, name: Vlan100, attaches_to: {vlan: vlan-100}, ip: 192.168.100.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    - {id: b-leaf2-vlan-100, node: b-leaf2, name: Vlan100, attaches_to: {vlan: vlan-100}, ip: 192.168.100.1/24, vrf: vrf-tenant-a, gateway_redundancy: [{mode: anycast_gateway}]}
+    # FEEDBACK (9): BGW には SVI を書かない (BGW は L2 の中継だけで anycast GW にはしない設計)。
+    # 結果として BGW は ADR-0026 D5 の 10 「参加機器にポートも SVI もない」warning の対象になる。
+    # これは deferred.md L2 の行 (BGW の warning を抑える方法) の該当ケースで、
+    # Multi-Site では「正しい構成なのに必ず warning」 になる。
+
+    # ── Server (bond0 に IP、ゲートウェイは leaf の anycast GW) ────────
+    - {id: a-server1-bond0-l3, node: a-server1, name: bond0, ip: 192.168.100.10/24, attaches_to: {lag: lag-a-server1-bond0}}
+    - {id: b-server1-bond0-l3, node: b-server1, name: bond0, ip: 192.168.100.20/24, attaches_to: {lag: lag-b-server1-bond0}}
+
+control_plane:
+  bgp:
+    - id: bgp-default
+      vrf: vrf-default
+      nodes:
+        # Site A: AS 65001 (iBGP で揃える)
+        - {node: a-spine1, local_as: 65001}
+        - {node: a-spine2, local_as: 65001}
+        - {node: a-leaf1,  local_as: 65001}
+        - {node: a-leaf2,  local_as: 65001}
+        - {node: a-bgw1,   local_as: 65001}
+        - {node: a-bgw2,   local_as: 65001}
+        # Site B: AS 65002
+        - {node: b-spine1, local_as: 65002}
+        - {node: b-spine2, local_as: 65002}
+        - {node: b-leaf1,  local_as: 65002}
+        - {node: b-leaf2,  local_as: 65002}
+        - {node: b-bgw1,   local_as: 65002}
+        - {node: b-bgw2,   local_as: 65002}
+
+  ospf:
+    - id: ospf-site-a
+      nodes:
+        - {node: a-spine1}
+        - {node: a-spine2}
+        - {node: a-leaf1}
+        - {node: a-leaf2}
+        - {node: a-bgw1}
+        - {node: a-bgw2}
+    - id: ospf-site-b
+      nodes:
+        - {node: b-spine1}
+        - {node: b-spine2}
+        - {node: b-leaf1}
+        - {node: b-leaf2}
+        - {node: b-bgw1}
+        - {node: b-bgw2}
+    # FEEDBACK (10): OSPF インスタンスがサイトごとに分かれるが、構文からは「a- と b- の
+    # 2 つは別のドメイン」が id の命名と nodes の中身からしか読めない。
+    # サイトが labels 止まり (ADR-0017) の結果、OSPF / BGP など「サイトごとの」インスタンスは
+    # どれも labels と id の一貫性に頼る。validator は「a- のインスタンスに b- の機器が
+    # 入っていないか」を検査しない (これは言語の検査の範囲外で正しいが、間違えやすい)。
+
+  routing_neighbors:
+    # ── サイト A underlay (OSPF area 0) ────────────────────────────────────
+    - {id: ospf-adj-a-spine1-leaf1, type: ospf, instance: ospf-site-a, from: {node: a-spine1, interface: a-spine1-swp1-l3}, to: {node: a-leaf1, interface: a-leaf1-swp51-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-a-spine1-leaf2, type: ospf, instance: ospf-site-a, from: {node: a-spine1, interface: a-spine1-swp2-l3}, to: {node: a-leaf2, interface: a-leaf2-swp51-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-a-spine1-bgw1,  type: ospf, instance: ospf-site-a, from: {node: a-spine1, interface: a-spine1-swp3-l3}, to: {node: a-bgw1, interface: a-bgw1-e1-1-l3},   area: "0.0.0.0"}
+    - {id: ospf-adj-a-spine1-bgw2,  type: ospf, instance: ospf-site-a, from: {node: a-spine1, interface: a-spine1-swp4-l3}, to: {node: a-bgw2, interface: a-bgw2-e1-1-l3},   area: "0.0.0.0"}
+    - {id: ospf-adj-a-spine2-leaf1, type: ospf, instance: ospf-site-a, from: {node: a-spine2, interface: a-spine2-swp1-l3}, to: {node: a-leaf1, interface: a-leaf1-swp52-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-a-spine2-leaf2, type: ospf, instance: ospf-site-a, from: {node: a-spine2, interface: a-spine2-swp2-l3}, to: {node: a-leaf2, interface: a-leaf2-swp52-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-a-spine2-bgw1,  type: ospf, instance: ospf-site-a, from: {node: a-spine2, interface: a-spine2-swp3-l3}, to: {node: a-bgw1, interface: a-bgw1-e1-2-l3},   area: "0.0.0.0"}
+    - {id: ospf-adj-a-spine2-bgw2,  type: ospf, instance: ospf-site-a, from: {node: a-spine2, interface: a-spine2-swp4-l3}, to: {node: a-bgw2, interface: a-bgw2-e1-2-l3},   area: "0.0.0.0"}
+
+    # ── サイト A overlay (iBGP EVPN、spine = RR) ──────────────────────────
+    - {id: bgp-peer-a-spine1-leaf1-evpn, type: bgp, from: {node: a-spine1, update_source: a-spine1-lo}, to: {node: a-leaf1, update_source: a-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-spine1-leaf2-evpn, type: bgp, from: {node: a-spine1, update_source: a-spine1-lo}, to: {node: a-leaf2, update_source: a-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-spine1-bgw1-evpn,  type: bgp, from: {node: a-spine1, update_source: a-spine1-lo}, to: {node: a-bgw1,  update_source: a-bgw1-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-spine1-bgw2-evpn,  type: bgp, from: {node: a-spine1, update_source: a-spine1-lo}, to: {node: a-bgw2,  update_source: a-bgw2-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-spine2-leaf1-evpn, type: bgp, from: {node: a-spine2, update_source: a-spine2-lo}, to: {node: a-leaf1, update_source: a-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-spine2-leaf2-evpn, type: bgp, from: {node: a-spine2, update_source: a-spine2-lo}, to: {node: a-leaf2, update_source: a-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-spine2-bgw1-evpn,  type: bgp, from: {node: a-spine2, update_source: a-spine2-lo}, to: {node: a-bgw1,  update_source: a-bgw1-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-spine2-bgw2-evpn,  type: bgp, from: {node: a-spine2, update_source: a-spine2-lo}, to: {node: a-bgw2,  update_source: a-bgw2-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+
+    # ── サイト B underlay (OSPF area 0) ────────────────────────────────────
+    - {id: ospf-adj-b-spine1-leaf1, type: ospf, instance: ospf-site-b, from: {node: b-spine1, interface: b-spine1-swp1-l3}, to: {node: b-leaf1, interface: b-leaf1-swp51-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-b-spine1-leaf2, type: ospf, instance: ospf-site-b, from: {node: b-spine1, interface: b-spine1-swp2-l3}, to: {node: b-leaf2, interface: b-leaf2-swp51-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-b-spine1-bgw1,  type: ospf, instance: ospf-site-b, from: {node: b-spine1, interface: b-spine1-swp3-l3}, to: {node: b-bgw1, interface: b-bgw1-e1-1-l3},   area: "0.0.0.0"}
+    - {id: ospf-adj-b-spine1-bgw2,  type: ospf, instance: ospf-site-b, from: {node: b-spine1, interface: b-spine1-swp4-l3}, to: {node: b-bgw2, interface: b-bgw2-e1-1-l3},   area: "0.0.0.0"}
+    - {id: ospf-adj-b-spine2-leaf1, type: ospf, instance: ospf-site-b, from: {node: b-spine2, interface: b-spine2-swp1-l3}, to: {node: b-leaf1, interface: b-leaf1-swp52-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-b-spine2-leaf2, type: ospf, instance: ospf-site-b, from: {node: b-spine2, interface: b-spine2-swp2-l3}, to: {node: b-leaf2, interface: b-leaf2-swp52-l3}, area: "0.0.0.0"}
+    - {id: ospf-adj-b-spine2-bgw1,  type: ospf, instance: ospf-site-b, from: {node: b-spine2, interface: b-spine2-swp3-l3}, to: {node: b-bgw1, interface: b-bgw1-e1-2-l3},   area: "0.0.0.0"}
+    - {id: ospf-adj-b-spine2-bgw2,  type: ospf, instance: ospf-site-b, from: {node: b-spine2, interface: b-spine2-swp4-l3}, to: {node: b-bgw2, interface: b-bgw2-e1-2-l3},   area: "0.0.0.0"}
+
+    # ── サイト B overlay (iBGP EVPN、spine = RR) ──────────────────────────
+    - {id: bgp-peer-b-spine1-leaf1-evpn, type: bgp, from: {node: b-spine1, update_source: b-spine1-lo}, to: {node: b-leaf1, update_source: b-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-b-spine1-leaf2-evpn, type: bgp, from: {node: b-spine1, update_source: b-spine1-lo}, to: {node: b-leaf2, update_source: b-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-b-spine1-bgw1-evpn,  type: bgp, from: {node: b-spine1, update_source: b-spine1-lo}, to: {node: b-bgw1,  update_source: b-bgw1-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-b-spine1-bgw2-evpn,  type: bgp, from: {node: b-spine1, update_source: b-spine1-lo}, to: {node: b-bgw2,  update_source: b-bgw2-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-b-spine2-leaf1-evpn, type: bgp, from: {node: b-spine2, update_source: b-spine2-lo}, to: {node: b-leaf1, update_source: b-leaf1-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-b-spine2-leaf2-evpn, type: bgp, from: {node: b-spine2, update_source: b-spine2-lo}, to: {node: b-leaf2, update_source: b-leaf2-lo, route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-b-spine2-bgw1-evpn,  type: bgp, from: {node: b-spine2, update_source: b-spine2-lo}, to: {node: b-bgw1,  update_source: b-bgw1-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-b-spine2-bgw2-evpn,  type: bgp, from: {node: b-spine2, update_source: b-spine2-lo}, to: {node: b-bgw2,  update_source: b-bgw2-lo,  route_reflector_client: true}, address_families: [l2vpn_evpn]}
+
+    # ── DCI underlay (eBGP IPv4 直結) ─────────────────────────────────────
+    - {id: bgp-peer-a-bgw1-b-bgw1, type: bgp, from: {node: a-bgw1, update_source: a-bgw1-e1-3-l3}, to: {node: b-bgw1, update_source: b-bgw1-e1-3-l3}, address_families: [ipv4_unicast]}
+    - {id: bgp-peer-a-bgw2-b-bgw2, type: bgp, from: {node: a-bgw2, update_source: a-bgw2-e1-3-l3}, to: {node: b-bgw2, update_source: b-bgw2-e1-3-l3}, address_families: [ipv4_unicast]}
+
+    # ── DCI overlay (Multi-Site eBGP multihop EVPN) ──────────────────────
+    # FEEDBACK (11): このセッションこそが「Multi-Site のサイト間 EVPN」。update_source は lo0 (PIP)。
+    # セッション自体は update_source で書けるが、「どの VTEP を使って stitch するか」
+    # (ここでは vtep-a-bgw-msvip <-> vtep-b-bgw-msvip のペア) は構文に出ない。
+    # BGW が L2VNI の vteps に 2 つ (vip と msvip) いても、どちらがこのセッションに紐づくかは
+    # 書けない。段のある構造はセッションの update_source からも読み取れない。
+    - {id: bgp-peer-a-bgw1-b-bgw1-evpn, type: bgp, from: {node: a-bgw1, update_source: a-bgw1-lo}, to: {node: b-bgw1, update_source: b-bgw1-lo}, address_families: [l2vpn_evpn]}
+    - {id: bgp-peer-a-bgw2-b-bgw2-evpn, type: bgp, from: {node: a-bgw2, update_source: a-bgw2-lo}, to: {node: b-bgw2, update_source: b-bgw2-lo}, address_families: [l2vpn_evpn]}
+
+# ============================================================================
+# 書けなかったこと / 書けたが読者が誤読しうること のまとめ (FEEDBACK 全体)
+# ----------------------------------------------------------------------------
+# (1)  role 推奨語彙に 'bgw' / 'border-gateway' がない -> labels で補う
+# (2)  link_role に 'dci' がない -> ADR-0017 の方針に従い自由文字列
+# (3)  サイトをまたぐ VLAN エントリが 1 つに統合される (論理的には正しいが読者の感覚に反する)
+# (4)  anycast BGW の VIP / MS-VIP を区別する手段が id の慣習しかない
+# (5)  ★ L2VNI.vteps が平らなリストなので、段のあるトンネル (intra-site vs inter-site) を書けない
+# (6)  L3VNI は vteps を持たないので stitching 時の挙動を書く場所がない
+# (7)  VRF.route_targets が 1 組なので、BGW ごとの RT 付け替えを書けない
+# (8)  BGW の共有 lo の ip と VTEP.address の関係が読みにくい
+# (9)  BGW が ADR-0026 D5 10 の warning 対象になる (正しい構成なのに必ず出る)
+# (10) OSPF / BGP のインスタンス = サイトの対応が id の命名規則頼り
+# (11) ★ Multi-Site EVPN セッションと使う VTEP の対応が構文に出ない
+#
+# 特に (5) (11) が本質。a2 / a3 でこれに手を付ける。
+# ============================================================================

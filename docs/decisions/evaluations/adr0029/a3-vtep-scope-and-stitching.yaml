@@ -1,0 +1,127 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass A / a3 — VTEP に scope と、L2VNI に stitching 関係を足す提案
+#
+# 案の要点:
+#   - a1 の FEEDBACK (4) (5) (11) に対する提案。構成子は増やさず、既存の VTEP に
+#     `scope` (または `tier`) を足して、L2VNI に「どの VTEP でサイトのあいだをつなぐか」の
+#     対を書く。
+#   - a2 (fabric グループを新設) と比べて加算的な変更が小さい (新しいトップレベルの
+#     コレクションを作らない)。scope は役割を書くので ADR-0022 の問い 5 (値から関係を
+#     読むか / 装置に設定するだけの値か) に照らすと微妙。この案はそこを越える決定を含む。
+#   - stitching の関係自体は a2 と同形。異なるのは「fabric」を明示するか、
+#     「VTEP の scope から fabric を導出するか」。
+#
+# 利点:
+#   - 既存 (ADR-0014) の VTEP モデルをそのまま使う (加算)。
+#   - scope が書ければ、下流ツール (ndl-viz) は scope が同じ VTEP だけに線を引く
+#     既定スタイルで any-to-any 誤読を避けられる。
+#   - fabric という名前の実体をユーザーが決めなくていい (scope だけ正しく書けばよい)。
+#
+# 欠点:
+#   - scope は注釈側構成子になる (ADR-0005 D4 の 4 軸でいうと「推定の根拠」側)。
+#     ADR-0003 の role のように open-form にすべきか closed にすべきかが争点。
+#     仮に closed にすると「ベンダー固有の役割 (NX-OS の `evpn multisite anycast-bgw`)」を
+#     どう扱うかが問題。
+#   - stitching の対を L2VNI に書くので、L2VNI エントリが設定っぽくなる (構成図の粒度を
+#     少し外れる)。
+#   - 「同じ scope の VTEP どうしだけが full-mesh」の規則をどこに書くか (構文か、
+#     導出関数か) が別途要検討。
+#
+# この YAML は仮の構文。今の mlndl では通らない。layer1 / layer3 / control_plane は
+# a1 と同じ (省略)。
+# ============================================================================
+
+meta:
+  name: evpn-multisite-a3-scope
+  description: 2-site EVPN Multi-Site with proposed vtep.scope + l2vni.stitching (Pass A の提案)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# (layer1 / layer3 は a1 と同じ。省略)
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a-webtier
+      access_ports:
+        - {ethernet_segment: es-a-server1}
+        - {ethernet_segment: es-b-server1}
+
+  vteps:
+    # ★ scope フィールドを追加。値の案: site-internal | dci | undeclared (既定)。
+    # closed-form の列挙にするか open-form (role と同じ注釈側) にするかは Pass B で決める。
+    # 以下は closed-form 案で書いた。
+    - {id: vtep-a-leaf1, sources: [a-leaf1-lo], scope: site-internal}
+    - {id: vtep-a-leaf2, sources: [a-leaf2-lo], scope: site-internal}
+    - {id: vtep-a-bgw-vip,   sources: [a-bgw1-lo1, a-bgw2-lo1], address: 10.0.100.1/32, scope: site-internal}
+    - {id: vtep-a-bgw-msvip, sources: [a-bgw1-lo2, a-bgw2-lo2], address: 10.0.200.1/32, scope: dci}
+    - {id: vtep-b-leaf1, sources: [b-leaf1-lo], scope: site-internal}
+    - {id: vtep-b-leaf2, sources: [b-leaf2-lo], scope: site-internal}
+    - {id: vtep-b-bgw-vip,   sources: [b-bgw1-lo1, b-bgw2-lo1], address: 10.0.100.2/32, scope: site-internal}
+    - {id: vtep-b-bgw-msvip, sources: [b-bgw1-lo2, b-bgw2-lo2], address: 10.0.200.2/32, scope: dci}
+    # 導出:
+    #   - 同じ scope の VTEP どうしで full-mesh トンネルを導出する (ndl-viz の既定スタイル)
+    #   - scope: site-internal の VTEP どうしで、labels.site が同じものだけが同じ fabric に属する
+    #     (site が違う site-internal VTEP どうしでは線を引かない)
+    #   - scope: dci の VTEP どうしは、site に関係なく互いに線を引く
+
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-a-leaf1, vtep-a-leaf2, vtep-a-bgw-vip,
+              vtep-b-leaf1, vtep-b-leaf2, vtep-b-bgw-vip,
+              vtep-a-bgw-msvip, vtep-b-bgw-msvip]
+      # ★ stitching: この L2VNI のあいだをつなぐ VTEP の対を列挙する。
+      # 「同じ機器が scope が違う VTEP を 2 つ (vip と msvip) 持つ」構成で、
+      # 装置はこの 2 VTEP のあいだでパケットを decap / encap し直す。
+      stitching:
+        - {between: [vtep-a-bgw-vip, vtep-a-bgw-msvip]}
+        - {between: [vtep-b-bgw-vip, vtep-b-bgw-msvip]}
+      # 検査:
+      #   - between の 2 VTEP が scope が異なること (同じ scope の 2 つは stitch しない)
+      #   - between の 2 VTEP の sources の node の集合が一致 (同じ機器の 2 つの NVE)
+      #   - stitching が空のとき、vteps に 2 つ以上の scope の VTEP があれば warning か error
+      #     (「scope が違う VTEP のあいだはトンネルを張らない」を明示しないと誤読)
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+      # ※ L3VNI にも stitching を書くかは争点。この案では書かず、L2VNI の stitching から導く
+
+# ─────────────────────────────────────────────────────────────────────────
+# a3 で VNI stitching を加えた場合 (サイト A は 10100、サイト B は 20100)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# a3 の素直な拡張は「stitching の対に、両側の VNI の番号を書けるようにする」:
+#
+#   vxlans:
+#     - id: vni-a-10100
+#       type: l2vni
+#       vni: 10100
+#       vlans: [vlan-100]
+#       vteps: [vtep-a-leaf1, vtep-a-leaf2, vtep-a-bgw-vip, vtep-a-bgw-msvip]
+#     - id: vni-b-20100
+#       type: l2vni
+#       vni: 20100
+#       vlans: [vlan-100]           # 同じ VLAN エントリ = 同じブロードキャストドメイン (要 ADR-0026 D5 の 4 の緩和)
+#       vteps: [vtep-b-leaf1, vtep-b-leaf2, vtep-b-bgw-vip, vtep-b-bgw-msvip]
+#
+#   vni_stitching:                  # 新コレクション (別案: 各 L2VNI の中に書く)
+#     - between_vnis: [vni-a-10100, vni-b-20100]
+#       at_vteps:
+#         - [vtep-a-bgw-vip, vtep-a-bgw-msvip]    # サイト A 側のつなぎ目
+#         - [vtep-b-bgw-vip, vtep-b-bgw-msvip]    # サイト B 側のつなぎ目
+#
+# ※ a3 で止まる所:
+#   - 「同じ vlans の L2VNI が 2 つ」を許すには ADR-0026 D5 の 4 を明示的に緩める必要がある。
+#     現在は「1 つの VLAN が 2 つ以上の L2VNI の vlans に入っている」を error にしている。
+#     stitching がある VLAN は例外とする、または VLAN エントリを 2 つ (vlan-a-100 / vlan-b-100)
+#     に分けて、別のメタ構造で「同じブロードキャストドメイン」と宣言する、など。
+#   - deferred.md L2 の 50 行目「VNI の番号はトポロジー全体で一意のまま。別の ADR で」とも
+#     関連する。ADR-0029 の Pass B で切り分ける。
