@@ -9,7 +9,7 @@ from .layer1 import (
     EthernetSegment,
     L1Layer,
 )
-from .layer2 import PortTarget, PortRef, BridgePort, Bridge, VLAN, Vtep, L2VxLAN, L3VxLAN, VxLAN, Subinterface, L2Layer
+from .layer2 import PortTarget, PortRef, BridgePort, Bridge, VLAN, OverlayDomain, Vtep, L2VxLAN, L3VxLAN, VxLAN, Subinterface, L2Layer
 from .layer3 import (
     RouteTargets,
     VRF,
@@ -46,7 +46,7 @@ __all__ = [
     "AttachesToObj", "L1Node", "L1Interface", "L1Link",
     "LacpConfig", "Lag", "SegmentMember", "EthernetSegment", "L1Layer",
     # layer2
-    "PortTarget", "PortRef", "BridgePort", "Bridge", "VLAN", "Vtep", "L2VxLAN", "L3VxLAN", "VxLAN", "Subinterface", "L2Layer",
+    "PortTarget", "PortRef", "BridgePort", "Bridge", "VLAN", "OverlayDomain", "Vtep", "L2VxLAN", "L3VxLAN", "VxLAN", "Subinterface", "L2Layer",
     # layer3
     "RouteTargets", "VRF",
     "VrrpGateway", "HsrpGateway", "AnycastGateway", "GatewayRedundancy",

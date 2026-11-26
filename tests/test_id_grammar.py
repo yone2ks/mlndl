@@ -89,7 +89,8 @@ layer1:
 layer2:
   vlans: [{id: Vlan-10, vlan_id: 10}]
   bridges: [{id: Bridge-r2, ports: [{interface: r2-eth0}]}]
-  vteps: [{id: Vtep-r1, sources: [R1-lo]}]
+  overlay_domains: [{id: Od-a}]
+  vteps: [{id: Vtep-r1, sources: [R1-lo], overlay_domain: Od-a}]
   vxlans:
     - {id: Vni-10010, type: l2vni, vni: 10010, vlans: [Vlan-10], vteps: [Vtep-r1]}
   subinterfaces:
@@ -118,6 +119,7 @@ EXPECTED_PATHS = {
     "layer1.ethernet_segments[0].id",
     "layer2.vlans[0].id",
     "layer2.bridges[0].id",
+    "layer2.overlay_domains[0].id",
     "layer2.vteps[0].id",
     "layer2.vxlans[0].id",
     "layer2.subinterfaces[0].id",

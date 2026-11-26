@@ -19,7 +19,7 @@
 - ○ のないキー (参考) は 1.x で変わることがある
 - 下流のツールは、**未知のキー・未知の値・未知の分岐を無視して読み進める**
 - eve-lab-builder が読むキーは推定で規範に含めた。eve-lab-builder を確かめられるようになったら、この列を実際のキーで直す (ADR-0027 D1-2)
-- 要素の `type` の値はすべて規範: ノードは `node` / `vlan` / `l2vni` / `l3vni` / `bridge` / `ethernet_segment`、エッジは `link` / `attaches_to` / `vlan_member` / `routing_neighbor` / `tunnel` / `lag_bundle`
+- 要素の `type` の値はすべて規範: ノードは `node` / `vlan` / `l2vni` / `l3vni` / `bridge` / `ethernet_segment` / `overlay_domain`、エッジは `link` / `attaches_to` / `vlan_member` / `routing_neighbor` / `tunnel` / `lag_bundle`
 - すべての要素の `id` / `type` / `label` / `layer` / `description` (あれば) は規範
 
 ## ルートの `meta`
@@ -41,7 +41,7 @@
 | `l3_interfaces` | ○ | このノードの L3 IF (IP を持つもの)。下の「L3 IF」 |
 | `vrfs` | ○ | このノードの L3 IF が属する VRF の id (並び順は参考) |
 | `vlans` | ○ | このノードにポートがある VLAN の id (Ethernet Segment は脚のすべてのノード。ADR-0013 D5・ADR-0023 D8)。L2VNI の `vlans` とは意味が違う |
-| `vteps` | ○ | このノードが終端する VTEP: `{id, source, address?, address_v6?, shared_with?}`。`source` は L3 IF の name、`shared_with` は共有相手のノード (ADR-0014) |
+| `vteps` | ○ | このノードが終端する VTEP: `{id, source, address?, address_v6?, overlay_domain?, shared_with?}`。`source` は L3 IF の name、`shared_with` は共有相手のノード (ADR-0014)。`overlay_domain` は VTEP に書いたときだけ (ADR-0029) |
 | `lags` | ○ | このノードの LAG: `{id, name?, members, lacp?, min_links?, ethernet_segment?, description?}`。`members` はメンバーの L1 IF の name (リンクの `source_if` / `target_if` と同じ)。`lacp` (`{mode}`。`active` / `passive` / `static`) と `min_links` は書かれたときだけ (ADR-0028 D4)。`ethernet_segment` はこの LAG が脚の ES (ADR-0023) |
 | `subinterfaces` |  | このノードのサブ IF: `{id, parent, vlan_id, name?}` (ADR-0012) |
 | `tunnels` | ○ | このノードのトンネル IF (ADR-0011 D6): `id` / `type` / `source` / `destination_interface` / `destination_ip` / `ip` / `vrf` |
@@ -96,11 +96,21 @@ MLAG か EVPN multihoming かは出さない (構文に方式名がない。ビ�
 - `node_vlans`: `[{node, vlan}]`。参加機器 (VTEP から導く) と、その機器の VLAN (VLAN のポートか、VLAN を指す SVI の機器から導く。ADR-0026 D4)。
   VLAN が決まらない参加機器 (VNI を中継するだけの機器など) は出さない。導いた値なので YAML には書けない。
   ビューワは機器ごとの VLAN の番号をこれで示し、自分では導かない
+- `tunnel_pairs`: `[{endpoints: [<VTEP>, <VTEP>], overlay_domain}]`。トンネルを張る VTEP の対 (同じドメインの VTEP どうし。ADR-0029 D4)。
+  VTEP に `overlay_domain` を書いたときだけ出す。出ていなければ、今までどおり `vteps` のどの 2 つのあいだにもトンネルがあると読む。
+  `endpoints` に向きの意味はない (ADR-0006)
+- `overlay_domains` (L3VNI だけ): 同じ VRF の L2VNI のドメイン。L3VNI の `tunnel_pairs` は同じ VRF の L2VNI の対を合わせたもの。
+  ドメインを書いたときは、L3VNI の `vteps` に `tunnel_pairs` に出る VTEP (VRF の L3 IF を書かない BGW など) も加える
+
+### `type: overlay_domain`
+
+`id` / `label` (`name` か `id`) / `layer: layer2` / `vteps` (このドメインに属する VTEP の id) / `description`。**すべて規範** (ADR-0029 D7)。
+YAML に書いたドメインだけを出し、暗黙のドメイン (どの VTEP にも書いていないとき) は出さない。辺は出さない。枠などの描き方はビューワが決める
 
 ## `description`
 
 YAML に `description` があれば、人が読む補足としてそのまま出す (ADR-0011 D7)。出すのは、対応する要素があるもの:
-機器ノード、`vlan`、`bridge`、`ethernet_segment`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `lags[]` / `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
+機器ノード、`vlan`、`bridge`、`ethernet_segment`、`overlay_domain`、`l2vni` / `l3vni`、エッジの `link` / `tunnel` / `routing_neighbor`、ノードに埋め込む `lags[]` / `l3_interfaces[]` / `subinterfaces[]` / `tunnels[]` / `bgp_sessions[]`。
 要素を持たないもの (L1 IF、LAG、VRF、VTEP、インスタンス) の `description` は出さない。
 受け取るツールは表示するだけで、パースせず、一部を取り出しもしない。回線 ID などを書く場所でもある ([ADR-0017](decisions/0017-sites-and-wan.md) D4)。
 `role: provider-network` (事業者網の箱) も、ほかの role と同じくそのまま出す。

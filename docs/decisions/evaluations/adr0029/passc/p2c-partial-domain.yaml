@@ -1,0 +1,60 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass C / p2c — 一部の VTEP にだけ overlay_domain を書いた
+#
+# 期待する結果: error (Pass B summary「検査の細部」3 — dsl-designer 案)
+#   メッセージの例: "overlay_domain を書いた VTEP と書かない VTEP を同じ
+#                    トポロジーに混ぜられません。すべての VTEP に書くか、
+#                    すべての VTEP から外してください。
+#                    書かなかった VTEP: [vtep-leaf3, vtep-leaf4]"
+#
+# 動機:
+#   VTEP に overlay_domain を書くかどうかは任意。書かなければ「全 VTEP が
+#   1 つの暗黙のドメインに属する」の意味 (b4-stretched / p3-no-domain と同じ)。
+#   一部だけ書くと、残りの VTEP が「暗黙のドメイン」に属するのか「どのドメインにも
+#   属さない」のかが曖昧になる。読者と validator の解釈が割れるので早期に止める。
+#
+# 代替案:
+#   書かない VTEP を「どのドメインにも属さない (= どの L2VNI にも入らない孤立
+#   VTEP)」と解釈してもよい。だがその場合は VTEP を書いた意味がなくなるので
+#   結局は VTEP の未使用の warning で捕まえる。どちらにしても、書かれたドメインと
+#   暗黙のドメインの境界がはっきりしないのは混乱のもと。
+# ============================================================================
+
+meta:
+  name: p2c-partial-domain
+
+layer1:
+  nodes:
+    - {id: leaf1, implementation: vm, role: leaf, device_type: cumulus_linux}
+    - {id: leaf2, implementation: vm, role: leaf, device_type: cumulus_linux}
+    - {id: leaf3, implementation: vm, role: leaf, device_type: cumulus_linux}
+    - {id: leaf4, implementation: vm, role: leaf, device_type: cumulus_linux}
+  interfaces: []
+  links: []
+
+layer2:
+  overlay_domains:
+    - {id: od-main}
+
+  vteps:
+    # ★ leaf1 / leaf2 は overlay_domain を書き、leaf3 / leaf4 は書かない → error
+    - {id: vtep-leaf1, sources: [leaf1-lo], overlay_domain: od-main}
+    - {id: vtep-leaf2, sources: [leaf2-lo], overlay_domain: od-main}
+    - {id: vtep-leaf3, sources: [leaf3-lo]}
+    - {id: vtep-leaf4, sources: [leaf4-lo]}
+
+  vxlans:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100],
+       vteps: [vtep-leaf1, vtep-leaf2, vtep-leaf3, vtep-leaf4]}
+
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}
+    - {id: leaf3-lo, node: leaf3, name: lo, ip: 10.0.0.3/32}
+    - {id: leaf4-lo, node: leaf4, name: lo, ip: 10.0.0.4/32}

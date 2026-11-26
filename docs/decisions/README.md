@@ -223,6 +223,8 @@ Pass C (2026-11-15) でも参照の向きは 4/5 が案 A で、ユーザーが�
 | [0028](0028-names-and-types.md) | 1.0 の前の名前と型の直し — `lags` / `vxlans`、IS-IS の `level` を下線に、`lacp.mode` の `static` と LAG の直下の `min_links`、空のリスト・既定値・値域 (2026-11-20 実装) | **Accepted** | C |
 | [drafts/0028](drafts/0028-names-and-types.md) | 同上 Pass A ドラフト (改訂 1) | Superseded by 0028 | A |
 | [evaluations/adr0028](evaluations/adr0028/recommendation.md) | ADR-0028 Pass A の検討と試し書き a1〜a5。Pass B の評価は [evaluation.md](evaluations/adr0028/evaluation.md)、試し書き `passb/` B1〜B6、`passc/` P1〜P3 | — | — |
+| [0029](0029-overlay-domains.md) | オーバーレイのドメイン — EVPN Multi-Site のトンネルの範囲を書く (`overlay_domains`。2026-11-26 実装) | **Accepted** | C |
+| [evaluations/adr0029](evaluations/adr0029/passa-summary.md) | ADR-0029 Pass A の 5 つの報告とまとめ、試し書き a1〜a3。Pass B は [passb/summary.md](evaluations/adr0029/passb/summary.md) と試し書き b1〜b4、Pass C は [passc/](evaluations/adr0029/passc/README.md) | — | — |
 
 1.0 の後は破壊的な変更にメジャーバージョンの更新が要る、という方針の中身を決める。`ndl_version` を必須にし、YAML より古い mlndl は版の違いを知らせて止まる。
 1.x で許すのはキー・値を足す、値域を広げる、検査を緩める、warning を足すこと。既存の YAML を落とす新しい error は 2.0 まで待ち、`--strict` はその版の warning を error にすることだけを約束する。
@@ -232,3 +234,7 @@ Pass C (2026-11-18) で確定した。1.0 の前の名前と型の直し (`lags`
 ADR-0028 は、1.0 の後は 2.0 が要る名前と型の直しを 1.0 の前に済ませる。id を持つエントリの一覧は複数形 (`lags` / `vxlans`)、列挙の値は下線区切り (IS-IS の `level_1` / `level_2` / `level_all`)。
 要素なしでは成り立たないリスト (`vteps` / `address_families` / LAG の `members` / bridge の `ports`) は 1 つ以上を必須に。LACP と BFD のタイマーは既定値をなくし、`lacp.mode` の `on` を `static` に、`min_links` を LAG の直下に移す。
 `local_as`・`vni`・BFD・トンネルの `mtu` に値域を置く。Pass C (2026-11-20) で確定した。
+
+ADR-0029 は、EVPN Multi-Site のトンネルの範囲を書くために、オーバーレイのドメイン (中でフルメッシュにトンネルを張る VTEP の集合) を足す。
+`layer2.overlay_domains` と VTEP の `overlay_domain:` (任意。書かなければ全 VTEP が 1 つの暗黙のドメイン)。トンネルの対は同じ L2VNI・同じドメインの VTEP どうしで、
+2 つのドメインに VTEP を持つ機器を BGW として導く。Pass A は ADR の本文を書かず、5 つのエージェントの報告と試し書きで検討した。Pass C (2026-11-26) で確定した。

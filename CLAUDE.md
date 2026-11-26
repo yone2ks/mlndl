@@ -273,6 +273,18 @@ informative な指針とし、必要が明確になった時点で構造化構�
   3 拠点以上の広域イーサの OSPF / IS-IS は範囲外。構文は次の ADR で決める
 - **→ ADR-0018 で決着**: 箱の中の L2 の転送は `layer2.bridges`（`ports` は箱のポートだけ）に書き、両端 `node` で書く。トンネルの上のセッションは `update_source` / OSPF の `interface` にトンネル IF を書く
 
+
+### 12. オーバーレイのドメイン — EVPN Multi-Site のトンネルの範囲
+
+> **→ 詳細: [ADR-0029](docs/decisions/0029-overlay-domains.md)**
+
+- オーバーレイのドメイン = 中でフルメッシュに VXLAN のトンネルを張る VTEP の集合。1 つの VTEP は 1 つのドメイン。DCI も 1 つのドメイン
+- 構文は `layer2.overlay_domains: [{id, name?, description?}]`（推奨プレフィックス `od-`）と VTEP の `overlay_domain:`。ドメインは VTEP を並べない（VTEP が単数で指す）
+- 任意。どの VTEP にも書かなければ全 VTEP が 1 つの暗黙のドメイン（今までどおりのフルメッシュ）。書くなら全 VTEP に（混在は error）
+- トンネルの対 = 同じ L2VNI に参加し、同じドメインに属する VTEP どうし。L3VNI は同じ VRF の L2VNI の和集合。L2VNI / L3VNI のスキーマは変えない
+- BGW は書かない。2 つ以上のドメインに VTEP を持つ機器として導く。BGW はサイトの中向けの VTEP と Multi-Site の VIP を別のエントリで書く（ADR-0014 D6）
+- `labels.site` とは別の軸（stretched fabric では 2 拠点が 1 ドメイン）。`role: border-gateway` は informative で validator は読まない
+- 範囲外: 1 本のループバックで 2 つのドメイン、hub-and-spoke の DCI、VNI stitching、RT の付け替え、BUM の方式、多対多
 ---
 
 ## MLNDL フォーマット概要
@@ -345,6 +357,9 @@ layer2:
         - {interface: net-wideether-tokyo}
         - {interface: net-wideether-osaka}
       # 方式名（E-LINE / VPLS 等）は書かない。bridge を書かない箱は L2 で透過しない
+
+  # overlay_domains:             # ADR-0029。任意。EVPN Multi-Site のトンネルの範囲（中でフルメッシュに張る VTEP の集合）
+  #   - {id: od-east}             # 推奨プレフィックス od-。VTEP が overlay_domain: で指す。書くなら全 VTEP に
 
   vteps:                         # ADR-0014。VXLAN のトンネル端点。方式名（anycast 等）は構文に出さない
     - id: vtep-leaf1-leaf2       # 推奨プレフィックス vtep-
@@ -489,13 +504,13 @@ mlndl/
 │       ├── __init__.py
 │       ├── schema/
 │       │   ├── layer1.py       # L1Node, L1Interface, L1Link, Lag, EthernetSegment
-│       │   ├── layer2.py       # VLAN, Bridge, VxLAN (l2vni/l3vni), Subinterface
+│       │   ├── layer2.py       # VLAN, Bridge, OverlayDomain, Vtep, VxLAN (l2vni/l3vni), Subinterface
 │       │   ├── layer3.py       # VRF, L3Interface, GatewayRedundancy, TunnelInterface
 │       │   ├── control_plane.py # BGP / OSPF / IS-IS のインスタンス、BFD、routing_neighbors（ADR-0010）
 │       │   ├── refs.py         # Ref（参照先の宣言。ADR-0015）
 │       │   └── topology.py     # MLNDLTopology（ルートモデル。index() / resolve()）
 │       ├── index.py            # IdIndex（id → エンティティの索引）
-│       ├── derive.py           # 参照をたどって求める関係（L2VNI の機器ごとの VLAN ADR-0026、Ethernet Segment の脚 ADR-0023、VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
+│       ├── derive.py           # 参照をたどって求める関係（L2VNI の機器ごとの VLAN ADR-0026、オーバーレイのドメインとトンネルの対・BGW ADR-0029、Ethernet Segment の脚 ADR-0023、VLAN の端点 ADR-0013 D7、BGP セッションの両端・AS・通り道 ADR-0010、bridge / トンネル・OSPF / IS-IS の通り道 ADR-0018）
 │       ├── parser.py           # yaml.safe_load + 1MB 制限 + ndl_version の検査（pydantic の前）
 │       ├── version.py          # LANGUAGE_VERSION / __version__ / UnsupportedVersionError（ADR-0027）
 │       ├── validator.py        # 整合性チェック
@@ -535,6 +550,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | VRF ↔ L3VNI | l3vni が vxlan に定義済みか。`VRF.l3vni` と `L3VxLAN.vrf` が双方向で一致するか | error |
 | VTEP | `sources` が L3 IF に存在するか。同じ L3 IF を 2 つの VTEP / 1 つの VTEP に 2 回書いていないか。1 つの VTEP に同じノードの L3 IF を 2 つ書いていないか。共有（`sources` が複数）なら `address` 必須（型）。アドレスが決まらない / VTEP 間で重複していないか。L2VNI の `vteps` が定義済みか（ADR-0014） | error |
 | VTEP の注意 | `sources` が 1 つで `address` が L3 IF の ip と食い違う。ES の脚の機器の一部が、どの VTEP も終端していない（ADR-0023 D7） | warning |
+| オーバーレイのドメイン | `overlay_domain` を書いた VTEP と書かない VTEP の混在、L2VNI の VTEP が 2 つ以上のドメインにまたがるのにそのドメインに VTEP を持つ機器（BGW）がない（error。未定義のドメインがあれば後者は出さない）。どの VTEP も属さないドメイン（warning）。VTEP が 1 つのドメイン・ドメインが 1 つ・セッションとドメインの照合は検査しない（ADR-0029 D5） | error / warning |
 | ノード所属 | L3 IF の `node` が、`attaches_to` の参照先（L1 IF / LAG / サブ IF）のノード（群）に含まれるか（ADR-0011 D9） | error |
 | VLAN のポート | `{interface:}` / `{lag:}` / `{ethernet_segment:}` のどれか 1 つ（型）。同じ VLAN に LAG とそのメンバー、ES とその脚を併記していないか（error）。同じ VLAN に同じ端点を 2 回書いていないか（error）。LAG のメンバーだけなら `{lag:}`、ES の脚の一部だけなら `{ethernet_segment:}` を促す（warning）（ADR-0013・ADR-0023 D7） | error / warning |
 | 参照キー | `attaches_to` のキーがそのエンティティに書けるものか（型。ADR-0001 D8）。参照先がそのキーの種類で定義されているか。キーの取り違え（`{lag: vlan-100}` 等）には正しいキーを示す | error |
@@ -547,14 +563,14 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | トンネル | `source` が同じ node の L3 IF か。`destination_interface` が別 node の L3 IF か。`destination_ip` / `destination_interface` がちょうど一方か。外側のアドレスファミリーが source と destination で一致するか。VRF 参照。対向がトポロジー内なのに逆向きのトンネルがなければ info | error / info |
 | 廃止キー | `vlan` / `fhrp` / `gateway_redundancy[].protocol` に移動先を示すエラー（ADR-0011 D10） | error |
 | 旧形式 | L3 IF の `interface`（→ `name`）、短縮形 `interface: vlan-N`、VLAN のポートの `node`、L2VNI の `vtep_source` / `members`・`vlan`（単数。→ `vlans`、ADR-0026）、`layer1.lag` / `layer2.vxlan`（→ 複数形）、IS-IS の `level-*`（→ `level_*`）、`lacp.mode: on` と真偽値（→ `static`）、`lacp.min_links`（→ LAG の直下）（ADR-0028）に移動先を示すエラー（スキーマ）。`{interface: <LAG / VLAN / サブ IF>}` など、その場所に書ける別のキーの id を指したら正しいキーを示すエラー（validator）。読み替えはしない（ADR-0025 D1） | error |
-| L2VNI の VLAN | `vlans` は 1 つ以上・同じ id を 2 回書かない（型）。1 つの VLAN が 2 つの L2VNI に、1 台の機器に同じ L2VNI の VLAN が 2 つ（機器はポート ∪ SVI）、ES の脚の機器で同じ L2VNI の VLAN の番号が違う、同じ L2VNI の SVI の `vrf` が食い違う（error）。同じ L2VNI に同じ `vlan_id` の VLAN が 2 つ、参加ノード（VTEP から導出）に `vlans` のどの VLAN のポートも SVI もない（warning）。重ねて出さない規則あり（ADR-0026 D5） | error / warning |
+| L2VNI の VLAN | `vlans` は 1 つ以上・同じ id を 2 回書かない（型）。1 つの VLAN が 2 つの L2VNI に、1 台の機器に同じ L2VNI の VLAN が 2 つ（機器はポート ∪ SVI）、ES の脚の機器で同じ L2VNI の VLAN の番号が違う、同じ L2VNI の SVI の `vrf` が食い違う（error）。同じ L2VNI に同じ `vlan_id` の VLAN が 2 つ、参加ノード（VTEP から導出）に `vlans` のどの VLAN のポートも SVI もない（warning。2 つ以上のオーバーレイのドメインに VTEP を持つ機器には出さない。ADR-0029 D6）。重ねて出さない規則あり（ADR-0026 D5） | error / warning |
 | VLAN の端点 | ポート → L1 リンクの対向 → 対向の L3 IF を id でたどって求めた端点（1 ホップ。`derive.vlan_endpoints`）の IP が、その VLAN の SVI のサブネットに入っているか。SVI がなければ検査しない（ADR-0013 D7） | info |
 | Ethernet Segment | `members` が 2 つ以上・`{lag:}` か `{interface:}`（型）。同じ機器の脚が 2 つ、1 つの脚（と脚の LAG のメンバー）が 2 つの ES に、LAG とそのメンバーの併記、脚どうしが L1 リンクでつながる（ピアリンクの疑い。`link_role` は見ない）（error）。脚に LAG のメンバーの IF（warning）（ADR-0023 D7） | error / warning |
 | 空のリスト | LAG の `members`・bridge の `ports`・L2VNI の `vteps`・BGP のセッションの `address_families` を書いていて 1 つ以上か。ES の `members` は 2 つ以上（型。文は案内の文）。`lacp` を書くなら `mode` がある（ADR-0028 D3・D4） | error |
 | 数の範囲 | `local_as`・`vni`・BFD のタイマー・`min_links`・トンネルの `mtu` が範囲内か（型。ADR-0028 D5） | error |
 | Route Target | `ASN:NN` または `IP:NN` フォーマットか | error |
 | VLAN ID | `vlan_id` が 1..4094 か（スキーマ）。同一ノード上で別の VLAN エントリが同じ `vlan_id` を使っていないか（別ノードでの番号再利用は許容。ES に載せた VLAN は脚の全機器で数える。VLAN を指す SVI の機器も数える。ADR-0026 D4） | error |
-| 推奨プレフィックス | `link-` / `lag-` / `es-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
+| 推奨プレフィックス | `link-` / `lag-` / `es-` / `vlan-` / `vni-` / `vrf-` / `tunnel-` / `subif-` / `vtep-` / `od-` / `bridge-` / `bfd-` / `bgp-peer-` / `ospf-adj-` / `isis-adj-`（ADR-0002 D7。`control_plane.routing_neighbors`） | warning |
 | SVI の紐づけ忘れ | `name` が VLAN らしき名前（`Vlan100` 等）なのに `attaches_to` が未指定 | warning |
 | labels キー | ADR-0002 D1 の ID 正規表現に従っているか（ADR-0009 D3）。値は検査しない | warning |
 | link_speed | `<数値><単位>`（単位は K / M / G / T） の書式か（`10g` / `10Gbps` / `10000` 等は直し方を示す error）。正規形（数値が 1 以上 1000 未満になる単位）でなければ warning。表記は書き換えない（ADR-0021） | error / warning |
@@ -604,6 +620,7 @@ warning / info も含めて受け取るには `validate_all(topology, strict=Fal
 | [ADR-0026](docs/decisions/0026-l2vni-vlans.md) | L2VNI に、機器によって番号の違う VLAN を載せる | **C**（2026-11-15 実装） | L2VNI の `vlan`（単数）を `vlans`（リスト）に。旧 `vlan` は移動先を示す error。L2VNI に入る VLAN ではブロードキャストドメインは L2VNI、VLAN のエントリは「番号とポート」。参照は L2VNI → VLAN の片方向（案 C の VLAN → L2VNI は却下）。参加機器は VTEP から、その機器の VLAN はポート ∪ SVI から導く（`derive.vlan_port_nodes` / `vlan_svi_nodes` / `l2vni_node_vlans`）。端点・`vlan_member` エッジはポートだけ。1 台で 2 VLAN・1 VLAN が 2 VNI・ES の脚で番号違い・SVI の VRF 違いは error。anycast の一致は VNI 単位。エクスポーターは L2VNI に `vlans` と `node_vlans: [{node, vlan}]` |
 | [ADR-0027](docs/decisions/0027-compatibility-promise.md) | 互換の約束 | **C**（2026-11-19 実装） | 1.0 の後に 1.x で許す変更（加算・緩和・warning）と 2.0 が要る変更（改名・必須化・既定値・意味・検査の強化）。新しい error は 1.x で足したキー・値だけ。`--strict` はそのバージョンの warning を error にすることだけを約束（CI はマイナーを固定）。`ndl_version` は必須の文字列で「読むのに要る最も古いバージョン」。新しい YAML は `UnsupportedVersionError` 1 本で止める。パッケージの `メジャー.マイナー` = `LANGUAGE_VERSION`。エクスポーターの規範キーと出力の `meta`。`meta` だけが未知のキーを受け付ける。糖衣構文と旧形式の error は 2.0 まで残す |
 | [ADR-0028](docs/decisions/0028-names-and-types.md) | 1.0 の前の名前と型の直し | **C**（2026-11-20 実装） | id を持つエントリの一覧は複数形（`lags` / `vxlans`）、参照キーは単数形、列挙の値は下線区切り（IS-IS の `level_*`）。要素なしでは成り立たないリストは型で 1 つ以上・必須（`vteps` / `address_families` / LAG の `members` / bridge の `ports`）。LACP と BFD のタイマーは既定値なし。`lacp.mode` の `on` → `static`、`min_links` は LAG の直下。`local_as`・`vni`・BFD・`min_links`・トンネルの `mtu` に値域。旧名・旧値は移動先を示す error |
+| [ADR-0029](docs/decisions/0029-overlay-domains.md) | オーバーレイのドメイン — EVPN Multi-Site のトンネルの範囲 | **C**（2026-11-26 実装） | `layer2.overlay_domains` と VTEP の `overlay_domain:`（任意。書かなければ暗黙の 1 つのドメイン、書くなら全 VTEP に）。ドメイン = 中でフルメッシュに張る VTEP の集合、1 VTEP = 1 ドメイン、DCI も 1 つのドメイン。トンネルの対は同じ L2VNI・同じドメインの VTEP どうし、L3VNI は同じ VRF の L2VNI の和集合。BGW は 2 つのドメインに VTEP を持つ機器として導き、ADR-0026 D5 の 10 の warning を出さない。ドメインをまたぐ L2VNI に BGW がなければ error。`role: border-gateway` は informative |
 | (§6 設計決定) | `lag` 統合設計 | — | `port_channels` + `mlag` → `lag`。ADR-0023 で機器 1 台の LAG と `ethernet_segments` に分け直した |
 
 ---

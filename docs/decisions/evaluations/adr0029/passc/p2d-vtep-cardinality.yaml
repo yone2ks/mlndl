@@ -1,0 +1,70 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass C / p2d — VTEP の数が 0 または 1 のドメイン
+#
+# 期待する結果 (Pass B summary「検査の細部」1 と 2 — Pass C で決める):
+#   - od-empty (VTEP 0 のドメイン):
+#       未定: error (spec-architect 案) か warning (dsl-designer 案)
+#       メッセージの例: "overlay_domain 'od-empty' に属する VTEP がありません。
+#                        不要なら消してください。"
+#   - od-island (VTEP 1 のドメイン):
+#       未定: warning (spec-architect / dsl-designer 案) か出さないか info
+#             (network-tech-reviewer 案 — stretched の構成では偽警告になる)
+#       メッセージの例: "overlay_domain 'od-island' には VTEP が 1 つしかありません。
+#                        中でフルメッシュを張る対が作れません。"
+#
+# 判断の材料:
+#   - od-empty を error にすると、ドメインを先に宣言してから VTEP を書く
+#     段階的な編集 (エントリを先に並べる、ADR-0028 D3 の例外) ができなくなる。
+#     ただし overlay_domains は空を許すコレクション (エントリを先に書く用途) に
+#     するほど「段階的に育てる」エンティティではない気がする (サイト数を増やすのは
+#     年単位)。
+#   - od-island は、stretched fabric で明示的に「将来拡張を見越して 1 ドメイン
+#     書いた」場合に偽警告になる。この警告を出す / 出さないは利用者の運用意思に
+#     依るので、警告を出すなら「`--strict` では error、既定では warning のまま」
+#     が自然かもしれない。
+#
+# 推奨 (example-author としての一案):
+#   od-empty → warning (unused エントリの一般則 — 消し忘れの可能性大)
+#   od-island → warning (運用上 stitching できない対になる旨)
+#   どちらも error ではなく warning。stretched fabric では overlay_domains を
+#   書かないのが自然なので、書いたうえで 1 VTEP は「将来拡張のため明示した」の
+#   可能性もある。
+# ============================================================================
+
+meta:
+  name: p2d-vtep-cardinality
+
+layer1:
+  nodes:
+    - {id: leaf1, implementation: vm, role: leaf, device_type: cumulus_linux}
+    - {id: leaf2, implementation: vm, role: leaf, device_type: cumulus_linux}
+    - {id: leaf3, implementation: vm, role: leaf, device_type: cumulus_linux}
+  interfaces: []
+  links: []
+
+layer2:
+  overlay_domains:
+    - {id: od-main,   description: 2 VTEPs ここだけが有効}
+    - {id: od-island, description: 1 VTEP だけ (フルメッシュを作る相手がいない)}
+    - {id: od-empty,  description: VTEP がない (未使用)}
+
+  vteps:
+    - {id: vtep-leaf1, sources: [leaf1-lo], overlay_domain: od-main}
+    - {id: vtep-leaf2, sources: [leaf2-lo], overlay_domain: od-main}
+    # ★ od-island には 1 つだけ。相手がいないので対が 0
+    - {id: vtep-leaf3, sources: [leaf3-lo], overlay_domain: od-island}
+    # ★ od-empty を指す VTEP はない
+
+  vxlans:
+    - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [vtep-leaf1, vtep-leaf2]}
+
+  vlans:
+    - {id: vlan-100, vlan_id: 100}
+
+layer3:
+  interfaces:
+    - {id: leaf1-lo, node: leaf1, name: lo, ip: 10.0.0.1/32}
+    - {id: leaf2-lo, node: leaf2, name: lo, ip: 10.0.0.2/32}
+    - {id: leaf3-lo, node: leaf3, name: lo, ip: 10.0.0.3/32}

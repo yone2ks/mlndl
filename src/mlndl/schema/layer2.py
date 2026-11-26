@@ -120,6 +120,21 @@ class Bridge(BaseModel):
         return data
 
 
+class OverlayDomain(BaseModel):
+    """オーバーレイのドメイン — 中でフルメッシュに VXLAN のトンネルを張る VTEP の集合 (ADR-0029)
+
+    EVPN Multi-Site のサイトの中と、サイトのあいだ (DCI) のように、同じ L2VNI でもトンネルを張る範囲を分けるときに書く。
+    - VTEP を並べない。VTEP が overlay_domain で 1 つのドメインを指す (ADR-0029 D2)
+    - 方式名 (Multi-Site / anycast / stretched) は持たない (ADR-0029 D1)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str                                 # 推奨プレフィックス od- (ADR-0002 D7・ADR-0029 D2)
+    name: str | None = None
+    description: str | None = None
+
+
 class Vtep(BaseModel):
     """VXLAN トンネル端点 (ADR-0014)
 
@@ -129,6 +144,7 @@ class Vtep(BaseModel):
     - sources: この VTEP を終端するノードの L3 IF (ループバック) の id。ノードは各 L3 IF から決まる
     - address / address_v6: VTEP のアドレス。sources が 1 つなら省略でき、その L3 IF の ip / ipv6 になる。
       sources が複数 (複数ノードで共有) なら必須
+    - overlay_domain: この VTEP が属するオーバーレイのドメイン (ADR-0029)。書かなければ全 VTEP が 1 つの暗黙のドメイン
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -137,6 +153,7 @@ class Vtep(BaseModel):
     sources: Annotated[list[str], Ref("layer3.interfaces")] = Field(min_length=1)
     address: IPv4Interface | None = None
     address_v6: IPv6Interface | None = None
+    overlay_domain: Annotated[str | None, Ref("layer2.overlay_domains")] = None   # ADR-0029
     description: str | None = None
 
     @field_validator("address", mode="before")
@@ -264,6 +281,7 @@ class L2Layer(BaseModel):
 
     vlans: list[VLAN] = []
     bridges: list[Bridge] = []
+    overlay_domains: list[OverlayDomain] = []       # ADR-0029。任意
     vteps: list[Vtep] = []
     vxlans: list[VxLAN] = []
     subinterfaces: list[Subinterface] = []

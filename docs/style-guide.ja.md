@@ -24,6 +24,7 @@ id は参照に使う名前なので、機器の上での名前とは別に、�
 | SVI | `<機器の id>-vlan-<番号>` | `leaf1-vlan-100` |
 | VRF | `vrf-<名前>` | `vrf-tenant-a` |
 | VTEP | `vtep-<終端する機器>` | `vtep-leaf1-leaf2`、`vtep-border1` |
+| オーバーレイのドメイン | `od-<サイト>` / `od-dci` | `od-east`、`od-dci` |
 | セッション | `bgp-peer-<機器>-<機器>` / `ospf-adj-…` / `isis-adj-…`。同じ 2 台に 2 本目があれば用途を末尾に | `bgp-peer-spine1-leaf1-overlay` |
 
 推奨プレフィックス (`link-`・`lag-`・`vlan-` など) の一覧と、従わないときの warning は [型](reference/types.ja.md#推奨プレフィックス) にあります。

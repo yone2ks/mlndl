@@ -46,6 +46,7 @@ from pydantic import BaseModel
 
 from .derive import (bgp_session_views, end_path_labels, ethernet_segments, igp_adjacency_views,
                      l2vni_participants, vlan_l2vnis, vlan_port_nodes, vlan_svi_nodes,
+                     IMPLICIT_DOMAIN, l2vni_domain_gateways, l2vni_overlay_domains,
                      l3_and_tunnels, outside_svi_subnet, vlan_endpoints, vlan_svi_networks)
 from .schema.control_plane import BgpInsideEndpoint, BgpSession, OspfAdjacency
 from .schema.layer3 import L3_ATTACH_KEYS, TunnelInterface
@@ -223,6 +224,7 @@ def _collect(topology: MLNDLTopology) -> list[ValidationError]:
 
     # ── L2VNI の VLAN と anycast gateway (ADR-0026 D5・D6) ─────────────────
     _validate_l2vnis(topology, vni_ctx, node_ids, errors)
+    _validate_overlay_domains(topology, errors)
     if topology.layer3:
         _check_anycast_consistency(topology.layer3, vlan_ids, vni_ctx, errors)
 
@@ -568,6 +570,7 @@ def _validate_l2vnis(topology: MLNDLTopology, ctx: _L2vniContext, node_ids, erro
     l2vnis = [(i, vx) for i, vx in enumerate(topology.layer2.vxlans) if isinstance(vx, L2VxLAN)]
     index_of = {vx.id: i for i, vx in l2vnis}
     participants = l2vni_participants(topology)
+    gateways = l2vni_domain_gateways(topology)       # ADR-0029 D6: ドメインをまたぐ機器 (BGW) には 10 を出さない
     svis_of: dict[str, list] = {}
     if topology.layer3:
         for iface in topology.layer3.interfaces:
@@ -642,7 +645,7 @@ def _validate_l2vnis(topology: MLNDLTopology, ctx: _L2vniContext, node_ids, erro
         carried = set().union(*(ctx.port_nodes.get(v, set()) | ctx.svi_nodes.get(v, set())
                                 for v in vx.vlans if v in vlans))
         if carried:
-            for m in sorted(participants.get(vx.id, set()) - carried):
+            for m in sorted(participants.get(vx.id, set()) - carried - gateways.get(vx.id, set())):
                 if m in node_ids:
                     errors.append(ValidationError(
                         path,
@@ -651,6 +654,56 @@ def _validate_l2vnis(topology: MLNDLTopology, ctx: _L2vniContext, node_ids, erro
                         f"そうでなければ VLAN の載せ忘れか、vlans への書き忘れです (ADR-0026 D5)",
                         "warning",
                     ))
+
+
+def _validate_overlay_domains(topology: MLNDLTopology, errors) -> None:
+    """オーバーレイのドメイン (ADR-0029 D5)。参照の存在は Ref の汎用の検査"""
+    l2 = topology.layer2
+    if not l2:
+        return
+    with_domain = [v for v in l2.vteps if v.overlay_domain is not None]
+    without = [v for v in l2.vteps if v.overlay_domain is None]
+
+    # 2: 書いた VTEP と書かない VTEP の混在
+    if with_domain and without:
+        i = next(k for k, v in enumerate(l2.vteps) if v.overlay_domain is None)
+        listed = " / ".join(v.id for v in without[:3]) + (" など" if len(without) > 3 else "")
+        errors.append(ValidationError(
+            f"layer2.vteps[{i}].overlay_domain",
+            f"VTEP '{with_domain[0].id}' には overlay_domain が書いてありますが、{listed} には書いてありません。"
+            f"overlay_domain を使うなら、すべての VTEP に書いてください。書かない VTEP があると、"
+            f"暗黙の 1 つのドメインなのか書き忘れなのか分かりません (ADR-0029 D3・D5)",
+        ))
+    else:
+        # 3: ドメインをまたぐ L2VNI に、ドメインをつなぐ機器がない (2 の error があるときは出さない)
+        domains = l2vni_overlay_domains(topology)
+        gateways = l2vni_domain_gateways(topology)
+        defined = {od.id for od in l2.overlay_domains}
+        for i, vx in enumerate(l2.vxlans):
+            if not isinstance(vx, L2VxLAN):
+                continue
+            doms = [d for d in domains.get(vx.id, []) if d != IMPLICIT_DOMAIN]
+            if any(d not in defined for d in doms):
+                continue                     # 未定義のドメインは Ref の error で示す。重ねて出さない
+            if len(doms) >= 2 and not gateways.get(vx.id):
+                errors.append(ValidationError(
+                    f"layer2.vxlans[{i}].vteps",
+                    f"L2VNI '{vx.id}' の VTEP は {len(doms)} つのオーバーレイのドメイン ({' / '.join(doms)}) にまたがっていますが、"
+                    f"2 つ以上のドメインに VTEP を持つ機器がありません。ドメインのあいだはトンネルを張らないので、"
+                    f"このままでは L2VNI がドメインごとに分かれます。ドメインをつなぐ機器 (境界ゲートウェイ、BGW) の VTEP を"
+                    f"それぞれのドメインに書き、vteps に足してください (ADR-0029 D5)",
+                ))
+
+    # 4: どの VTEP も属さないドメイン
+    used = {v.overlay_domain for v in with_domain}
+    for i, od in enumerate(l2.overlay_domains):
+        if od.id not in used:
+            errors.append(ValidationError(
+                f"layer2.overlay_domains[{i}]",
+                f"オーバーレイのドメイン '{od.id}' に属する VTEP がありません。VTEP の overlay_domain に書くか、"
+                f"使わないなら overlay_domains から外してください (ADR-0029 D5)",
+                "warning",
+            ))
 
 
 def _validate_bridges(topology: MLNDLTopology, spaces, member_lag, segments, errors) -> None:
@@ -1481,6 +1534,8 @@ def _check_conventions(topology: MLNDLTopology, errors: list[ValidationError]) -
             _warn_prefix(errors, f"layer2.vxlans[{i}].id", vx.id, "vni-", "VNI")
         for i, vtep in enumerate(topology.layer2.vteps):
             _warn_prefix(errors, f"layer2.vteps[{i}].id", vtep.id, "vtep-", "VTEP")
+        for i, od in enumerate(topology.layer2.overlay_domains):
+            _warn_prefix(errors, f"layer2.overlay_domains[{i}].id", od.id, "od-", "オーバーレイのドメイン")
         for i, si in enumerate(topology.layer2.subinterfaces):
             _warn_prefix(errors, f"layer2.subinterfaces[{i}].id", si.id, "subif-", "サブインターフェース")
         for i, br in enumerate(topology.layer2.bridges):

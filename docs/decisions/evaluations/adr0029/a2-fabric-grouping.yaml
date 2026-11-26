@@ -1,0 +1,149 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass A / a2 — EVPN Fabric を独立の構成子にする提案
+#
+# 案の要点:
+#   - a1 の FEEDBACK (5) (11) に対する提案。VTEP を「同じ fabric に属する VTEP どうしで
+#     full-mesh でトンネルを張る集まり」という単位にまとめる。
+#   - 新しいコレクション `layer2.vxlan_fabrics` (または `layer2.evpn_fabrics`) を足し、
+#     fabric のメンバー (VTEP の id) を列挙する。
+#   - L2VNI は `vteps` の平らなリストの代わりに `fabrics` を持ち、fabric のあいだの
+#     つなぎ目を `stitching` で明示する。stitching に書くのは「どの 2 VTEP で
+#     再カプセル化するか」の対。
+#   - 利点: 段のある構造 (intra-site fabric x 2 + DCI fabric 1) が構文で表現される。
+#     ndl-viz は fabric を枠として描けるし、VTEP 間のトンネルは各 fabric の中で
+#     導出すれば any-to-any 誤読は起きない。
+#   - 欠点: 新しいトップレベルのコレクション (`vxlan_fabrics`) を足すので、
+#     既存の YAML には加算的に触れることになる。「1 つの fabric = 1 つの full-mesh の集合」
+#     の定義が運用者の fabric の感覚 (サイトや AS 境界) と常に一致するかは要検討。
+#
+# この案は仮の構文。今の mlndl では通らない (スキーマを拡張する必要がある)。
+#
+# この YAML は a1 をベースに「変わる所」(layer2 と関連) だけ書き、他は a1 と同じ。
+# a1 と共通の L1 / L3 は省略 (実際に通すときは a1 の該当部を貼る前提)。
+# ============================================================================
+
+meta:
+  name: evpn-multisite-a2-fabric
+  description: 2-site EVPN Multi-Site with proposed layer2.vxlan_fabrics (Pass A の提案)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ─────────────────────────────────────────────────────────────────────────
+# layer1 / layer3 は a1-current-syntax.yaml と完全に同じ。ここでは省略。
+# 実際にツールに通すときは a1 の layer1 / layer3 と control_plane をそのまま持ってくる。
+# ─────────────────────────────────────────────────────────────────────────
+
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      name: tenant-a-webtier
+      access_ports:
+        - {ethernet_segment: es-a-server1}
+        - {ethernet_segment: es-b-server1}
+
+  vteps:
+    # VTEP 自体は a1 と同じ (方式中立 / ADR-0014 D1 を保つ)。scope や role は書かない
+    - {id: vtep-a-leaf1, sources: [a-leaf1-lo]}
+    - {id: vtep-a-leaf2, sources: [a-leaf2-lo]}
+    - {id: vtep-a-bgw-vip,   sources: [a-bgw1-lo1, a-bgw2-lo1], address: 10.0.100.1/32}
+    - {id: vtep-a-bgw-msvip, sources: [a-bgw1-lo2, a-bgw2-lo2], address: 10.0.200.1/32}
+    - {id: vtep-b-leaf1, sources: [b-leaf1-lo]}
+    - {id: vtep-b-leaf2, sources: [b-leaf2-lo]}
+    - {id: vtep-b-bgw-vip,   sources: [b-bgw1-lo1, b-bgw2-lo1], address: 10.0.100.2/32}
+    - {id: vtep-b-bgw-msvip, sources: [b-bgw1-lo2, b-bgw2-lo2], address: 10.0.200.2/32}
+
+  # ★ 新しいコレクション: VXLAN fabric (= full-mesh でトンネルを張る VTEP の集合)
+  # 推奨プレフィックス `fabric-` (仮) を足す。サイトと必ずしも 1:1 ではない (DCI fabric がある)
+  vxlan_fabrics:
+    - id: fabric-a
+      name: Site A fabric
+      members: [vtep-a-leaf1, vtep-a-leaf2, vtep-a-bgw-vip]
+      # サイト内の leaves と BGW の VIP だけがこの fabric のメンバー。
+      # ここのメンバー同士は full-mesh でトンネルを張り、ほかの fabric の VTEP とは張らない
+    - id: fabric-b
+      name: Site B fabric
+      members: [vtep-b-leaf1, vtep-b-leaf2, vtep-b-bgw-vip]
+    - id: fabric-dci
+      name: Multi-Site DCI
+      members: [vtep-a-bgw-msvip, vtep-b-bgw-msvip]
+      # DCI 側は MS-VIP どうしのペア 1 本だけ
+
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      # ★ 平らな `vteps` ではなく `fabrics` を持つ。この L2VNI が流れる fabric の集合
+      fabrics: [fabric-a, fabric-b, fabric-dci]
+      # ★ fabric のあいだを縫う VTEP のペア。stitch 側の VTEP で 1 回 decap し、
+      # もう一方の VTEP で再 encap する。どこのペアで stitch するかを明示する
+      stitching:
+        # サイト A 側: fabric-a の BGW-VIP と fabric-dci の BGW-MSVIP で stitch
+        - {between: [vtep-a-bgw-vip, vtep-a-bgw-msvip]}
+        # サイト B 側
+        - {between: [vtep-b-bgw-vip, vtep-b-bgw-msvip]}
+      # 導出: between の 2 VTEP の sources の node の集合に一致する機器が stitching 装置 (BGW)。
+      # 構文には書かない (ADR-0005 D6 の方針: node は参照先から導く)。
+      # 検査: between の 2 VTEP のあいだで sources の node の集合が等しいこと (error)。
+      #       between の 2 VTEP がそれぞれ別の fabric のメンバーであること (error)。
+      #       stitching がないのに L2VNI の fabrics が 2 つ以上あるのは error。
+      #       fabrics が 1 つのときは stitching を書かない (今の L2VNI と同じ。加算的)。
+
+    - id: vni-10900
+      type: l3vni
+      vni: 10900
+      vrf: vrf-tenant-a
+      irb_mode: symmetric
+      # L3VNI も同じ構造 (fabric + stitching) を持てる形にする。
+      # L3VNI の stitching 装置 = L2VNI の stitching 装置 と検査で一致させる。
+      # 書かない場合は「VRF の L3 IF を持つ全機器が L3VNI を終端」(今と同じ) にフォールバック
+      fabrics: [fabric-a, fabric-b, fabric-dci]
+      stitching:
+        - {between: [vtep-a-bgw-vip, vtep-a-bgw-msvip]}
+        - {between: [vtep-b-bgw-vip, vtep-b-bgw-msvip]}
+      # ※ 代替案: L3VNI は fabrics を持たず、L2VNI から導く。この例では両方書いた
+
+# ─────────────────────────────────────────────────────────────────────────
+# VNI stitching を加えた場合 (サイト A は VNI 10100、サイト B は VNI 20100)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# 案 a2 は「fabric ごとに別の L2VNI エントリを許す」拡張で書けそう (仮):
+#
+#   vxlan_fabrics:
+#     - {id: fabric-a,   members: [vtep-a-leaf1, vtep-a-leaf2, vtep-a-bgw-vip]}
+#     - {id: fabric-b,   members: [vtep-b-leaf1, vtep-b-leaf2, vtep-b-bgw-vip]}
+#     - {id: fabric-dci, members: [vtep-a-bgw-msvip, vtep-b-bgw-msvip]}
+#
+#   vxlans:
+#     # サイト A は VNI 10100 で、サイト B は VNI 20100 を使う。両者は同じ L2 セグメント。
+#     # 現行構文 ADR-0014 / ADR-0026 では「同じブロードキャストドメインは 1 つの L2VNI」が原則で、
+#     # 同じ vni の重複は error。stitching の提案ではここをどう扱うかが争点。
+#     - id: vni-a-10100
+#       type: l2vni
+#       vni: 10100
+#       vlans: [vlan-100]
+#       fabrics: [fabric-a]
+#     - id: vni-b-20100
+#       type: l2vni
+#       vni: 20100
+#       vlans: [vlan-100]           # 同じ VLAN エントリ = 同じブロードキャストドメイン
+#       fabrics: [fabric-b]
+#     - id: vni-dci-10100
+#       type: l2vni
+#       vni: 10100                  # DCI 側で使う VNI の値 (スティッチングの結果)
+#       vlans: [vlan-100]
+#       fabrics: [fabric-dci]
+#       stitching:
+#         # 同じ VLAN に属する 3 つの L2VNI のつなぎ目を、fabric のあいだで明示する
+#         - {between_vnis: [vni-a-10100, vni-dci-10100], at: [vtep-a-bgw-vip, vtep-a-bgw-msvip]}
+#         - {between_vnis: [vni-b-20100, vni-dci-10100], at: [vtep-b-bgw-vip, vtep-b-bgw-msvip]}
+#
+# ※ ここで決まっていないこと (ADR-0029 Pass B 以降で):
+#   - 「同じブロードキャストドメインに 3 つの L2VNI」の意味を L2VNI 側で表すか、
+#     VLAN 側に「この VLAN は複数 L2VNI に乗る」と書くか (ADR-0026 D5 の 4 と矛盾しないように)。
+#   - stitching の書き方が L2VNI の中にネストするか、`layer2.vni_stitching` のような
+#     別のコレクションにするか。
+#   - deferred.md L2 の 50 行目「Multi-Site の BGW での VNI の付け替え (VNI stitching)。
+#     今は VNI の番号はトポロジー全体で一意」と直接関係する。

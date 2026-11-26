@@ -1,0 +1,71 @@
+ndl_version: "1.0"
+
+# ============================================================================
+# ADR-0029 Pass B / b4 — Stretched fabric (1 ドメイン、BGW なし)
+#
+# 変形:
+#   - 2 拠点 (A/B) を 1 つの EVPN-VXLAN ファブリックとして運用
+#   - BGW は置かず、各 leaf が相手サイトの leaf とも直接 VXLAN トンネルを張る
+#     (サイト間の L3 回線で lo が相互到達できる前提。underlay は 1 つ)
+#   - L2VNI は 1 つで、全 leaf が参加するフルメッシュ
+#
+# この構成では「ドメイン」は 1 つしか要らない。
+# ============================================================================
+
+meta:
+  name: evpn-multisite-b4-stretched
+  description: Stretched EVPN fabric across two sites (no BGW, single domain)
+  network_types: [l1-physical, l2-network, l3-unicast]
+
+# ─────────────────────────────────────────────────────────────────────────
+# ★ 書き方 1 — overlay_domains を書かない (ドメイン省略時の既定)
+# ─────────────────────────────────────────────────────────────────────────
+layer2:
+  vlans:
+    - id: vlan-100
+      vlan_id: 100
+      access_ports:
+        - {ethernet_segment: es-a-server1}
+        - {ethernet_segment: es-b-server1}
+
+  # overlay_domains は書かない。VTEP に domain を書かないと「全 VTEP が同じ 1 つの
+  # 暗黙のドメインに属する」= 既存の L2VNI.vteps と同じ (= フルメッシュ)
+  vteps:
+    - {id: vtep-a-leaf1, sources: [a-leaf1-lo]}
+    - {id: vtep-a-leaf2, sources: [a-leaf2-lo]}
+    - {id: vtep-b-leaf1, sources: [b-leaf1-lo]}
+    - {id: vtep-b-leaf2, sources: [b-leaf2-lo]}
+
+  vxlans:
+    - id: vni-10100
+      type: l2vni
+      vni: 10100
+      vlans: [vlan-100]
+      vteps: [vtep-a-leaf1, vtep-a-leaf2, vtep-b-leaf1, vtep-b-leaf2]
+      # 4 VTEP のフルメッシュ (6 対) で tunnel を張る
+
+# ─────────────────────────────────────────────────────────────────────────
+# ★ 書き方 2 — overlay_domains を 1 つ明示する (参考)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# layer2:
+#   overlay_domains:
+#     - {id: od-main, description: Stretched fabric across sites A and B}
+#   vteps:
+#     - {id: vtep-a-leaf1, sources: [a-leaf1-lo], domain: od-main}
+#     - {id: vtep-a-leaf2, sources: [a-leaf2-lo], domain: od-main}
+#     - {id: vtep-b-leaf1, sources: [b-leaf1-lo], domain: od-main}
+#     - {id: vtep-b-leaf2, sources: [b-leaf2-lo], domain: od-main}
+#   vxlans:
+#     - {id: vni-10100, type: l2vni, vni: 10100, vlans: [vlan-100], vteps: [...] }
+#
+# ★ どちらが自然か
+# - 書き方 1 (書かない): 加算性に合う。「1 ファブリックしかない」単純な構成では
+#   余計な一覧を書かずに済み、既存の fixture もそのまま valid。推奨。
+# - 書き方 2 (書く): ドメインの一覧を常に書く規約にすれば構文は一貫するが、
+#   一番単純な Spine-Leaf 1 ファブリックでも 1 行足すことになり、ADR-0005 D4 の
+#   「書かなくてよい」は守りにくい。
+#
+# → b4 では書き方 1 を推す。Pass B の推奨: 「ドメインは任意。書かないと
+#   全 VTEP が 1 つの暗黙のドメインに属する」。
+# ============================================================================
