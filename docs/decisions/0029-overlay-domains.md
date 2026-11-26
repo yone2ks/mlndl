@@ -1,6 +1,6 @@
 # ADR-0029: オーバーレイのドメイン — EVPN Multi-Site のトンネルの範囲を書く (`overlay_domains`)
 
-- **Status**: Accepted (2026-11-26 に Pass C で確定し、同日に実装。スキーマ・derive・validator・エクスポーター・fixture・docs。ndl-viz の対応はこれから)
+- **Status**: Accepted (2026-11-26 に Pass C で確定し、同日に実装。スキーマ・derive・validator・エクスポーター・fixture・docs。ndl-viz も同日に対応 (yone2ks/ndl-viz#20))
 - **Date**: 2026-11-26
 - **Deciders**: mlndl-spec-architect, mlndl-linguist, mlndl-dsl-designer, network-tech-reviewer, mlndl-example-author (Pass C)、ユーザー (書く場所は VTEP の属性、名前は `overlay_domains` / `overlay_domain:` / `od-`、1 本のループバックで 2 つのドメインを終端する構成は先送り、`role: border-gateway` は informative)
 - **Pass**: C ([Pass B のまとめ](evaluations/adr0029/passb/summary.md) を入力に再設計)
@@ -120,6 +120,8 @@ BGW という役割は書かず、構造から拾う (ADR-0022 の粒度を保�
 - `type: l3vni` に `overlay_domains: [<id>]` と `tunnel_pairs` (D4)
 
 ndl-viz は、ドメインを枠で描き、`tunnel_pairs` の対だけトンネルの線を引ける。
+
+(実装の注: ndl-viz は枠を描かず、`tunnel_pairs` をドメインごとにまとめて、ドメインごとに VXLAN の母線を 1 本引いた。BGW は 2 つのドメインに属するので、枠にすると枠どうしが重なり、サイトの枠とも交わるため。VTEP のバッジにはドメインの名前を添える。yone2ks/ndl-viz#20)
 
 ### D8. `labels.site` との関係
 
