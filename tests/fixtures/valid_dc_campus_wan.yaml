@@ -1,20 +1,19 @@
 ndl_version: "1.0"
 
 # ============================================================================
-# マルチサイト (DC + キャンパス) を WAN で結ぶ構成
+# DC とキャンパスの 2 サイトを WAN で結ぶ構成
+#   (EVPN Multi-Site ではない。EVPN は DC の中だけで、キャンパスは VLAN と VRRP)
 #   - DC: Spine x2 / Leaf x2 (MLAG) / Border x2 / Server x2
 #         EVPN/VXLAN, L2VNI/L3VNI, anycast GW
 #   - Campus: Core x2 (inter-core LACP, SVI 終端) / Agg x2 / Dist x2 / Host x2
 #             tag VLAN x3 トランク全通し, Dist-Host access
 #   - WAN: DC-Border <-> Campus-Core を eBGP。default VRF は直結の /31、tenant-a は
 #          サブ IF (.100) の VRF-lite で渡す。DC-Border は border leaf (VTEP で L3VNI を終端)
-#
-# 注: 現行 mlndl にサイト概念は無いため、サイトの区別は role / id prefix /
-#     meta.description で表現するに留まる。下記 feedback 参照。
+#   - サイトは labels.site (ADR-0017)
 # ============================================================================
 
 meta:
-  name: multisite-wan
+  name: dc-campus-wan
   description: DC (EVPN/VXLAN/MLAG, border leaf) + Campus (3-tier, SVI on Core) joined by WAN eBGP (VRF-lite for tenant-a)
   network_types: [l1-physical, l2-network, l3-unicast]
 

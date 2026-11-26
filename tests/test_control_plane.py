@@ -281,7 +281,7 @@ class TestChecks:
 # ---------------------------------------------------------------------------
 
 class TestFixturesAndExport:
-    @pytest.mark.parametrize("name", ["valid_full_dc.yaml", "valid_multi_vlan.yaml", "valid_multisite_wan.yaml"])
+    @pytest.mark.parametrize("name", ["valid_full_dc.yaml", "valid_multi_vlan.yaml", "valid_dc_campus_wan.yaml"])
     def test_fixtures_are_valid(self, name):
         assert validate(parse_file(FIXTURES / name)) == []
 
@@ -306,7 +306,7 @@ class TestFixturesAndExport:
         assert edge["address_families"] == ["ipv4_unicast", "l2vpn_evpn"]
 
     def test_outside_peer_is_node_data_only(self):
-        out = self._cy("valid_multisite_wan.yaml")
+        out = self._cy("valid_dc_campus_wan.yaml")
         assert not any(e["data"]["id"] == "bgp-peer-cm-core1-isp" for e in out["edges"])
         core1 = next(n["data"] for n in out["nodes"] if n["data"]["id"] == "cm-core1")
         isp = next(s for s in core1["bgp_sessions"] if s["id"] == "bgp-peer-cm-core1-isp")
@@ -315,11 +315,11 @@ class TestFixturesAndExport:
         assert core1["local_as"] == 65100
 
     def test_ospf_edge(self):
-        edge = next(e["data"] for e in self._cy("valid_multisite_wan.yaml")["edges"]
+        edge = next(e["data"] for e in self._cy("valid_dc_campus_wan.yaml")["edges"]
                     if e["data"].get("protocol") == "ospf")
         assert edge["area"] == "0.0.0.0" and edge["from"]["interface"].endswith("-l3")
 
     def test_route_reflector_client_in_export(self):
-        edge = next(e["data"] for e in self._cy("valid_multisite_wan.yaml")["edges"]
+        edge = next(e["data"] for e in self._cy("valid_dc_campus_wan.yaml")["edges"]
                     if e["data"]["id"] == "bgp-peer-dc-spine1-leaf1")
         assert edge["bgp_type"] == "ibgp" and edge["to"]["route_reflector_client"] is True
